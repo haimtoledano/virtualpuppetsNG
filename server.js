@@ -549,7 +549,7 @@ app.post('/api/enroll/approve', async (req, res) => {
             .input('name', sql.NVarChar, name)
             .input('ip', sql.NVarChar, pending.DetectedIp)
             .input('os', sql.NVarChar, pending.OsVersion)
-            .query("INSERT INTO Actors (ActorId, HwId, GatewayId, Name, Status, LocalIp, LastSeen, OsVersion) VALUES (@aid, @hwid, @gw, @name, 'ONLINE', GETDATE(), @ip, @os)");
+            .query("INSERT INTO Actors (ActorId, HwId, GatewayId, Name, Status, LocalIp, LastSeen, OsVersion) VALUES (@aid, @hwid, @gw, @name, 'ONLINE', @ip, GETDATE(), @os)");
             
         await dbPool.request().input('pid', sql.NVarChar, pendingId).query("DELETE FROM PendingActors WHERE Id = @pid");
         res.json({success: true});
