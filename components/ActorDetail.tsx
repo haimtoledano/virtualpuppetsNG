@@ -543,9 +543,20 @@ const ActorDetail: React.FC<ActorDetailProps> = ({ actor, gateway, logs: initial
                                      <div className="absolute -top-2 -right-2 bg-blue-600 rounded-full p-1 shadow-lg z-10">
                                         <Shield className="w-3 h-3 text-white" />
                                     </div>
-                                    <div className="text-xs text-slate-500 font-bold uppercase mb-1">Target (Self)</div>
-                                    <div className="text-blue-400 font-mono font-bold text-sm">{actor.localIp}</div>
-                                    <div className="text-[10px] text-slate-500 mt-1">{actor.name}</div>
+                                    <div className="text-xs text-slate-500 font-bold uppercase mb-2">Target (Self)</div>
+                                    
+                                    <div className="mb-1">
+                                        <span className="text-[10px] text-slate-500 font-mono mr-1">LAN:</span>
+                                        <span className="text-white font-mono font-bold text-xs">
+                                            {displayedLocalIp || <span className="text-slate-600 italic">---</span>}
+                                        </span>
+                                    </div>
+                                    <div>
+                                        <span className="text-[10px] text-slate-500 font-mono mr-1">WAN:</span>
+                                        <span className="text-blue-400 font-mono font-bold text-xs">{actor.localIp}</span>
+                                    </div>
+                                    
+                                    <div className="text-[10px] text-slate-500 mt-2 border-t border-slate-700 pt-1 truncate">{actor.name}</div>
                                 </div>
                             </div>
                         ))}
