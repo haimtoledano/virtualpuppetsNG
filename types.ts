@@ -183,12 +183,25 @@ export interface ReportContent {
   compromisedNodes?: number;
   topAttackers?: { ip: string; count: number }[];
   summaryText: string;
-  // For Manual Reports
+  
+  // For Manual/Filtered Reports
   customBody?: string;
+  
+  // Data Driven Incident Fields
+  incidentFilters?: {
+      targetActor?: string;
+      attackerIp?: string;
+      protocol?: string;
+      dateRange?: string;
+  };
+  
   incidentDetails?: {
       incidentTime: string;
       vector: string;
       mitigation: string;
+      // Derived from filters
+      affectedSystems?: string[];
+      eventCount?: number;
   };
 }
 
@@ -198,7 +211,7 @@ export interface Report {
   generatedBy: string;
   dateRange: string;
   createdAt: Date;
-  type: 'SECURITY_AUDIT' | 'ACTIVITY_SUMMARY' | 'INCIDENT_LOG' | 'CUSTOM';
+  type: 'SECURITY_AUDIT' | 'INCIDENT_LOG' | 'CUSTOM' | 'AI_INSIGHT';
   status: 'READY' | 'GENERATING';
   content?: ReportContent; // JSON data for the report
 }

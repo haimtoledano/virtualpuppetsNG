@@ -1,14 +1,17 @@
 
 import React, { useState, useEffect } from 'react';
-import { Report, SystemConfig, User } from '../types';
+import { Report, SystemConfig, User, LogEntry, Actor } from '../types';
 import { getReports, generateReport, getSystemConfig } from '../services/dbService';
-import { FileText, Download, Loader, Eye, X, Printer, ShieldCheck, Plus, AlertTriangle, PenTool } from 'lucide-react';
+import { generateCustomAiReport } from '../services/aiService';
+import { FileText, Download, Loader, Eye, X, Printer, ShieldCheck, Plus, AlertTriangle, PenTool, Search, Calendar, Server, Filter, Bot } from 'lucide-react';
 
 interface ReportsProps {
     currentUser?: User | null;
+    logs?: LogEntry[]; // Pass logs for context in AI generation
+    actors?: Actor[]; // Pass actors for dropdowns (mock mode)
 }
 
-const Reports: React.FC<ReportsProps> = ({ currentUser }) => {
+const Reports: React.FC<ReportsProps> = ({ currentUser, logs = [], actors = [] }) => {
   const [isGenerating, setIsGenerating] = useState(false);
   const [reports, setReports] = useState<Report[]>([]);
   const [viewReport, setViewReport] = useState<Report | null>(null);
@@ -16,14 +19,30 @@ const Reports: React.FC<ReportsProps> = ({ currentUser }) => {
 
   // New Report Modal State
   const [isCreatorOpen, setIsCreatorOpen] = useState(false);
-  const [reportType, setReportType] = useState<'SECURITY_AUDIT' | 'INCIDENT_LOG' | 'CUSTOM'>('SECURITY_AUDIT');
+  const [reportType, setReportType] = useState<'SECURITY_AUDIT' | 'INCIDENT_LOG' | 'CUSTOM' | 'AI_INSIGHT'>('SECURITY_AUDIT');
+  
+  // Custom & AI Fields
   const [customBody, setCustomBody] = useState('');
-  const [incidentDetails, setIncidentDetails] = useState({ incidentTime: '', vector: '', mitigation: '' });
+  const [aiPrompt, setAiPrompt] = useState('');
+  const [aiResult, setAiResult] = useState<{title: string, body: string} | null>(null);
+
+  // Data Driven Incident Fields
+  const [filters, setFilters] = useState({
+      attackerIp: '',
+      targetActorId: '',
+      protocol: '',
+      dateRange: 'LAST_24H'
+  });
+  
+  // Dropdown Data Sources
+  const [availableAttackers, setAvailableAttackers] = useState<string[]>([]);
+  const [availableProtocols, setAvailableProtocols] = useState<string[]>([]);
 
   useEffect(() => {
       loadReports();
       loadConfig();
-  }, []);
+      populateFilters();
+  }, [logs]);
 
   const loadReports = async () => {
       const data = await getReports();
@@ -35,7 +54,43 @@ const Reports: React.FC<ReportsProps> = ({ currentUser }) => {
       setSysConfig(cfg);
   };
 
-  const handleGenerate = async () => {
+  const populateFilters = async () => {
+      // In production, we should fetch these from the API to get full history
+      // For now, we mix props (mock/recent) with an API call check
+      try {
+          const res = await fetch('/api/reports/filters');
+          if (res.ok) {
+              const data = await res.json();
+              setAvailableAttackers(data.attackers || []);
+              setAvailableProtocols(data.protocols || []);
+              return;
+          }
+      } catch (e) {}
+
+      // Fallback to local logs if API fails or in Mock mode
+      const attackers = Array.from(new Set(logs.map(l => l.sourceIp).filter(Boolean))) as string[];
+      const protocols = Array.from(new Set(logs.map(l => l.process))) as string[];
+      setAvailableAttackers(attackers);
+      setAvailableProtocols(protocols);
+  };
+
+  const handleGenerateAi = async () => {
+      if (!aiPrompt.trim()) return;
+      setIsGenerating(true);
+      
+      const result = await generateCustomAiReport(aiPrompt, logs);
+      if (result) {
+          setAiResult({
+              title: result.reportTitle,
+              body: result.reportBody
+          });
+      } else {
+          alert("AI Generation failed. Check API configuration.");
+      }
+      setIsGenerating(false);
+  };
+
+  const handleSaveReport = async () => {
       if (!currentUser) return;
       setIsGenerating(true);
       
@@ -43,8 +98,20 @@ const Reports: React.FC<ReportsProps> = ({ currentUser }) => {
       
       if (reportType === 'CUSTOM') {
           payload.customBody = customBody;
-      } else if (reportType === 'INCIDENT_LOG') {
-          payload.incidentDetails = incidentDetails;
+      } 
+      else if (reportType === 'AI_INSIGHT') {
+          if (!aiResult) return;
+          payload.incidentDetails = { title: aiResult.title }; // Reuse Incident details for title storage hack or just pass customBody
+          payload.customBody = aiResult.body;
+      }
+      else if (reportType === 'INCIDENT_LOG') {
+          // Pass the filters so backend can generate the specific stats
+          payload.incidentFilters = {
+              targetActor: filters.targetActorId,
+              attackerIp: filters.attackerIp,
+              protocol: filters.protocol,
+              dateRange: filters.dateRange
+          };
       }
 
       const success = await generateReport(payload);
@@ -55,7 +122,9 @@ const Reports: React.FC<ReportsProps> = ({ currentUser }) => {
           // Reset Form
           setReportType('SECURITY_AUDIT');
           setCustomBody('');
-          setIncidentDetails({ incidentTime: '', vector: '', mitigation: '' });
+          setAiResult(null);
+          setAiPrompt('');
+          setFilters({ attackerIp: '', targetActorId: '', protocol: '', dateRange: 'LAST_24H' });
       } else {
           alert("Failed to generate report");
       }
@@ -123,35 +192,47 @@ const Reports: React.FC<ReportsProps> = ({ currentUser }) => {
                               </div>
                           )}
 
-                          {/* 2. INCIDENT DETAILS */}
-                          {report.type === 'INCIDENT_LOG' && report.content.incidentDetails && (
+                          {/* 2. DATA DRIVEN INCIDENT DETAILS */}
+                          {report.type === 'INCIDENT_LOG' && (
                                <div className="bg-red-50 border border-red-100 p-6 mb-8 rounded">
-                                   <h3 className="text-red-700 font-bold uppercase mb-4 flex items-center"><AlertTriangle className="w-5 h-5 mr-2" /> Incident Specifics</h3>
+                                   <h3 className="text-red-700 font-bold uppercase mb-4 flex items-center"><AlertTriangle className="w-5 h-5 mr-2" /> Incident Filters Applied</h3>
                                    <div className="grid grid-cols-2 gap-4">
-                                       <div>
-                                           <div className="text-xs text-red-400 font-bold uppercase">Incident Time</div>
-                                           <div className="text-slate-800">{report.content.incidentDetails.incidentTime}</div>
-                                       </div>
-                                       <div>
-                                           <div className="text-xs text-red-400 font-bold uppercase">Attack Vector</div>
-                                           <div className="text-slate-800">{report.content.incidentDetails.vector}</div>
-                                       </div>
-                                       <div className="col-span-2">
-                                           <div className="text-xs text-red-400 font-bold uppercase">Mitigation / Response</div>
-                                           <div className="text-slate-800">{report.content.incidentDetails.mitigation}</div>
-                                       </div>
+                                       {report.content.incidentFilters?.attackerIp && (
+                                           <div>
+                                               <div className="text-xs text-red-400 font-bold uppercase">Source IP</div>
+                                               <div className="text-slate-800 font-mono">{report.content.incidentFilters.attackerIp}</div>
+                                           </div>
+                                       )}
+                                       {report.content.incidentFilters?.targetActor && (
+                                           <div>
+                                               <div className="text-xs text-red-400 font-bold uppercase">Target Actor ID</div>
+                                               <div className="text-slate-800 font-mono">{report.content.incidentFilters.targetActor}</div>
+                                           </div>
+                                       )}
+                                       {report.content.incidentFilters?.protocol && (
+                                            <div>
+                                               <div className="text-xs text-red-400 font-bold uppercase">Protocol</div>
+                                               <div className="text-slate-800 font-mono">{report.content.incidentFilters.protocol}</div>
+                                           </div>
+                                       )}
+                                       {report.content.incidentDetails?.eventCount !== undefined && (
+                                            <div>
+                                               <div className="text-xs text-red-400 font-bold uppercase">Matching Events</div>
+                                               <div className="text-slate-800 font-mono text-xl">{report.content.incidentDetails.eventCount}</div>
+                                           </div>
+                                       )}
                                    </div>
                                </div>
                           )}
 
-                          {/* 3. BODY TEXT (Summary or Custom) */}
+                          {/* 3. BODY TEXT (Summary or Custom/AI) */}
                           <div className="mb-8">
                               <h3 className="text-sm font-bold uppercase border-b border-slate-300 mb-2 pb-1">
-                                  {report.type === 'CUSTOM' ? 'Analyst Notes' : 'Executive Summary'}
+                                  {report.type === 'CUSTOM' ? 'Analyst Notes' : report.type === 'AI_INSIGHT' ? 'AI Assessment' : 'Executive Summary'}
                               </h3>
-                              <p className="text-sm leading-relaxed text-slate-700 text-justify whitespace-pre-wrap">
+                              <div className="text-sm leading-relaxed text-slate-700 text-justify whitespace-pre-wrap font-serif">
                                   {report.content.customBody || report.content.summaryText}
-                              </p>
+                              </div>
                           </div>
 
                           {/* 4. TOP ATTACKERS (Only for Audit) */}
@@ -196,7 +277,7 @@ const Reports: React.FC<ReportsProps> = ({ currentUser }) => {
         <div className="flex justify-between items-center">
              <div>
                 <h2 className="text-2xl font-bold text-slate-200">System Reports</h2>
-                <p className="text-slate-500 text-sm">Access generated compliance documents and security summaries.</p>
+                <p className="text-slate-500 text-sm">Access generated compliance documents, data-driven attack logs, and AI insights.</p>
              </div>
              <button 
                 onClick={() => setIsCreatorOpen(true)}
@@ -210,36 +291,33 @@ const Reports: React.FC<ReportsProps> = ({ currentUser }) => {
         {/* Creator Modal */}
         {isCreatorOpen && (
              <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-40 flex items-center justify-center p-4">
-                 <div className="bg-slate-800 border border-slate-600 rounded-xl w-full max-w-lg shadow-2xl p-6">
+                 <div className="bg-slate-800 border border-slate-600 rounded-xl w-full max-w-xl shadow-2xl p-6 overflow-hidden">
                      <div className="flex justify-between items-center mb-6">
                          <h3 className="text-xl font-bold text-white flex items-center"><PenTool className="w-5 h-5 mr-2 text-blue-400" /> Generate Report</h3>
                          <button onClick={() => setIsCreatorOpen(false)}><X className="w-5 h-5 text-slate-500 hover:text-white"/></button>
                      </div>
                      
                      <div className="space-y-4">
+                         {/* Report Type Select */}
                          <div>
                              <label className="block text-slate-400 text-xs font-bold uppercase mb-2">Report Type</label>
-                             <div className="grid grid-cols-3 gap-2">
-                                 <button 
-                                     onClick={() => setReportType('SECURITY_AUDIT')}
-                                     className={`p-2 rounded border text-xs font-bold transition-all ${reportType === 'SECURITY_AUDIT' ? 'bg-blue-600 border-blue-400 text-white' : 'bg-slate-900 border-slate-700 text-slate-400'}`}
-                                 >
-                                     System Audit
+                             <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
+                                 <button onClick={() => setReportType('SECURITY_AUDIT')} className={`p-2 rounded border text-[10px] font-bold transition-all ${reportType === 'SECURITY_AUDIT' ? 'bg-blue-600 border-blue-400 text-white' : 'bg-slate-900 border-slate-700 text-slate-400'}`}>
+                                     Audit Snapshot
                                  </button>
-                                 <button 
-                                     onClick={() => setReportType('INCIDENT_LOG')}
-                                     className={`p-2 rounded border text-xs font-bold transition-all ${reportType === 'INCIDENT_LOG' ? 'bg-red-600 border-red-400 text-white' : 'bg-slate-900 border-slate-700 text-slate-400'}`}
-                                 >
-                                     Incident Log
+                                 <button onClick={() => setReportType('INCIDENT_LOG')} className={`p-2 rounded border text-[10px] font-bold transition-all ${reportType === 'INCIDENT_LOG' ? 'bg-red-600 border-red-400 text-white' : 'bg-slate-900 border-slate-700 text-slate-400'}`}>
+                                     Incident (Data)
                                  </button>
-                                 <button 
-                                     onClick={() => setReportType('CUSTOM')}
-                                     className={`p-2 rounded border text-xs font-bold transition-all ${reportType === 'CUSTOM' ? 'bg-purple-600 border-purple-400 text-white' : 'bg-slate-900 border-slate-700 text-slate-400'}`}
-                                 >
-                                     Custom Note
+                                 <button onClick={() => setReportType('AI_INSIGHT')} className={`p-2 rounded border text-[10px] font-bold transition-all ${reportType === 'AI_INSIGHT' ? 'bg-purple-600 border-purple-400 text-white' : 'bg-slate-900 border-slate-700 text-slate-400'}`}>
+                                     AI Insight
+                                 </button>
+                                 <button onClick={() => setReportType('CUSTOM')} className={`p-2 rounded border text-[10px] font-bold transition-all ${reportType === 'CUSTOM' ? 'bg-slate-600 border-slate-400 text-white' : 'bg-slate-900 border-slate-700 text-slate-400'}`}>
+                                     Manual Note
                                  </button>
                              </div>
                          </div>
+
+                         {/* CONTENT AREA BASED ON TYPE */}
 
                          {reportType === 'SECURITY_AUDIT' && (
                              <div className="bg-blue-900/20 border border-blue-500/30 p-3 rounded text-sm text-blue-200">
@@ -248,19 +326,78 @@ const Reports: React.FC<ReportsProps> = ({ currentUser }) => {
                          )}
 
                          {reportType === 'INCIDENT_LOG' && (
-                             <div className="space-y-3 bg-slate-900 p-3 rounded border border-slate-700">
-                                 <div>
-                                     <label className="text-xs text-slate-500 block mb-1">Time of Incident</label>
-                                     <input className="w-full bg-slate-800 border border-slate-600 rounded p-2 text-white text-sm" value={incidentDetails.incidentTime} onChange={e => setIncidentDetails({...incidentDetails, incidentTime: e.target.value})} />
+                             <div className="space-y-3 bg-slate-900 p-4 rounded border border-slate-700">
+                                 <h4 className="text-red-400 text-xs font-bold uppercase mb-2 flex items-center"><Filter className="w-3 h-3 mr-2"/> Select Data Filters</h4>
+                                 
+                                 <div className="grid grid-cols-2 gap-3">
+                                     <div>
+                                         <label className="text-xs text-slate-500 block mb-1">Date Range</label>
+                                         <select className="w-full bg-slate-800 border border-slate-600 rounded p-2 text-white text-xs outline-none" 
+                                             value={filters.dateRange} onChange={e => setFilters({...filters, dateRange: e.target.value})}>
+                                             <option value="LAST_24H">Last 24 Hours</option>
+                                             <option value="LAST_7D">Last 7 Days</option>
+                                             <option value="LAST_30D">Last 30 Days</option>
+                                         </select>
+                                     </div>
+                                     <div>
+                                         <label className="text-xs text-slate-500 block mb-1">Target Actor (Victim)</label>
+                                         <select className="w-full bg-slate-800 border border-slate-600 rounded p-2 text-white text-xs outline-none"
+                                              value={filters.targetActorId} onChange={e => setFilters({...filters, targetActorId: e.target.value})}>
+                                             <option value="">-- All Actors --</option>
+                                             {actors.map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
+                                         </select>
+                                     </div>
+                                     <div>
+                                         <label className="text-xs text-slate-500 block mb-1">Attacker IP</label>
+                                         <select className="w-full bg-slate-800 border border-slate-600 rounded p-2 text-white text-xs outline-none"
+                                              value={filters.attackerIp} onChange={e => setFilters({...filters, attackerIp: e.target.value})}>
+                                             <option value="">-- All IPs --</option>
+                                             {availableAttackers.map(ip => <option key={ip} value={ip}>{ip}</option>)}
+                                         </select>
+                                     </div>
+                                     <div>
+                                         <label className="text-xs text-slate-500 block mb-1">Protocol / Service</label>
+                                         <select className="w-full bg-slate-800 border border-slate-600 rounded p-2 text-white text-xs outline-none"
+                                              value={filters.protocol} onChange={e => setFilters({...filters, protocol: e.target.value})}>
+                                             <option value="">-- All Protocols --</option>
+                                             {availableProtocols.map(p => <option key={p} value={p}>{p}</option>)}
+                                         </select>
+                                     </div>
                                  </div>
-                                 <div>
-                                     <label className="text-xs text-slate-500 block mb-1">Attack Vector (e.g. SSH Brute Force)</label>
-                                     <input className="w-full bg-slate-800 border border-slate-600 rounded p-2 text-white text-sm" value={incidentDetails.vector} onChange={e => setIncidentDetails({...incidentDetails, vector: e.target.value})} />
-                                 </div>
-                                 <div>
-                                     <label className="text-xs text-slate-500 block mb-1">Mitigation Steps Taken</label>
-                                     <textarea className="w-full bg-slate-800 border border-slate-600 rounded p-2 text-white text-sm h-20" value={incidentDetails.mitigation} onChange={e => setIncidentDetails({...incidentDetails, mitigation: e.target.value})} />
-                                 </div>
+                             </div>
+                         )}
+
+                         {reportType === 'AI_INSIGHT' && (
+                             <div className="space-y-3">
+                                 {!aiResult ? (
+                                    <>
+                                        <div>
+                                            <label className="block text-slate-400 text-xs font-bold uppercase mb-2">Natural Language Prompt</label>
+                                            <textarea 
+                                                className="w-full bg-slate-900 border border-slate-700 rounded p-3 text-white text-sm h-32 focus:border-purple-500 outline-none placeholder-slate-600"
+                                                placeholder="E.g., 'Summarize all SSH brute force attempts from China last week and suggest mitigations.'"
+                                                value={aiPrompt}
+                                                onChange={e => setAiPrompt(e.target.value)}
+                                            />
+                                        </div>
+                                        <button 
+                                            onClick={handleGenerateAi}
+                                            disabled={isGenerating || !aiPrompt}
+                                            className="w-full bg-purple-600 hover:bg-purple-500 text-white font-bold py-2 rounded flex justify-center items-center"
+                                        >
+                                            {isGenerating ? <Loader className="animate-spin w-4 h-4 mr-2" /> : <Bot className="w-4 h-4 mr-2" />}
+                                            GENERATE INSIGHT
+                                        </button>
+                                    </>
+                                 ) : (
+                                     <div className="bg-slate-900 border border-purple-500/50 rounded p-4 max-h-[300px] overflow-y-auto">
+                                         <div className="flex justify-between items-center mb-2">
+                                            <h4 className="text-purple-400 font-bold text-sm">{aiResult.title}</h4>
+                                            <button onClick={() => setAiResult(null)} className="text-xs text-slate-500 hover:text-white">Reset</button>
+                                         </div>
+                                         <p className="text-slate-300 text-xs whitespace-pre-wrap">{aiResult.body}</p>
+                                     </div>
+                                 )}
                              </div>
                          )}
 
@@ -269,7 +406,7 @@ const Reports: React.FC<ReportsProps> = ({ currentUser }) => {
                                  <label className="block text-slate-400 text-xs font-bold uppercase mb-2">Report Content</label>
                                  <textarea 
                                      className="w-full bg-slate-900 border border-slate-700 rounded p-3 text-white text-sm h-40 focus:border-blue-500 outline-none"
-                                     placeholder="Type your analysis here..."
+                                     placeholder="Type your manual analysis here..."
                                      value={customBody}
                                      onChange={e => setCustomBody(e.target.value)}
                                  />
@@ -277,11 +414,11 @@ const Reports: React.FC<ReportsProps> = ({ currentUser }) => {
                          )}
 
                          <button 
-                            onClick={handleGenerate}
-                            disabled={isGenerating}
+                            onClick={handleSaveReport}
+                            disabled={isGenerating || (reportType === 'AI_INSIGHT' && !aiResult)}
                             className="w-full bg-emerald-600 hover:bg-emerald-500 text-white font-bold py-3 rounded-lg flex justify-center items-center mt-4"
                          >
-                            {isGenerating ? <Loader className="animate-spin w-5 h-5" /> : 'GENERATE REPORT'}
+                            {isGenerating ? <Loader className="animate-spin w-5 h-5" /> : 'SAVE REPORT TO ARCHIVE'}
                          </button>
                      </div>
                  </div>
@@ -316,7 +453,8 @@ const Reports: React.FC<ReportsProps> = ({ currentUser }) => {
                                     <span className={`px-2 py-1 rounded text-[10px] font-bold ${
                                         report.type === 'SECURITY_AUDIT' ? 'bg-blue-500/20 text-blue-400' :
                                         report.type === 'INCIDENT_LOG' ? 'bg-red-500/20 text-red-400' :
-                                        'bg-purple-500/20 text-purple-400'
+                                        report.type === 'AI_INSIGHT' ? 'bg-purple-500/20 text-purple-400' :
+                                        'bg-slate-500/20 text-slate-400'
                                     }`}>
                                         {report.type.replace('_', ' ')}
                                     </span>

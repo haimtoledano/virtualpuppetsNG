@@ -1,5 +1,4 @@
 
-
 import React, { useState, useEffect, useCallback } from 'react';
 import { generateInitialActors, generateRandomLog, generateGateways } from './services/mockService';
 import { dbQuery, dbUpdate, getSystemConfig, getPendingActors, approvePendingActor, rejectPendingActor, getSystemLogs, sendAuditLog } from './services/dbService';
@@ -195,7 +194,7 @@ const App: React.FC = () => {
     switch (activeTab) {
       case 'dashboard': return <Dashboard gateways={gateways} actors={actors} logs={logs} onActorSelect={setSelectedActorId} />;
       case 'map': return <WarRoomMap gateways={gateways} actors={actors} />;
-      case 'reports': return <Reports currentUser={currentUser} />;
+      case 'reports': return <Reports currentUser={currentUser} logs={logs} actors={actors} />;
       case 'gateways': return <GatewayManager gateways={gateways} onRefresh={loadProductionData} domain={systemConfig?.domain || 'vpp.io'} isProduction={isProduction} />;
       case 'wireless': return <WirelessRecon isProduction={isProduction} actors={actors} />;
       case 'actors': return (

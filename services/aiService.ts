@@ -161,6 +161,52 @@ export const analyzeLogsWithAi = async (logs: LogEntry[], actorStatus?: string):
     return null;
 };
 
+// NEW: Generate Report based on User Free Text
+export const generateCustomAiReport = async (userPrompt: string, logs: LogEntry[]): Promise<{ reportTitle: string, reportBody: string } | null> => {
+    const config = await getAiConfig();
+
+    // Prepare context
+    const logContext = logs.slice(0, 100).map(l => 
+        `${new Date(l.timestamp).toISOString()} | ${l.actorName} | ${l.sourceIp || 'N/A'} | ${l.process}: ${l.message}`
+    ).join('\n');
+
+    const prompt = `
+        You are an advanced Cyber Security Reporting Engine. 
+        
+        USER REQUEST: "${userPrompt}"
+
+        AVAILABLE SYSTEM LOG DATA:
+        ${logContext}
+
+        INSTRUCTIONS:
+        1. Analyze the logs based specifically on the User Request.
+        2. Generate a professional report title.
+        3. Generate a detailed report body (using Markdown formatting if necessary, but returning as a plain string inside JSON).
+        4. Cite specific log entries if relevant.
+        5. If the logs do not contain data relevant to the request, state that clearly in the report body.
+
+        Return JSON format.
+    `;
+
+    const geminiSchema = {
+        type: Type.OBJECT,
+        properties: {
+            reportTitle: { type: Type.STRING },
+            reportBody: { type: Type.STRING }
+        }
+    };
+    const localSchemaDesc = "{ reportTitle: string, reportBody: string }";
+
+    let result;
+    if (config.provider === 'GEMINI') {
+        result = await callGemini(config, prompt, geminiSchema);
+    } else {
+        result = await callLocalLLM(config, prompt, localSchemaDesc);
+    }
+
+    return result || null;
+};
+
 export const generateDeceptionContent = async (type: 'CREDENTIALS' | 'CONFIG'): Promise<HoneyFile | null> => {
     const config = await getAiConfig();
 
