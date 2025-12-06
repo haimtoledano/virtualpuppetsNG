@@ -489,16 +489,16 @@ const ActorDetail: React.FC<ActorDetailProps> = ({ actor, gateway, logs: initial
                 <div>
                     <div className="text-slate-500 text-[10px] font-bold uppercase tracking-wider mb-1">CPU Load</div>
                     <div className="w-full bg-slate-700 h-1.5 rounded-full mt-2 overflow-hidden">
-                        <div className={`${getTempColor(actor.cpuLoad)} h-1.5 rounded-full transition-all duration-1000`} style={{ width: `${actor.cpuLoad}%` }}></div>
+                        <div className={`${getTempColor(actor.cpuLoad)} h-1.5 rounded-full transition-all duration-1000`} style={{ width: `${actor.cpuLoad || 0}%` }}></div>
                     </div>
-                    <div className="text-right text-[10px] text-slate-400 mt-1">{actor.cpuLoad.toFixed(1)}%</div>
+                    <div className="text-right text-[10px] text-slate-400 mt-1">{(actor.cpuLoad || 0).toFixed(1)}%</div>
                 </div>
                 <div>
                      <div className="text-slate-500 text-[10px] font-bold uppercase tracking-wider mb-1">RAM Usage</div>
                     <div className="w-full bg-slate-700 h-1.5 rounded-full mt-2 overflow-hidden">
-                        <div className="bg-blue-500 h-1.5 rounded-full transition-all duration-1000" style={{ width: `${actor.memoryUsage}%` }}></div>
+                        <div className="bg-blue-500 h-1.5 rounded-full transition-all duration-1000" style={{ width: `${actor.memoryUsage || 0}%` }}></div>
                     </div>
-                     <div className="text-right text-[10px] text-slate-400 mt-1">{actor.memoryUsage.toFixed(1)}%</div>
+                     <div className="text-right text-[10px] text-slate-400 mt-1">{(actor.memoryUsage || 0).toFixed(1)}%</div>
                 </div>
                 <div>
                      <div className="text-slate-500 text-[10px] font-bold uppercase tracking-wider mb-1 flex items-center"><Thermometer className="w-3 h-3 mr-1" /> Temperature</div>
