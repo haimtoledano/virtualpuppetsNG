@@ -3,7 +3,8 @@ import React, { useState, useEffect } from 'react';
 import { User, DbConfig, UserRole, SystemConfig, AiConfig, AiProvider, SyslogConfig } from '../types';
 import { dbQuery, getSystemConfig, updateSystemConfig, connectToDatabase } from '../services/dbService';
 import { createUser, deleteUser, hashPassword, updateUser, resetUserMfa } from '../services/authService';
-import { Settings as SettingsIcon, Database, Users, Shield, Trash2, AlertTriangle, Plus, Lock, Bot, Cloud, Server, Building, Globe, Save, RefreshCw, Edit, ShieldAlert, X, Check, ShieldCheck, FileText, Key } from 'lucide-react';
+import { testAiConnection } from '../services/aiService';
+import { Settings as SettingsIcon, Database, Users, Shield, Trash2, AlertTriangle, Plus, Lock, Bot, Cloud, Server, Building, Globe, Save, RefreshCw, Edit, ShieldAlert, X, Check, ShieldCheck, FileText, Key, Activity } from 'lucide-react';
 
 interface SettingsProps {
   isProduction: boolean;
@@ -20,6 +21,7 @@ const Settings: React.FC<SettingsProps> = ({ isProduction, onToggleProduction, c
   const [editPassword, setEditPassword] = useState('');
   
   const [sysConfig, setSysConfig] = useState<SystemConfig | null>(null);
+  const [isTestingAi, setIsTestingAi] = useState(false);
   
   // AI Form State
   const [aiForm, setAiForm] = useState<AiConfig>({
@@ -136,7 +138,23 @@ const Settings: React.FC<SettingsProps> = ({ isProduction, onToggleProduction, c
           headers: {'Content-Type': 'application/json'},
           body: JSON.stringify(updatedConfig)
       });
-      alert("AI Configuration Saved.");
+      
+      // Update local state so subsequent actions use the fresh config
+      setSysConfig(updatedConfig);
+      
+      alert("AI Configuration Saved. You can now use the Test Connection button.");
+  };
+
+  const handleTestAi = async () => {
+      setIsTestingAi(true);
+      const res = await testAiConnection(aiForm);
+      setIsTestingAi(false);
+      
+      if (res.success) {
+          alert("Connection Successful! The AI model responded correctly.");
+      } else {
+          alert(`Connection Failed: ${res.message || "Unknown error"}`);
+      }
   };
 
   const handleSaveSyslogConfig = async () => {
@@ -151,6 +169,7 @@ const Settings: React.FC<SettingsProps> = ({ isProduction, onToggleProduction, c
           headers: {'Content-Type': 'application/json'},
           body: JSON.stringify(updatedConfig)
       });
+      setSysConfig(updatedConfig);
       alert("Syslog Configuration Saved. Events will be forwarded.");
   };
 
@@ -437,12 +456,23 @@ const Settings: React.FC<SettingsProps> = ({ isProduction, onToggleProduction, c
                         </>
                     )}
 
-                    <button 
-                        onClick={handleSaveAiConfig}
-                        className="w-full bg-blue-600 hover:bg-blue-500 text-white font-bold py-3 rounded-lg transition-colors mt-4 shadow-lg shadow-blue-600/20"
-                    >
-                        SAVE CONFIGURATION
-                    </button>
+                    <div className="flex gap-4 mt-4">
+                        <button 
+                            onClick={handleTestAi}
+                            disabled={isTestingAi}
+                            className={`flex-1 flex justify-center items-center py-3 rounded-lg font-bold transition-colors ${isTestingAi ? 'bg-slate-700 text-slate-400' : 'bg-slate-700 hover:bg-slate-600 text-white'}`}
+                        >
+                            {isTestingAi ? <RefreshCw className="w-4 h-4 animate-spin mr-2"/> : <Activity className="w-4 h-4 mr-2" />}
+                            Test Connection
+                        </button>
+
+                        <button 
+                            onClick={handleSaveAiConfig}
+                            className="flex-1 bg-blue-600 hover:bg-blue-500 text-white font-bold py-3 rounded-lg transition-colors shadow-lg shadow-blue-600/20"
+                        >
+                            SAVE CONFIGURATION
+                        </button>
+                    </div>
                 </div>
              </div>
         )}

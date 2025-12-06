@@ -6,6 +6,15 @@ import { LogEntry, AiAnalysis, HoneyFile, AiConfig, AiProvider } from '../types'
 const DEFAULT_GEMINI_MODEL = 'gemini-2.5-flash';
 const DEFAULT_LOCAL_ENDPOINT = 'http://localhost:11434/v1/chat/completions';
 
+// Safely access process.env to avoid ReferenceError in pure browser environments
+const getEnvApiKey = () => {
+    try {
+        return process.env.API_KEY;
+    } catch (e) {
+        return undefined;
+    }
+};
+
 const getAiConfig = async (): Promise<AiConfig> => {
     // In a real app, pass this config from the component or fetch from state manager.
     // For this implementation, we will fetch it from the API to ensure fresh config.
@@ -27,7 +36,7 @@ const getAiConfig = async (): Promise<AiConfig> => {
 const callGemini = async (config: AiConfig, prompt: string, responseSchema?: any): Promise<any> => {
     // PRIORITY: Use Config Key first (Manual Override), then Environment Variable
     // This allows users to input their own key in Settings to override the server env var
-    const apiKey = config.apiKey || process.env.API_KEY;
+    const apiKey = config.apiKey || getEnvApiKey();
     
     if (!apiKey) {
         console.error("Gemini API Key missing in Settings OR environment variables (process.env.API_KEY)");
@@ -100,6 +109,29 @@ const callLocalLLM = async (config: AiConfig, prompt: string, schemaDescription:
 };
 
 // --- PUBLIC FACING FUNCTIONS ---
+
+export const testAiConnection = async (config: AiConfig): Promise<{success: boolean, message?: string}> => {
+    const prompt = "Reply with a JSON object containing the property 'status' set to 'OK' to verify connectivity.";
+    const geminiSchema = {
+        type: Type.OBJECT,
+        properties: { status: { type: Type.STRING } }
+    };
+    const localSchemaDesc = "{ status: 'OK' }";
+
+    try {
+        let result;
+        if (config.provider === 'GEMINI') {
+            result = await callGemini(config, prompt, geminiSchema);
+        } else {
+            result = await callLocalLLM(config, prompt, localSchemaDesc);
+        }
+        
+        if (result && result.status) return { success: true };
+        return { success: false, message: "No valid response from model." };
+    } catch (e: any) {
+        return { success: false, message: e.message || "Connection failed." };
+    }
+};
 
 export const analyzeLogsWithAi = async (logs: LogEntry[], actorStatus?: string): Promise<AiAnalysis | null> => {
     const config = await getAiConfig();
