@@ -1,3 +1,5 @@
+
+
 import express from 'express';
 import path from 'path';
 import fs from 'fs';
@@ -299,7 +301,8 @@ done
 
         if [ "\$SENTINEL_MODE" = true ]; then
              # PARANOID MODE: Check for ANY established connection that is NOT loopback
-             RAW_LINES=\$(ss -ntap state established state syn-recv | grep -v "127.0.0.1" | grep -v "::1")
+             # Added -H to suppress header line
+             RAW_LINES=\$(ss -H -ntap state established state syn-recv | grep -v "127.0.0.1" | grep -v "::1")
         else
              # NORMAL MODE: Only look for socat traps
              RAW_LINES=\$(ss -ntap | grep "socat")

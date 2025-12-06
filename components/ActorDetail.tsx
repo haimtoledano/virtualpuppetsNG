@@ -595,6 +595,9 @@ const ActorDetail: React.FC<ActorDetailProps> = ({ actor, gateway, logs: initial
           // FILTER: Ignore logs older than dismissal time
           if (new Date(log.timestamp).getTime() <= topologyDismissedTime) return;
 
+          // FILTER: Ignore bad Sentinel logs (parsing headers)
+          if (log.sourceIp === 'Address' || log.message.includes('Address:Port')) return;
+
           let attackerIp = log.sourceIp;
 
           // If no structured SourceIP, try to extract from message (common in raw syslog/socat)
