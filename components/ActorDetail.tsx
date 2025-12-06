@@ -1,10 +1,12 @@
+
+
 import React, { useState, useEffect, useMemo } from 'react';
 import { Actor, LogEntry, ActorStatus, AiAnalysis, ProxyGateway, HoneyFile, ActiveTunnel, DevicePersona, CommandJob, LogLevel, User, UserPreferences } from '../types';
 import { executeRemoteCommand, getAvailableCloudTraps, toggleTunnelMock, AVAILABLE_PERSONAS, generateRandomLog } from '../services/mockService';
 import { analyzeLogsWithAi, generateDeceptionContent } from '../services/aiService';
 import { updateActorName, queueSystemCommand, getActorCommands, deleteActor, updateActorTunnels, updateActorPersona, resetActorStatus, resetActorToFactory, updateActorHoneyFiles, toggleActorSentinel } from '../services/dbService';
 import Terminal from './Terminal';
-import { Cpu, Wifi, Shield, Bot, ArrowLeft, BrainCircuit, Router, Network, FileCode, Check, Activity, X, Printer, Camera, Server, Edit2, Trash2, Loader, ShieldCheck, AlertOctagon, Skull, ArrowRight, Terminal as TerminalIcon, Globe, ScanSearch, Power, RefreshCw, History as HistoryIcon, Thermometer, RefreshCcw, Siren, Eye, Fingerprint, Info, Cable, Search } from 'lucide-react';
+import { Cpu, Wifi, Shield, Bot, ArrowLeft, BrainCircuit, Router, Network, FileCode, Check, Activity, X, Printer, Camera, Server, Edit2, Trash2, Loader, ShieldCheck, AlertOctagon, Skull, ArrowRight, Terminal as TerminalIcon, Globe, ScanSearch, Power, RefreshCw, History as HistoryIcon, Thermometer, RefreshCcw, Siren, Eye, Fingerprint, Info, Cable, Search, Lock } from 'lucide-react';
 
 interface ActorDetailProps {
   actor: Actor;
@@ -20,7 +22,13 @@ const DEFAULT_TRAP_PORTS: Record<string, number> = {
     'trap-oracle-01': 1521,
     'trap-win-rdp': 3389,
     'trap-scada-plc': 102,
-    'trap-elastic': 9200
+    'trap-elastic': 9200,
+    'trap-redis': 6379,
+    'trap-mongo': 27017,
+    'trap-ftp': 21,
+    'trap-telnet': 23,
+    'trap-vnc': 5900,
+    'trap-postgres': 5432
 };
 
 // --- GAUGE COMPONENT ---
@@ -687,6 +695,36 @@ const ActorDetail: React.FC<ActorDetailProps> = ({ actor, gateway, logs: initial
 
   const activeThreats = threatTopology.attackers;
 
+  // --- NEW: CONFLICT DETECTION HELPERS ---
+  
+  // Calculate which ports are currently occupied by Tunnels
+  const blockedByTunnels = tunnels.map(t => t.localPort);
+  
+  // Calculate which ports are blocked by the Persona (only relevant when enabling tunnels)
+  const blockedByPersona = activePersona.openPorts || [];
+
+  // System ports that are always blocked
+  const systemPorts = [22];
+
+  // Helper: Get list of conflicting ports for a candidate persona
+  const getPersonaConflicts = (persona: DevicePersona): number[] => {
+      // A persona conflicts if any of its ports are taken by an ACTIVE TUNNEL or SYSTEM port
+      const blocked = [...systemPorts, ...blockedByTunnels];
+      return persona.openPorts.filter(p => blocked.includes(p));
+  };
+
+  // Helper: Get list of conflicting ports for a candidate trap (tunnel)
+  const getTunnelConflicts = (trapId: string): number[] => {
+      const defaultPort = DEFAULT_TRAP_PORTS[trapId];
+      if (!defaultPort) return [];
+      
+      // A trap conflicts if its port is taken by PERSONA, SYSTEM, or ANOTHER TUNNEL
+      // Note: We exclude self from blockedByTunnels check if it's already active, but here we usually check to enable
+      const blocked = [...systemPorts, ...blockedByTunnels, ...blockedByPersona];
+      
+      return blocked.includes(defaultPort) ? [defaultPort] : [];
+  };
+
   return (
     <div className="space-y-6 animate-fade-in pb-10">
       
@@ -1171,11 +1209,18 @@ const ActorDetail: React.FC<ActorDetailProps> = ({ actor, gateway, logs: initial
                        <div className="space-y-3">
                            {AVAILABLE_PERSONAS.map(p => {
                                const isActive = activePersona.id === p.id;
+                               const conflictingPorts = getPersonaConflicts(p);
+                               const hasConflict = conflictingPorts.length > 0 && !isActive;
+
                                return (
                                    <div 
                                        key={p.id} 
-                                       onClick={() => handleChangePersona(p.id)}
-                                       className={`cursor-pointer rounded-lg border transition-all overflow-hidden ${isActive ? 'bg-purple-900/10 border-purple-500' : 'bg-slate-900 border-slate-700 hover:border-slate-500'}`}
+                                       onClick={() => !hasConflict && handleChangePersona(p.id)}
+                                       className={`rounded-lg border transition-all overflow-hidden relative ${
+                                           isActive ? 'bg-purple-900/10 border-purple-500' : 
+                                           hasConflict ? 'bg-slate-900/40 border-slate-800 opacity-60 cursor-not-allowed grayscale' :
+                                           'bg-slate-900 border-slate-700 hover:border-slate-500 cursor-pointer'
+                                        }`}
                                    >
                                        {/* Header Section */}
                                        <div className="p-3 flex items-center border-b border-slate-700/50">
@@ -1187,7 +1232,10 @@ const ActorDetail: React.FC<ActorDetailProps> = ({ actor, gateway, logs: initial
                                                 {p.icon === 'ROUTER' && <Router className="w-4 h-4" />}
                                             </div>
                                             <div className="flex-1">
-                                                <div className={`font-bold text-sm ${isActive ? 'text-white' : 'text-slate-300'}`}>{p.name}</div>
+                                                <div className={`font-bold text-sm ${isActive ? 'text-white' : 'text-slate-300'}`}>
+                                                    {p.name}
+                                                    {hasConflict && <span className="text-[10px] text-red-400 ml-2 font-normal">(Ports Blocked)</span>}
+                                                </div>
                                                 <div className="text-[10px] text-slate-500">{p.description}</div>
                                             </div>
                                             {isChangingPersona && isActive && <Loader className="w-4 h-4 animate-spin text-purple-500" />}
@@ -1200,9 +1248,16 @@ const ActorDetail: React.FC<ActorDetailProps> = ({ actor, gateway, logs: initial
                                             <div className="flex items-center">
                                                 <span className="text-slate-600 font-bold w-16 text-[10px] uppercase">Open Ports</span>
                                                 <div className="flex gap-1 flex-wrap">
-                                                    {p.openPorts.map(port => (
-                                                        <span key={port} className="bg-slate-800 text-slate-400 px-1.5 rounded text-[10px] border border-slate-700">{port}/tcp</span>
-                                                    ))}
+                                                    {p.openPorts.map(port => {
+                                                        const isBlocked = conflictingPorts.includes(port);
+                                                        return (
+                                                            <span key={port} className={`px-1.5 rounded text-[10px] border ${
+                                                                isBlocked && !isActive ? 'bg-red-900/30 text-red-400 border-red-900' : 'bg-slate-800 text-slate-400 border-slate-700'
+                                                            }`} title={isBlocked ? "Port is currently in use by a Tunnel" : ""}>
+                                                                {port}/tcp
+                                                            </span>
+                                                        );
+                                                    })}
                                                 </div>
                                             </div>
                                             
@@ -1223,6 +1278,15 @@ const ActorDetail: React.FC<ActorDetailProps> = ({ actor, gateway, logs: initial
                                                 </code>
                                             </div>
                                        </div>
+                                       
+                                       {/* Conflict Overlay Tooltip */}
+                                       {hasConflict && (
+                                            <div className="absolute inset-0 bg-black/40 flex items-center justify-center opacity-0 hover:opacity-100 transition-opacity backdrop-blur-[1px]">
+                                                <div className="bg-red-900/90 text-red-200 text-xs px-2 py-1 rounded shadow-lg border border-red-500/50">
+                                                    Conflict: Port {conflictingPorts.join(', ')} in use
+                                                </div>
+                                            </div>
+                                       )}
                                    </div>
                                );
                            })}
@@ -1333,34 +1397,50 @@ const ActorDetail: React.FC<ActorDetailProps> = ({ actor, gateway, logs: initial
                           Open ports on this device that forward traffic to high-interaction cloud honeypots.
                       </p>
                       
-                      <div className="space-y-3 mb-6">
+                      <div className="space-y-3 mb-6 max-h-[400px] overflow-y-auto pr-2 scrollbar-thin scrollbar-thumb-slate-700">
                           {getAvailableCloudTraps().map(trap => {
                               const isActive = tunnels.some(t => t.trap.id === trap.id);
                               const isPending = pendingTunnel === trap.id;
                               
+                              const conflictingPorts = getTunnelConflicts(trap.id);
+                              const hasConflict = conflictingPorts.length > 0 && !isActive;
+
                               return (
-                                  <button 
-                                    key={trap.id}
-                                    onClick={() => handleToggleTunnel(trap.id)}
-                                    disabled={isPending}
-                                    className={`w-full text-left p-3 rounded border flex items-center justify-between transition-all ${
-                                        isActive 
-                                        ? 'bg-emerald-900/10 border-emerald-500/50' 
-                                        : 'bg-slate-900 border-slate-700 hover:border-blue-500'
-                                    }`}
-                                  >
-                                      <div>
-                                          <div className={`font-bold text-sm ${isActive ? 'text-emerald-400' : 'text-slate-200'}`}>{trap.name}</div>
-                                          <div className="text-xs text-slate-500">{trap.serviceType}</div>
-                                      </div>
-                                      <div className="flex items-center">
-                                          {isPending ? <Loader className="w-4 h-4 animate-spin text-blue-400" /> : (
-                                              <div className={`w-8 h-4 rounded-full relative transition-colors ${isActive ? 'bg-emerald-500' : 'bg-slate-700'}`}>
-                                                  <div className={`absolute top-0.5 w-3 h-3 bg-white rounded-full transition-all ${isActive ? 'left-4.5' : 'left-0.5'}`} style={{ left: isActive ? '18px' : '2px' }} />
+                                  <div key={trap.id} className="relative group">
+                                      <button 
+                                        onClick={() => !hasConflict && handleToggleTunnel(trap.id)}
+                                        disabled={isPending || (hasConflict && !isActive)}
+                                        className={`w-full text-left p-3 rounded border flex items-center justify-between transition-all ${
+                                            isActive 
+                                            ? 'bg-emerald-900/10 border-emerald-500/50' 
+                                            : hasConflict 
+                                                ? 'bg-slate-900/40 border-slate-800 cursor-not-allowed grayscale opacity-60'
+                                                : 'bg-slate-900 border-slate-700 hover:border-blue-500'
+                                        }`}
+                                      >
+                                          <div>
+                                              <div className={`font-bold text-sm ${isActive ? 'text-emerald-400' : 'text-slate-200'}`}>{trap.name}</div>
+                                              <div className="text-xs text-slate-500">
+                                                  {trap.serviceType} {hasConflict && <span className="text-red-400 ml-1">(Port Blocked)</span>}
                                               </div>
-                                          )}
-                                      </div>
-                                  </button>
+                                          </div>
+                                          <div className="flex items-center">
+                                              {isPending ? <Loader className="w-4 h-4 animate-spin text-blue-400" /> : (
+                                                  <div className={`w-8 h-4 rounded-full relative transition-colors ${isActive ? 'bg-emerald-500' : 'bg-slate-700'}`}>
+                                                      <div className={`absolute top-0.5 w-3 h-3 bg-white rounded-full transition-all ${isActive ? 'left-4.5' : 'left-0.5'}`} style={{ left: isActive ? '18px' : '2px' }} />
+                                                  </div>
+                                              )}
+                                          </div>
+                                      </button>
+                                      
+                                      {hasConflict && (
+                                            <div className="absolute inset-0 hidden group-hover:flex items-center justify-center pointer-events-none z-10">
+                                                <div className="bg-red-900/90 text-red-200 text-xs px-2 py-1 rounded shadow-lg border border-red-500/50 backdrop-blur-[1px]">
+                                                    Port {conflictingPorts.join(', ')} occupied
+                                                </div>
+                                            </div>
+                                       )}
+                                  </div>
                               );
                           })}
                       </div>

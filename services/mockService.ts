@@ -60,7 +60,7 @@ export const AVAILABLE_PERSONAS: DevicePersona[] = [
         name: 'Generic Linux Server', 
         icon: 'SERVER', 
         description: 'Emulates a standard Ubuntu 20.04 LTS footprint.', 
-        openPorts: [22, 80], 
+        openPorts: [80], 
         banner: 'SSH-2.0-OpenSSH_8.2p1 Ubuntu-4ubuntu0.3', 
         macVendor: 'VMware, Inc.' 
     },
@@ -96,9 +96,55 @@ export const AVAILABLE_PERSONAS: DevicePersona[] = [
         name: 'Cisco ISR Router', 
         icon: 'ROUTER', 
         description: 'Edge router with legacy telnet management enabled.', 
-        openPorts: [22, 23, 80], 
+        openPorts: [23, 80], 
         banner: 'Cisco IOS Software, C2900 Software (C2900-UNIVERSALK9-M), Version 15.1(4)M4', 
         macVendor: 'Cisco Systems, Inc' 
+    },
+    // --- NEW PERSONAS ---
+    { 
+        id: 'pers-nas', 
+        name: 'Synology NAS', 
+        icon: 'SERVER', 
+        description: 'Network Attached Storage with exposed management UI.', 
+        openPorts: [80, 5000, 5001], 
+        banner: 'Synology DiskStation Manager 7.1', 
+        macVendor: 'Synology Inc.' 
+    },
+    { 
+        id: 'pers-hue', 
+        name: 'Philips Hue Bridge', 
+        icon: 'ROUTER', 
+        description: 'IoT Lighting Gateway. Common pivot point.', 
+        openPorts: [80, 443, 8080], 
+        banner: 'Philips Hue Bridge 2.0 API', 
+        macVendor: 'Signify Netherlands B.V.' 
+    },
+    { 
+        id: 'pers-win', 
+        name: 'Windows Server 2022', 
+        icon: 'SERVER', 
+        description: 'Enterprise Domain Controller simulation.', 
+        openPorts: [135, 139, 445, 3389], 
+        banner: 'Microsoft Windows Server 2022 Datacenter', 
+        macVendor: 'Microsoft Corporation' 
+    },
+    { 
+        id: 'pers-med', 
+        name: 'GE Healthcare MRI', 
+        icon: 'PLC', 
+        description: 'Vulnerable medical imaging device interface.', 
+        openPorts: [80, 104, 443], 
+        banner: 'GE Healthcare DICOM Server', 
+        macVendor: 'General Electric Company' 
+    },
+    { 
+        id: 'pers-unifi', 
+        name: 'UniFi Controller', 
+        icon: 'ROUTER', 
+        description: 'Network management console for Ubiquiti devices.', 
+        openPorts: [8080, 8443, 8880], 
+        banner: 'UniFi Network Application 7.2.94', 
+        macVendor: 'Ubiquiti Inc.' 
     }
 ];
 
@@ -330,7 +376,14 @@ export const getAvailableCloudTraps = (): CloudTrap[] => [
     { id: 'trap-oracle-01', name: 'Legacy Oracle DB', serviceType: 'Oracle TNS', description: 'Emulates an unpatched Oracle 11g instance.', riskLevel: 'HIGH' },
     { id: 'trap-win-rdp', name: 'Windows 2019 RDP', serviceType: 'RDP', description: 'High interaction Windows server with weak admin creds.', riskLevel: 'HIGH' },
     { id: 'trap-scada-plc', name: 'Siemens S7 PLC', serviceType: 'Industrial ICS', description: 'Simulated industrial controller for SCADA networks.', riskLevel: 'MEDIUM' },
-    { id: 'trap-elastic', name: 'Open ElasticSearch', serviceType: 'ElasticSearch', description: 'Unsecured ES cluster with fake PII data.', riskLevel: 'MEDIUM' }
+    { id: 'trap-elastic', name: 'Open ElasticSearch', serviceType: 'ElasticSearch', description: 'Unsecured ES cluster with fake PII data.', riskLevel: 'MEDIUM' },
+    // --- NEW TRAPS ---
+    { id: 'trap-redis', name: 'Redis Cache', serviceType: 'Redis', description: 'Unauthenticated Redis instance with write access.', riskLevel: 'HIGH' },
+    { id: 'trap-mongo', name: 'MongoDB NoSQL', serviceType: 'MongoDB', description: 'Open MongoDB 4.0 instance.', riskLevel: 'MEDIUM' },
+    { id: 'trap-ftp', name: 'VSFTPD 2.3.4', serviceType: 'FTP', description: 'Legacy FTP server with backdoor vulnerability.', riskLevel: 'HIGH' },
+    { id: 'trap-telnet', name: 'Legacy Telnet', serviceType: 'Telnet', description: 'Unencrypted remote management interface.', riskLevel: 'LOW' },
+    { id: 'trap-vnc', name: 'VNC Remote Desktop', serviceType: 'VNC', description: 'RFB 3.8 protocol without password.', riskLevel: 'MEDIUM' },
+    { id: 'trap-postgres', name: 'PostgreSQL DB', serviceType: 'PostgreSQL', description: 'Default postgres user with trust auth.', riskLevel: 'MEDIUM' }
 ];
 
 export const toggleTunnelMock = async (actor: Actor, trapId: string, localPort: number): Promise<ActiveTunnel> => {
