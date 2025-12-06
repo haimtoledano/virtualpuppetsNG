@@ -1,5 +1,4 @@
 
-
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { Actor, LogEntry, ActorStatus, AiAnalysis, ProxyGateway, HoneyFile, ActiveTunnel, DevicePersona, CommandJob, LogLevel, User, UserPreferences, ForensicSnapshot, ForensicProcess, AttackSession } from '../types';
 import { executeRemoteCommand, getAvailableCloudTraps, toggleTunnelMock, AVAILABLE_PERSONAS, generateRandomLog, performForensicScan, getAttackSessions } from '../services/mockService';
@@ -241,9 +240,9 @@ const ActorDetail: React.FC<ActorDetailProps> = ({ actor, gateway, logs: initial
   useEffect(() => {
       if (activeTab === 'FORENSICS' && forensicView === 'SESSIONS') {
           // Load sessions
-          getAttackSessions(actor.id).then(setRecordedSessions);
+          getAttackSessions(actor.id, actor).then(setRecordedSessions);
       }
-  }, [activeTab, forensicView, actor.id]);
+  }, [activeTab, forensicView, actor.id, actor]);
 
   // --- REPLAY LOGIC ---
   useEffect(() => {

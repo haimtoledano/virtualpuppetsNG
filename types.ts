@@ -1,6 +1,4 @@
 
-
-
 export enum ActorStatus {
   ONLINE = 'ONLINE',
   OFFLINE = 'OFFLINE',
@@ -59,7 +57,7 @@ export interface ActiveTunnel {
 
 export interface Actor {
   id: string;
-  proxyId: string; // Link to the local proxy
+  proxyId: string;
   name: string;
   localIp: string; // Internal Network IP
   status: ActorStatus;
@@ -295,7 +293,7 @@ export interface AttackSession {
     id: string;
     actorId: string;
     attackerIp: string;
-    protocol: 'SSH' | 'TELNET';
+    protocol: 'SSH' | 'TELNET' | 'FTP' | 'REDIS' | 'HTTP' | 'VNC';
     startTime: Date;
     durationSeconds: number;
     frames: SessionFrame[];
