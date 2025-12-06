@@ -6,6 +6,8 @@
 
 
 
+
+
 import { Actor, ActorStatus, LogEntry, LogLevel, ProxyGateway, CloudTrap, ActiveTunnel, PendingActor, ProvisioningStatus, DevicePersona, WifiNetwork, BluetoothDevice } from '../types';
 
 const LOCATIONS = ['Tel Aviv HQ', 'New York Branch', 'London DC', 'Frankfurt AWS'];
@@ -61,11 +63,51 @@ export const generateGateways = (): ProxyGateway[] => {
 };
 
 export const AVAILABLE_PERSONAS: DevicePersona[] = [
-    { id: 'pers-linux', name: 'Generic Linux Server', icon: 'SERVER', description: 'Standard Ubuntu 20.04 LTS footprint.', openPorts: [22, 80], banner: 'Ubuntu SSHD 8.2' },
-    { id: 'pers-cam', name: 'Axis Security Camera', icon: 'CAMERA', description: 'Emulates an IP Camera web interface.', openPorts: [80, 554], banner: 'Axis Network Camera 2.1' },
-    { id: 'pers-printer', name: 'HP Enterprise Printer', icon: 'PRINTER', description: 'Office printer with exposed admin console.', openPorts: [80, 631, 9100], banner: 'HP JetDirect' },
-    { id: 'pers-plc', name: 'Siemens S7-1200', icon: 'PLC', description: 'Industrial Controller (ICS/SCADA).', openPorts: [102, 502], banner: 'Siemens S7 Comm' },
-    { id: 'pers-router', name: 'Cisco ISR Router', icon: 'ROUTER', description: 'Edge router with telnet enabled.', openPorts: [22, 23, 80], banner: 'Cisco IOS 15.1' }
+    { 
+        id: 'pers-linux', 
+        name: 'Generic Linux Server', 
+        icon: 'SERVER', 
+        description: 'Emulates a standard Ubuntu 20.04 LTS footprint.', 
+        openPorts: [22, 80], 
+        banner: 'SSH-2.0-OpenSSH_8.2p1 Ubuntu-4ubuntu0.3', 
+        macVendor: 'VMware, Inc.' 
+    },
+    { 
+        id: 'pers-cam', 
+        name: 'Axis Security Camera', 
+        icon: 'CAMERA', 
+        description: 'High-value target. Emulates an IP Camera login page.', 
+        openPorts: [80, 554, 8080], 
+        banner: 'Axis Network Camera 2.1 - RTSP Service Ready', 
+        macVendor: 'Axis Communications AB' 
+    },
+    { 
+        id: 'pers-printer', 
+        name: 'HP Enterprise Printer', 
+        icon: 'PRINTER', 
+        description: 'Office printer with exposed admin console and PJL.', 
+        openPorts: [80, 443, 631, 9100], 
+        banner: 'HP JetDirect - JD019238', 
+        macVendor: 'Hewlett Packard' 
+    },
+    { 
+        id: 'pers-plc', 
+        name: 'Siemens S7-1200', 
+        icon: 'PLC', 
+        description: 'Critical Infrastructure Controller (ICS/SCADA).', 
+        openPorts: [102, 502], 
+        banner: 'Siemens S7 Comm / Modbus TCP', 
+        macVendor: 'Siemens AG' 
+    },
+    { 
+        id: 'pers-router', 
+        name: 'Cisco ISR Router', 
+        icon: 'ROUTER', 
+        description: 'Edge router with legacy telnet management enabled.', 
+        openPorts: [22, 23, 80], 
+        banner: 'Cisco IOS Software, C2900 Software (C2900-UNIVERSALK9-M), Version 15.1(4)M4', 
+        macVendor: 'Cisco Systems, Inc' 
+    }
 ];
 
 export const generateInitialActors = (gateways: ProxyGateway[]): Actor[] => {
@@ -183,7 +225,24 @@ export const executeRemoteCommand = async (actorId: string, command: string): Pr
       } else if (command.includes('killall') || command.includes('pkill')) {
         resolve(`[${actorId}] Process terminated.`);
       } else if (command.startsWith('vpp-agent --set-persona')) {
-        resolve(`Updating system persona...\nPersona configuration applied successfully.`);
+        // Extract name to make it look real, though simple regex suffices for mock
+        const match = command.match(/"([^"]+)"/);
+        const name = match ? match[1] : 'Unknown';
+        resolve(`
+[VPP-AGENT] Initiating Persona Switch: "${name}"
+[INFO] Stopping network services (eth0)... OK
+[INFO] Randomizing MAC Address... 
+      > OLD: B8:27:EB:AA:BB:CC (Raspberry Pi Foundation)
+      > NEW: 00:1C:06:AF:3D:21 (Spoofed Vendor OUI)
+[INFO] Flushing iptables... OK
+[INFO] Applying new port rules...
+      > ALLOW TCP/22
+      > ALLOW TCP/80
+      > ALLOW TCP/443
+[INFO] Updating Service Banners (SSH/HTTP)... OK
+[INFO] Restarting networking... OK
+[SUCCESS] Device identity updated to "${name}".
+        `);
       } else if (command.startsWith('vpp-agent --set-sentinel')) {
           const mode = command.includes('on') ? 'ON' : 'OFF';
           resolve(`

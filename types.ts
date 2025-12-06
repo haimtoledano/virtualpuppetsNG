@@ -1,4 +1,5 @@
 
+
 export enum ActorStatus {
   ONLINE = 'ONLINE',
   OFFLINE = 'OFFLINE',
@@ -26,6 +27,7 @@ export interface DevicePersona {
   description: string;
   openPorts: number[];
   banner: string; // Service banner (e.g., "Apache/2.4.41")
+  macVendor?: string; // New: The hardware vendor to spoof (e.g., "Cisco Systems")
 }
 
 export interface HoneyFile {

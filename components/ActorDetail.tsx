@@ -9,13 +9,15 @@
 
 
 
+
+
 import React, { useState, useEffect, useMemo } from 'react';
 import { Actor, LogEntry, ActorStatus, AiAnalysis, ProxyGateway, HoneyFile, ActiveTunnel, DevicePersona, CommandJob, LogLevel } from '../types';
 import { executeRemoteCommand, getAvailableCloudTraps, toggleTunnelMock, AVAILABLE_PERSONAS, generateRandomLog } from '../services/mockService';
 import { analyzeLogsWithAi, generateDeceptionContent } from '../services/aiService';
 import { updateActorName, queueSystemCommand, getActorCommands, deleteActor, updateActorTunnels, updateActorPersona, resetActorStatus, resetActorToFactory, updateActorHoneyFiles, toggleActorSentinel } from '../services/dbService';
 import Terminal from './Terminal';
-import { Cpu, Wifi, Shield, Bot, ArrowLeft, BrainCircuit, Router, Network, FileCode, Check, Activity, X, Printer, Camera, Server, Edit2, Trash2, Loader, ShieldCheck, AlertOctagon, Skull, ArrowRight, Terminal as TerminalIcon, Globe, ScanSearch, Power, RefreshCw, History as HistoryIcon, Thermometer, RefreshCcw, Siren, Eye } from 'lucide-react';
+import { Cpu, Wifi, Shield, Bot, ArrowLeft, BrainCircuit, Router, Network, FileCode, Check, Activity, X, Printer, Camera, Server, Edit2, Trash2, Loader, ShieldCheck, AlertOctagon, Skull, ArrowRight, Terminal as TerminalIcon, Globe, ScanSearch, Power, RefreshCw, History as HistoryIcon, Thermometer, RefreshCcw, Siren, Eye, Fingerprint, Info } from 'lucide-react';
 
 interface ActorDetailProps {
   actor: Actor;
@@ -894,32 +896,72 @@ const ActorDetail: React.FC<ActorDetailProps> = ({ actor, gateway, logs: initial
                   {/* Persona Management */}
                   <div className="bg-slate-800 rounded-xl border border-slate-700 p-6 shadow-lg">
                        <h3 className="text-lg font-bold text-white mb-4 flex items-center"><Bot className="w-5 h-5 mr-2 text-purple-400" /> Device Persona</h3>
-                       <p className="text-slate-400 text-xs mb-4">
-                           Configure how this device appears to scanners (nmap/shodan). Changing persona will restart network services.
-                       </p>
+                       <div className="bg-blue-900/20 border border-blue-500/30 rounded p-3 mb-4 flex items-start">
+                           <Info className="w-4 h-4 text-blue-400 mr-2 shrink-0 mt-0.5" />
+                           <p className="text-xs text-blue-200">
+                               Deploying a persona will temporarily restart networking services on the actor. 
+                               The agent will spoof the MAC Address Vendor, open dummy ports, and update service banners to deceive scanners.
+                           </p>
+                       </div>
                        
                        <div className="space-y-3">
-                           {AVAILABLE_PERSONAS.map(p => (
-                               <div 
-                                   key={p.id} 
-                                   onClick={() => handleChangePersona(p.id)}
-                                   className={`cursor-pointer p-3 rounded border transition-all flex items-center ${activePersona.id === p.id ? 'bg-purple-900/20 border-purple-500' : 'bg-slate-900 border-slate-700 hover:border-slate-500'}`}
-                               >
-                                   <div className={`p-2 rounded-full mr-3 ${activePersona.id === p.id ? 'bg-purple-600 text-white' : 'bg-slate-800 text-slate-500'}`}>
-                                       {p.icon === 'SERVER' && <Server className="w-4 h-4" />}
-                                       {p.icon === 'CAMERA' && <Camera className="w-4 h-4" />}
-                                       {p.icon === 'PRINTER' && <Printer className="w-4 h-4" />}
-                                       {p.icon === 'PLC' && <Cpu className="w-4 h-4" />}
-                                       {p.icon === 'ROUTER' && <Router className="w-4 h-4" />}
+                           {AVAILABLE_PERSONAS.map(p => {
+                               const isActive = activePersona.id === p.id;
+                               return (
+                                   <div 
+                                       key={p.id} 
+                                       onClick={() => handleChangePersona(p.id)}
+                                       className={`cursor-pointer rounded-lg border transition-all overflow-hidden ${isActive ? 'bg-purple-900/10 border-purple-500' : 'bg-slate-900 border-slate-700 hover:border-slate-500'}`}
+                                   >
+                                       {/* Header Section */}
+                                       <div className="p-3 flex items-center border-b border-slate-700/50">
+                                            <div className={`p-2 rounded-full mr-3 ${isActive ? 'bg-purple-600 text-white' : 'bg-slate-800 text-slate-500'}`}>
+                                                {p.icon === 'SERVER' && <Server className="w-4 h-4" />}
+                                                {p.icon === 'CAMERA' && <Camera className="w-4 h-4" />}
+                                                {p.icon === 'PRINTER' && <Printer className="w-4 h-4" />}
+                                                {p.icon === 'PLC' && <Cpu className="w-4 h-4" />}
+                                                {p.icon === 'ROUTER' && <Router className="w-4 h-4" />}
+                                            </div>
+                                            <div className="flex-1">
+                                                <div className={`font-bold text-sm ${isActive ? 'text-white' : 'text-slate-300'}`}>{p.name}</div>
+                                                <div className="text-[10px] text-slate-500">{p.description}</div>
+                                            </div>
+                                            {isChangingPersona && isActive && <Loader className="w-4 h-4 animate-spin text-purple-500" />}
+                                            {isActive && !isChangingPersona && <Check className="w-4 h-4 text-purple-500" />}
+                                       </div>
+
+                                       {/* Technical Details Footer */}
+                                       <div className="bg-black/20 p-2 text-xs font-mono grid gap-1.5">
+                                            {/* Open Ports */}
+                                            <div className="flex items-center">
+                                                <span className="text-slate-600 font-bold w-16 text-[10px] uppercase">Open Ports</span>
+                                                <div className="flex gap-1 flex-wrap">
+                                                    {p.openPorts.map(port => (
+                                                        <span key={port} className="bg-slate-800 text-slate-400 px-1.5 rounded text-[10px] border border-slate-700">{port}/tcp</span>
+                                                    ))}
+                                                </div>
+                                            </div>
+                                            
+                                            {/* MAC Vendor */}
+                                            <div className="flex items-center">
+                                                <span className="text-slate-600 font-bold w-16 text-[10px] uppercase">MAC OUI</span>
+                                                <span className="text-slate-400 flex items-center text-[10px]">
+                                                    <Fingerprint className="w-3 h-3 mr-1 text-emerald-500" />
+                                                    {p.macVendor || 'Generic'}
+                                                </span>
+                                            </div>
+
+                                            {/* Banner Preview */}
+                                            <div className="flex items-start mt-1">
+                                                <span className="text-slate-600 font-bold w-16 text-[10px] uppercase pt-0.5">Banner</span>
+                                                <code className="text-[10px] text-yellow-600/80 break-all bg-slate-950 px-1 rounded flex-1">
+                                                    {p.banner}
+                                                </code>
+                                            </div>
+                                       </div>
                                    </div>
-                                   <div className="flex-1">
-                                       <div className="font-bold text-sm text-slate-200">{p.name}</div>
-                                       <div className="text-xs text-slate-500">{p.description}</div>
-                                   </div>
-                                   {isChangingPersona && activePersona.id === p.id && <Loader className="w-4 h-4 animate-spin text-purple-500" />}
-                                   {activePersona.id === p.id && !isChangingPersona && <Check className="w-4 h-4 text-purple-500" />}
-                               </div>
-                           ))}
+                               );
+                           })}
                        </div>
                   </div>
 
