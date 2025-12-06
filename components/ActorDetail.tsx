@@ -294,6 +294,8 @@ const ActorDetail: React.FC<ActorDetailProps> = ({ actor, gateway, logs: initial
       const system: any[] = [];
       const application: any[] = [];
       
+      const seen = new Set<string>();
+
       const getServiceName = (p: number) => {
           if (p === 21) return 'FTP';
           if (p === 22) return 'SSH';
@@ -301,17 +303,49 @@ const ActorDetail: React.FC<ActorDetailProps> = ({ actor, gateway, logs: initial
           if (p === 53) return 'DNS';
           if (p === 80) return 'HTTP';
           if (p === 443) return 'HTTPS';
+          if (p === 3000) return 'Grafana/Dev';
+          if (p === 3306) return 'MySQL';
+          if (p === 5432) return 'PostgreSQL';
+          if (p === 6379) return 'Redis';
+          if (p === 8080) return 'HTTP-Alt';
           return 'TCP';
       };
 
       lines.forEach(line => {
           // Regex to parse ss -lntup
-          // Example: tcp LISTEN 0 128 0.0.0.0:22 0.0.0.0:* users:(("sshd",pid=123,fd=3))
-          const match = line.match(/(udp|tcp)\s+\w+\s+\d+\s+\d+\s+(?:[\d\.]+|\[::\]):(\d+)\s+[\d\.\*\[\]:]+\s+users:\(\("([^"]+)"/);
+          // Format: Netid State Recv-Q Send-Q Local Address:Port Peer Address:Port Process
+          // Matches: 
+          // 1: udp/tcp
+          // 2: Local Address (IP)
+          // 3: Local Port
+          // 4: Process Name
+          
+          // Handles:
+          // 0.0.0.0:22
+          // [::]:22
+          // *:80
+          // 127.0.0.1:53
+          const match = line.match(/^(udp|tcp)\s+\w+\s+\d+\s+\d+\s+([^\s:]+|\[.*?\]):(\d+)\s+.*users:\(\("([^"]+)"/);
+          
           if (match) {
               const proto = match[1].toUpperCase();
-              const port = parseInt(match[2]);
-              const process = match[3];
+              let bindIp = match[2];
+              const port = parseInt(match[3]);
+              const process = match[4];
+
+              // Clean IP
+              bindIp = bindIp.replace('[', '').replace(']', '');
+
+              // FILTER 1: IGNORE LOOPBACK
+              if (bindIp.startsWith('127.') || bindIp === '::1') {
+                  return;
+              }
+
+              // FILTER 2: DEDUPLICATE (Port + Proto)
+              // If 22/TCP exists on 0.0.0.0, don't show it again for [::]
+              const key = `${proto}:${port}`;
+              if (seen.has(key)) return;
+              seen.add(key);
 
               const item = {
                   port,
@@ -321,7 +355,6 @@ const ActorDetail: React.FC<ActorDetailProps> = ({ actor, gateway, logs: initial
               };
 
               // Logic to distinguish VPP vs System
-              // VPP uses 'socat' for tunnels and 'vpp-agent' (or python/node) for personas
               if (process.includes('socat') || process.includes('vpp-agent') || process.includes('python')) {
                    item.service = process.includes('socat') ? 'Tunnel' : 'Persona';
                    application.push(item);
