@@ -64,6 +64,7 @@ export interface Actor {
   osVersion: string;
   cpuLoad: number;
   memoryUsage: number;
+  temperature?: number; // New field for real device temp
   activeTools: string[]; // e.g., 'tcpdump', 'cowrie'
   protocolVersion: string; // e.g., 'VPP-1.2'
   deployedHoneyFiles?: HoneyFile[]; // New field for deception

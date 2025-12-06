@@ -5,7 +5,7 @@ import { executeRemoteCommand, getAvailableCloudTraps, toggleTunnelMock, AVAILAB
 import { analyzeLogsWithAi, generateDeceptionContent } from '../services/aiService';
 import { updateActorName, queueSystemCommand, getActorCommands, deleteActor, updateActorTunnels, updateActorPersona, resetActorStatus } from '../services/dbService';
 import Terminal from './Terminal';
-import { Cpu, Wifi, Shield, Bot, ArrowLeft, BrainCircuit, Router, Network, FileCode, Check, Activity, X, Printer, Camera, Server, Edit2, Trash2, Loader, ShieldCheck, AlertOctagon, Skull, ArrowRight, Terminal as TerminalIcon, Globe, ScanSearch, Power, RefreshCw, History as HistoryIcon } from 'lucide-react';
+import { Cpu, Wifi, Shield, Bot, ArrowLeft, BrainCircuit, Router, Network, FileCode, Check, Activity, X, Printer, Camera, Server, Edit2, Trash2, Loader, ShieldCheck, AlertOctagon, Skull, ArrowRight, Terminal as TerminalIcon, Globe, ScanSearch, Power, RefreshCw, History as HistoryIcon, Thermometer } from 'lucide-react';
 
 interface ActorDetailProps {
   actor: Actor;
@@ -354,6 +354,14 @@ const ActorDetail: React.FC<ActorDetailProps> = ({ actor, gateway, logs: initial
 
   const activeThreats = threatTopology.attackers;
 
+  // Formatting helpers
+  const getTempColor = (temp?: number) => {
+      if (!temp) return 'bg-slate-700';
+      if (temp < 60) return 'bg-emerald-500';
+      if (temp < 80) return 'bg-yellow-500';
+      return 'bg-red-500';
+  };
+
   return (
     <div className="space-y-6 animate-fade-in pb-10">
       
@@ -441,7 +449,7 @@ const ActorDetail: React.FC<ActorDetailProps> = ({ actor, gateway, logs: initial
             </div>
 
             {/* Network Stats Bar */}
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-4 bg-slate-900/50 rounded-lg p-4 border border-slate-700/50">
+            <div className="grid grid-cols-2 lg:grid-cols-5 gap-4 bg-slate-900/50 rounded-lg p-4 border border-slate-700/50">
                  {/* External IP */}
                 <div>
                     <div className="text-slate-500 text-[10px] font-bold uppercase tracking-wider mb-1 flex items-center">
@@ -479,18 +487,28 @@ const ActorDetail: React.FC<ActorDetailProps> = ({ actor, gateway, logs: initial
                 </div>
 
                 <div>
-                    <div className="text-slate-500 text-[10px] font-bold uppercase tracking-wider mb-1">Load Average</div>
-                    <div className="w-full bg-slate-700 h-1.5 rounded-full mt-2">
-                        <div className="bg-emerald-500 h-1.5 rounded-full transition-all duration-1000" style={{ width: `${actor.cpuLoad}%` }}></div>
+                    <div className="text-slate-500 text-[10px] font-bold uppercase tracking-wider mb-1">CPU Load</div>
+                    <div className="w-full bg-slate-700 h-1.5 rounded-full mt-2 overflow-hidden">
+                        <div className={`${getTempColor(actor.cpuLoad)} h-1.5 rounded-full transition-all duration-1000`} style={{ width: `${actor.cpuLoad}%` }}></div>
                     </div>
-                    <div className="text-right text-[10px] text-slate-400 mt-1">{actor.cpuLoad}%</div>
+                    <div className="text-right text-[10px] text-slate-400 mt-1">{actor.cpuLoad.toFixed(1)}%</div>
                 </div>
                 <div>
-                     <div className="text-slate-500 text-[10px] font-bold uppercase tracking-wider mb-1">Memory</div>
-                    <div className="w-full bg-slate-700 h-1.5 rounded-full mt-2">
+                     <div className="text-slate-500 text-[10px] font-bold uppercase tracking-wider mb-1">RAM Usage</div>
+                    <div className="w-full bg-slate-700 h-1.5 rounded-full mt-2 overflow-hidden">
                         <div className="bg-blue-500 h-1.5 rounded-full transition-all duration-1000" style={{ width: `${actor.memoryUsage}%` }}></div>
                     </div>
-                     <div className="text-right text-[10px] text-slate-400 mt-1">{actor.memoryUsage}%</div>
+                     <div className="text-right text-[10px] text-slate-400 mt-1">{actor.memoryUsage.toFixed(1)}%</div>
+                </div>
+                <div>
+                     <div className="text-slate-500 text-[10px] font-bold uppercase tracking-wider mb-1 flex items-center"><Thermometer className="w-3 h-3 mr-1" /> Temperature</div>
+                     <div className="flex items-center space-x-2 mt-1">
+                         <div className={`w-2 h-2 rounded-full ${getTempColor(actor.temperature)}`}></div>
+                         <div className="text-slate-200 font-mono text-sm">{actor.temperature ? `${actor.temperature.toFixed(1)}°C` : 'N/A'}</div>
+                     </div>
+                     <div className="w-full bg-slate-700 h-1.5 rounded-full mt-2 overflow-hidden">
+                         <div className={`${getTempColor(actor.temperature)} h-1.5 rounded-full transition-all duration-1000`} style={{ width: `${Math.min(100, (actor.temperature || 0))}%` }}></div>
+                     </div>
                 </div>
             </div>
         </div>

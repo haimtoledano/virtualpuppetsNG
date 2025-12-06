@@ -98,7 +98,7 @@ LOG_FILE="/var/log/vpp-agent.log"
 if [ "$EUID" -ne 0 ]; then echo "Please run as root"; exit 1; fi
 
 echo "--------------------------------------------------"
-echo "   Virtual Puppets Agent Bootstrap v6.3"
+echo "   Virtual Puppets Agent Bootstrap v7.0"
 echo "--------------------------------------------------"
 
 echo "[*] Checking dependencies..."
@@ -206,9 +206,36 @@ done
                 WIFI_JSON=\$(echo "\$RAW_WIFI" | jq -R -s -c 'split("\n")[:-1] | map(split(":")) | map({ssid: .[0], bssid: (.[1]+":"+.[2]+":"+.[3]+":"+.[4]+":"+.[5]+":"+.[6]), signal: .[7], security: .[8]})')
              fi
         fi
-        PAYLOAD=\$(jq -n -c --arg aid "\$ACTOR_ID" --argjson wifi "\$WIFI_JSON" '{actorId: \$aid, wifi: \$wifi, bluetooth: []}')
+
+        # TELEMETRY COLLECTION
+        # CPU: Approximate usage (100 - idle) from top batch mode
+        CPU_USAGE=\$(top -bn1 | grep "Cpu(s)" | sed "s/.*, *\([0-9.]*\)%* id.*/\1/" | awk '{print 100 - \$1}')
+        
+        # RAM: Percent Used
+        RAM_USAGE=\$(free | grep Mem | awk '{print \$3/\$2 * 100.0}')
+        
+        # TEMP: Try standard thermal zone
+        if [ -f /sys/class/thermal/thermal_zone0/temp ]; then
+             RAW_TEMP=\$(cat /sys/class/thermal/thermal_zone0/temp)
+             TEMP=\$(awk "BEGIN {print \$RAW_TEMP/1000}")
+        else
+             TEMP=0
+        fi
+
+        # Defaults if calculation failed
+        if [ -z "\$CPU_USAGE" ]; then CPU_USAGE=0; fi
+        if [ -z "\$RAM_USAGE" ]; then RAM_USAGE=0; fi
+
+        PAYLOAD=\$(jq -n -c \
+            --arg aid "\$ACTOR_ID" \
+            --argjson wifi "\$WIFI_JSON" \
+            --arg cpu "\$CPU_USAGE" \
+            --arg ram "\$RAM_USAGE" \
+            --arg temp "\$TEMP" \
+            '{actorId: \$aid, wifi: \$wifi, bluetooth: [], cpu: \$cpu, ram: \$ram, temp: \$temp}')
+        
         curl -s -X POST -H "Content-Type: application/json" -d "\$PAYLOAD" --max-time 15 "\$SERVER/api/agent/scan" > /dev/null
-        sleep 120
+        sleep 30 # Telemetry update every 30s
     done
 ) &
 
@@ -388,7 +415,7 @@ const runSchemaMigrations = async (pool) => {
         'SystemConfig': `ConfigKey NVARCHAR(50) PRIMARY KEY, ConfigValue NVARCHAR(MAX)`,
         'Users': `UserId NVARCHAR(50) PRIMARY KEY, Username NVARCHAR(100), PasswordHash NVARCHAR(255), Role NVARCHAR(20), MfaEnabled BIT DEFAULT 0, MfaSecret NVARCHAR(100), LastLogin DATETIME`,
         'Gateways': `GatewayId NVARCHAR(50) PRIMARY KEY, Name NVARCHAR(100), Location NVARCHAR(100), Status NVARCHAR(20), IpAddress NVARCHAR(50), Lat FLOAT, Lng FLOAT`,
-        'Actors': `ActorId NVARCHAR(50) PRIMARY KEY, HwId NVARCHAR(100), GatewayId NVARCHAR(50), Name NVARCHAR(100), Status NVARCHAR(20), LocalIp NVARCHAR(50), LastSeen DATETIME, Config NVARCHAR(MAX), OsVersion NVARCHAR(100), TunnelsJson NVARCHAR(MAX), Persona NVARCHAR(MAX), HasWifi BIT DEFAULT 0, HasBluetooth BIT DEFAULT 0`,
+        'Actors': `ActorId NVARCHAR(50) PRIMARY KEY, HwId NVARCHAR(100), GatewayId NVARCHAR(50), Name NVARCHAR(100), Status NVARCHAR(20), LocalIp NVARCHAR(50), LastSeen DATETIME, Config NVARCHAR(MAX), OsVersion NVARCHAR(100), TunnelsJson NVARCHAR(MAX), Persona NVARCHAR(MAX), HasWifi BIT DEFAULT 0, HasBluetooth BIT DEFAULT 0, CpuLoad FLOAT DEFAULT 0, MemoryUsage FLOAT DEFAULT 0, Temperature FLOAT DEFAULT 0`,
         'Logs': `LogId NVARCHAR(50) PRIMARY KEY, ActorId NVARCHAR(50), Level NVARCHAR(20), Process NVARCHAR(50), Message NVARCHAR(MAX), SourceIp NVARCHAR(50), Timestamp DATETIME`,
         'PendingActors': `Id NVARCHAR(50) PRIMARY KEY, HwId NVARCHAR(100), DetectedIp NVARCHAR(50), TargetGatewayId NVARCHAR(50), DetectedAt DATETIME, OsVersion NVARCHAR(100)`,
         'CommandQueue': `JobId NVARCHAR(50) PRIMARY KEY, ActorId NVARCHAR(50), Command NVARCHAR(MAX), Status NVARCHAR(20), Output NVARCHAR(MAX), CreatedAt DATETIME, UpdatedAt DATETIME`,
@@ -403,6 +430,11 @@ const runSchemaMigrations = async (pool) => {
             const check = await req.query(`SELECT * FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_NAME = '${name}'`);
             if (check.recordset.length === 0) {
                 await req.query(`CREATE TABLE ${name} (${schema})`);
+            } else if (name === 'Actors') {
+                // Ensure new telemetry columns exist if table already exists
+                try { await req.query(`ALTER TABLE Actors ADD CpuLoad FLOAT DEFAULT 0`); } catch(e){}
+                try { await req.query(`ALTER TABLE Actors ADD MemoryUsage FLOAT DEFAULT 0`); } catch(e){}
+                try { await req.query(`ALTER TABLE Actors ADD Temperature FLOAT DEFAULT 0`); } catch(e){}
             }
         } catch (e) { }
     }
@@ -694,8 +726,19 @@ app.post('/api/agent/result', async (req, res) => {
 });
 
 app.post('/api/agent/scan', async (req, res) => {
-    // Stores Wifi/BT results, can implement insertion into tables here
-    res.json({success:true});
+    if (!dbPool) return res.json({});
+    const { actorId, cpu, ram, temp } = req.body;
+    try {
+        if (actorId) {
+            await dbPool.request()
+                .input('aid', sql.NVarChar, actorId)
+                .input('c', sql.Float, parseFloat(cpu) || 0)
+                .input('r', sql.Float, parseFloat(ram) || 0)
+                .input('t', sql.Float, parseFloat(temp) || 0)
+                .query("UPDATE Actors SET CpuLoad = @c, MemoryUsage = @r, Temperature = @t, LastSeen = GETDATE() WHERE ActorId = @aid");
+        }
+        res.json({success:true});
+    } catch(e) { console.error("Telemetry update failed", e); res.status(500).json({error:e.message}); }
 });
 
 app.post('/api/agent/alert', async (req, res) => { 
@@ -740,7 +783,7 @@ app.get('/api/commands/:actorId', async (req, res) => {
 
 // --- ACTOR MGMT ---
 
-app.get('/api/actors', async (req, res) => { if (!dbPool) return res.json([]); try { const result = await dbPool.request().query("SELECT * FROM Actors"); res.json(result.recordset.map(row => ({ id: row.ActorId, proxyId: row.GatewayId, name: row.Name, localIp: row.LocalIp, status: row.Status, lastSeen: row.LastSeen, osVersion: row.OsVersion, activeTunnels: row.TunnelsJson ? JSON.parse(row.TunnelsJson) : [], persona: row.Persona ? JSON.parse(row.Persona) : undefined, hasWifi: row.HasWifi, hasBluetooth: row.HasBluetooth }))); } catch (e) { res.status(500).json({error: e.message}); } });
+app.get('/api/actors', async (req, res) => { if (!dbPool) return res.json([]); try { const result = await dbPool.request().query("SELECT * FROM Actors"); res.json(result.recordset.map(row => ({ id: row.ActorId, proxyId: row.GatewayId, name: row.Name, localIp: row.LocalIp, status: row.Status, lastSeen: row.LastSeen, osVersion: row.OsVersion, activeTunnels: row.TunnelsJson ? JSON.parse(row.TunnelsJson) : [], persona: row.Persona ? JSON.parse(row.Persona) : undefined, hasWifi: row.HasWifi, hasBluetooth: row.HasBluetooth, cpuLoad: row.CpuLoad, memoryUsage: row.MemoryUsage, temperature: row.Temperature }))); } catch (e) { res.status(500).json({error: e.message}); } });
 
 app.put('/api/actors/:id', async (req, res) => {
     if (!dbPool) return res.json({success: false});
