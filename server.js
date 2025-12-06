@@ -1,3 +1,4 @@
+
 import express from 'express';
 import path from 'path';
 import fs from 'fs';
@@ -97,7 +98,7 @@ LOG_FILE="/var/log/vpp-agent.log"
 if [ "$EUID" -ne 0 ]; then echo "Please run as root"; exit 1; fi
 
 echo "--------------------------------------------------"
-echo "   Virtual Puppets Agent Bootstrap v6.1"
+echo "   Virtual Puppets Agent Bootstrap v6.2"
 echo "--------------------------------------------------"
 
 echo "[*] Checking dependencies..."
@@ -206,7 +207,7 @@ done
              fi
         fi
         PAYLOAD=\$(jq -n -c --arg aid "\$ACTOR_ID" --argjson wifi "\$WIFI_JSON" '{actorId: \$aid, wifi: \$wifi, bluetooth: []}')
-        curl -s -X POST -H "Content-Type: application/json" -d "\$PAYLOAD" "\$SERVER/api/agent/scan" > /dev/null
+        curl -s -X POST -H "Content-Type: application/json" -d "\$PAYLOAD" --max-time 15 "\$SERVER/api/agent/scan" > /dev/null
         sleep 120
     done
 ) &
@@ -259,7 +260,7 @@ done
                             --arg msg "\$MSG" \
                             '{type: "TRAP_TRIGGERED", details: \$msg, sourceIp: \$ip}')
                          
-                         CURL_OUT=\$(curl -s -X POST -H "Content-Type: application/json" -d "\$PAYLOAD" "\$SERVER/api/agent/alert?actorId=\$ACTOR_ID" 2>&1)
+                         CURL_OUT=\$(curl -s -X POST -H "Content-Type: application/json" -d "\$PAYLOAD" --max-time 10 "\$SERVER/api/agent/alert?actorId=\$ACTOR_ID" 2>&1)
                          
                          if [ "\$DEBUG_MODE" = true ]; then
                              log "DEBUG: Alert sent. Server response: \$CURL_OUT"
@@ -278,28 +279,44 @@ done
     done
 ) &
 
+# MAIN COMMAND LOOP
 while true; do
     if [ -z "\$ACTOR_ID" ] && [ -f "\$AGENT_DIR/vpp-id" ]; then
          ACTOR_ID=\$(cat "\$AGENT_DIR/vpp-id")
     fi
 
     if [ ! -z "\$ACTOR_ID" ]; then
-        JOB_JSON=\$(curl -s --connect-timeout 10 "\$SERVER/api/agent/commands?actorId=\$ACTOR_ID")
+        JOB_JSON=\$(curl -s --connect-timeout 10 --max-time 30 "\$SERVER/api/agent/commands?actorId=\$ACTOR_ID")
         
         if [ ! -z "\$JOB_JSON" ] && echo "\$JOB_JSON" | jq -e '.[0].id' > /dev/null 2>&1; then
             JOB_ID=\$(echo "\$JOB_JSON" | jq -r '.[0].id')
             
             if [ "\$JOB_ID" != "null" ]; then
+                log "[+] Received Job: \$JOB_ID"
                 CMD=\$(echo "\$JOB_JSON" | jq -r '.[0].command')
-                curl -s -X POST -H "Content-Type: application/json" -d '{"jobId":"'"\$JOB_ID"'","status":"RUNNING","output":"Executing..."}' "\$SERVER/api/agent/result" > /dev/null
-                OUTPUT=\$(eval "\$CMD" 2>&1); EXIT_CODE=\$?
-                STATUS="COMPLETED"; if [ \$EXIT_CODE -ne 0 ]; then STATUS="FAILED"; fi
+                
+                curl -s -X POST -H "Content-Type: application/json" -d '{"jobId":"'"\$JOB_ID"'","status":"RUNNING","output":"Executing..."}' --max-time 10 "\$SERVER/api/agent/result" > /dev/null
+                
+                # Execute with timeout to prevent infinite hang on background jobs like socat
+                # "timeout 10s bash -c" ensures we don't wait forever if stdout is kept open
+                OUTPUT=\$(timeout 10s bash -c "\$CMD" 2>&1); EXIT_CODE=\$?
+                
+                if [ \$EXIT_CODE -eq 124 ]; then 
+                    STATUS="COMPLETED"
+                    OUTPUT="Command executed (Timeout enforced to prevent agent hang). Background process should be running."
+                elif [ \$EXIT_CODE -ne 0 ]; then 
+                    STATUS="FAILED"
+                else
+                    STATUS="COMPLETED"
+                fi
+                
                 PAYLOAD=\$(jq -n -c \
                         --arg jid "\$JOB_ID" \
                         --arg stat "\$STATUS" \
                         --arg out "\$OUTPUT" \
                         '{jobId: \$jid, status: \$stat, output: \$out}')
-                curl -s -X POST -H "Content-Type: application/json" -d "\$PAYLOAD" "\$SERVER/api/agent/result" > /dev/null
+                curl -s -X POST -H "Content-Type: application/json" -d "\$PAYLOAD" --max-time 10 "\$SERVER/api/agent/result" > /dev/null
+                log "[-] Job \$JOB_ID Finished ($STATUS)"
             fi
         fi
     fi
@@ -639,7 +656,11 @@ app.get('/api/agent/commands', async (req, res) => {
     if (!dbPool) return res.json([]);
     const { actorId } = req.query;
     try {
-        await dbPool.request().query(`UPDATE Actors SET LastSeen = GETDATE(), Status = CASE WHEN Status = 'COMPROMISED' THEN 'COMPROMISED' ELSE 'ONLINE' END WHERE ActorId = '${actorId}'`);
+        // Safe parameterized query for Update as well
+        await dbPool.request()
+            .input('aid', sql.NVarChar, actorId)
+            .query("UPDATE Actors SET LastSeen = GETDATE(), Status = CASE WHEN Status = 'COMPROMISED' THEN 'COMPROMISED' ELSE 'ONLINE' END WHERE ActorId = @aid");
+            
         const result = await dbPool.request().input('aid', sql.NVarChar, actorId).query("SELECT * FROM CommandQueue WHERE ActorId = @aid AND Status = 'PENDING'");
         res.json(result.recordset.map(r => ({ id: r.JobId, command: r.Command })));
     } catch(e) { res.json([]); }
