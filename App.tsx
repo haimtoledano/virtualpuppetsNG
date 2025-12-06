@@ -102,8 +102,9 @@ const App: React.FC = () => {
               return prevActors.map(actor => {
                   const lastSeenTime = new Date(actor.lastSeen).getTime();
                   const timeDiff = Date.now() - lastSeenTime;
-                  // Increase timeout to 3 minutes to avoid fighting with server polling
-                  if (timeDiff > 180000 && actor.status === 'ONLINE') {
+                  // Increase timeout to 10 minutes (600000ms) to avoid fighting with server polling
+                  // and account for potential timezone differences between client and server DB
+                  if (timeDiff > 600000 && actor.status === 'ONLINE') {
                       return { ...actor, status: ActorStatus.OFFLINE };
                   }
                   return actor;
