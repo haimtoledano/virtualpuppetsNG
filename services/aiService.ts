@@ -25,8 +25,22 @@ const getAiConfig = async (): Promise<AiConfig> => {
 
 const callGemini = async (config: AiConfig, prompt: string, responseSchema?: any): Promise<any> => {
     // Coding Guidelines: The API key must be obtained exclusively from the environment variable process.env.API_KEY.
-    // Assume process.env.API_KEY is available and valid.
-    const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+    
+    let apiKey;
+    try {
+        apiKey = process.env.API_KEY;
+    } catch (e) {
+        // process is likely not defined in this environment
+        console.warn("process.env is not defined, cannot retrieve API_KEY");
+        return null;
+    }
+
+    if (!apiKey) {
+        console.warn("Gemini API Key is missing in environment variables. AI features are disabled.");
+        return null;
+    }
+
+    const ai = new GoogleGenAI({ apiKey });
     
     try {
         const geminiConfig: any = { responseMimeType: "application/json" };
