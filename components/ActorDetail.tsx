@@ -11,6 +11,8 @@
 
 
 
+
+
 import React, { useState, useEffect, useMemo } from 'react';
 import { Actor, LogEntry, ActorStatus, AiAnalysis, ProxyGateway, HoneyFile, ActiveTunnel, DevicePersona, CommandJob, LogLevel } from '../types';
 import { executeRemoteCommand, getAvailableCloudTraps, toggleTunnelMock, AVAILABLE_PERSONAS, generateRandomLog } from '../services/mockService';
@@ -139,6 +141,18 @@ const ActorDetail: React.FC<ActorDetailProps> = ({ actor, gateway, logs: initial
 
   // Topology Reset State
   const [topologyDismissedTime, setTopologyDismissedTime] = useState<number>(0);
+
+  // --- PERSISTENCE FOR TOPOLOGY VIEW ---
+  useEffect(() => {
+      const saved = localStorage.getItem(`vpp_topology_dismissed_${actor.id}`);
+      setTopologyDismissedTime(saved ? parseInt(saved, 10) : 0);
+  }, [actor.id]);
+
+  const handleClearTopology = () => {
+      const now = Date.now();
+      setTopologyDismissedTime(now);
+      localStorage.setItem(`vpp_topology_dismissed_${actor.id}`, now.toString());
+  };
 
   // --- MOCK SIMULATION FOR LIVE TELEMETRY ---
   useEffect(() => {
@@ -308,7 +322,7 @@ const ActorDetail: React.FC<ActorDetailProps> = ({ actor, gateway, logs: initial
       setHoneyFiles([]);
       actor.status = ActorStatus.ONLINE;
       setIsSentinelEnabled(false);
-      setTopologyDismissedTime(Date.now()); // Also reset topology view
+      handleClearTopology(); // Also reset topology view
       
       setTimeout(() => setIsResetting(false), 2000);
   };
@@ -669,7 +683,7 @@ const ActorDetail: React.FC<ActorDetailProps> = ({ actor, gateway, logs: initial
                   <div className="flex items-center space-x-3">
                       <span className="text-[10px] text-red-300 font-mono uppercase animate-pulse">Attack in Progress</span>
                       <button 
-                        onClick={() => setTopologyDismissedTime(Date.now())}
+                        onClick={handleClearTopology}
                         className="flex items-center space-x-1 bg-red-950 hover:bg-red-900 text-red-300 px-2 py-1 rounded text-[10px] font-bold border border-red-800 transition-colors"
                         title="Clear visualization until new attack events detected"
                       >
