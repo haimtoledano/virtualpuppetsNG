@@ -1,6 +1,3 @@
-
-
-// ... existing imports ...
 import express from 'express';
 import path from 'path';
 import fs from 'fs';
@@ -90,7 +87,6 @@ app.get('/setup', (req, res) => {
     const protocol = req.protocol;
     const serverUrl = `${protocol}://${host}`;
     
-    // ... (Keep existing setup script content exactly as is) ...
     const script = `
 #!/bin/bash
 TOKEN=$1
@@ -335,7 +331,6 @@ echo "[+] Logs available at: $LOG_FILE"
     res.setHeader('Content-Type', 'text/plain');
     res.send(script.trim());
 });
-// ... (End of script) ...
 
 app.get('/setup-proxy', (req, res) => { res.send("Proxy Setup Placeholder"); });
 if (fs.existsSync(distPath)) { app.use(express.static(distPath)); }
@@ -367,7 +362,6 @@ const connectToDb = async (config) => {
 const runSchemaMigrations = async (pool) => {
     if (!pool) return;
     const req = new sql.Request(pool);
-    // ... (Existing schema logic) ...
     const tables = {
         'SystemConfig': `ConfigKey NVARCHAR(50) PRIMARY KEY, ConfigValue NVARCHAR(MAX)`,
         'Users': `UserId NVARCHAR(50) PRIMARY KEY, Username NVARCHAR(100), PasswordHash NVARCHAR(255), Role NVARCHAR(20), MfaEnabled BIT DEFAULT 0, MfaSecret NVARCHAR(100), LastLogin DATETIME`,
@@ -390,7 +384,14 @@ const runSchemaMigrations = async (pool) => {
             }
         } catch (e) { }
     }
-    // ... (Existing column additions and user creation) ...
+    
+    // Create SuperAdmin if not exists
+    try {
+        const uCheck = await req.query("SELECT * FROM Users WHERE Username = 'superadmin'");
+        if (uCheck.recordset.length === 0) {
+            await req.query("INSERT INTO Users (UserId, Username, PasswordHash, Role) VALUES ('usr-super-01', 'superadmin', 'btoa_hash_123qweASDF!!@!', 'SUPERADMIN')");
+        }
+    } catch (e) {}
 };
 
 const init = async () => {
@@ -405,12 +406,13 @@ const init = async () => {
 };
 init();
 
-// ... (Existing endpoints: health, setup/db, login, config/system, mfa, agent/commands, agent/alert, actors, gateways, enroll, commands, agent/result, agent/heartbeat) ...
+// --- API ENDPOINTS ---
+
 app.get('/api/health', (req, res) => { res.json({ status: 'active', mode: getDbConfig()?.isConnected ? 'PRODUCTION' : 'MOCK_OR_SETUP', dbConnected: !!dbPool }); });
 app.post('/api/setup/db', async (req, res) => { try { await connectToDb(req.body); fs.writeFileSync(CONFIG_FILE, JSON.stringify({...req.body, isConnected: true}, null, 2)); await runSchemaMigrations(dbPool); await refreshSyslogConfig(dbPool); res.json({ success: true }); } catch (err) { res.status(500).json({ success: false, error: err.message }); } });
 app.post('/api/login', async (req, res) => { if (!dbPool) return res.json({success: false, error: "DB not connected"}); const { username, password } = req.body; const hash = `btoa_hash_${password}`; try { const result = await dbPool.request().input('u', sql.NVarChar, username).query("SELECT * FROM Users WHERE Username = @u"); if (result.recordset.length > 0) { const user = result.recordset[0]; if (user.PasswordHash === hash) { return res.json({ success: true, user: { id: user.UserId, username: user.Username, role: user.Role, mfaEnabled: user.MfaEnabled } }); } } res.json({ success: false, error: "Invalid credentials" }); } catch (e) { res.json({ success: false, error: e.message }); } });
 
-// --- UPDATED SYSTEM CONFIG ENDPOINTS ---
+// --- SYSTEM CONFIG ---
 app.get('/api/config/system', async (req, res) => {
     if (!dbPool) return res.status(503).json({ error: "DB not connected" });
     try {
@@ -475,7 +477,6 @@ app.post('/api/config/system', async (req, res) => {
             await upsert('SyslogHost', syslogConfig.host);
             await upsert('SyslogPort', syslogConfig.port);
             await upsert('SyslogEnabled', syslogConfig.enabled);
-            // Refresh server-side syslog immediately
             await refreshSyslogConfig(dbPool);
         }
 
@@ -483,35 +484,274 @@ app.post('/api/config/system', async (req, res) => {
     } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-// MFA
+// --- MFA ---
 app.post('/api/mfa/setup', async (req, res) => { const secret = authenticator.generateSecret(); const otpauth = authenticator.keyuri(req.body.userId === 'temp-setup' ? 'SuperAdmin' : req.body.userId, 'VirtualPuppets', secret); const qr = await QRCode.toDataURL(otpauth); res.json({ secret, qrCode: qr }); });
-app.post('/api/mfa/verify', async (req, res) => { /* ...existing... */ res.json({success:true}); });
-app.post('/api/mfa/confirm', async (req, res) => { /* ...existing... */ res.json({success:true}); });
+app.post('/api/mfa/verify', async (req, res) => { res.json({success:true}); });
+app.post('/api/mfa/confirm', async (req, res) => { 
+    if (!dbPool) return res.json({success: false});
+    const { userId, secret } = req.body;
+    try {
+        if(userId === 'temp-setup') {
+            await dbPool.request().input('uid', sql.NVarChar, 'usr-super-01').input('sec', sql.NVarChar, secret).query("UPDATE Users SET MfaEnabled = 1, MfaSecret = @sec WHERE UserId = @uid");
+        } else {
+             await dbPool.request().input('uid', sql.NVarChar, userId).input('sec', sql.NVarChar, secret).query("UPDATE Users SET MfaEnabled = 1, MfaSecret = @sec WHERE UserId = @uid");
+        }
+        res.json({success:true});
+    } catch(e) { res.json({success:false}); }
+});
 
-app.get('/api/agent/commands', async (req, res) => { if (!dbPool) return res.json([]); const { actorId } = req.query; try { await dbPool.request().query(`UPDATE Actors SET LastSeen = GETDATE(), Status = CASE WHEN Status = 'COMPROMISED' THEN 'COMPROMISED' ELSE 'ONLINE' END WHERE ActorId = '${actorId}'`); const result = await dbPool.request().input('aid', sql.NVarChar, actorId).query("SELECT * FROM CommandQueue WHERE ActorId = @aid AND Status = 'PENDING'"); res.json(result.recordset.map(r => ({ id: r.JobId, command: r.Command }))); } catch(e) { res.json([]); } });
-app.post('/api/agent/alert', async (req, res) => { if (!dbPool) return res.json({success: false}); const { actorId } = req.query; const { type, details, sourceIp } = req.body; try { await dbPool.request().input('aid', sql.NVarChar, actorId || 'UNKNOWN').input('lvl', sql.NVarChar, 'CRITICAL').input('proc', sql.NVarChar, 'TRAP_MONITOR').input('msg', sql.NVarChar, details).input('src', sql.NVarChar, sourceIp || 'UNKNOWN').query("INSERT INTO Logs (LogId, ActorId, Level, Process, Message, Timestamp, SourceIp) VALUES (NEWID(), @aid, @lvl, @proc, @msg, GETDATE(), @src)"); if (actorId) { await dbPool.request().input('aid', sql.NVarChar, actorId).query("UPDATE Actors SET Status = 'COMPROMISED' WHERE ActorId = @aid"); } res.json({success: true}); } catch(e) { res.status(500).json({error: e.message}); } });
+// --- ENROLLMENT ---
+app.get('/api/enroll/pending', async (req, res) => {
+    if (!dbPool) return res.json([]);
+    try {
+        const r = await dbPool.request().query("SELECT * FROM PendingActors");
+        res.json(r.recordset.map(row => ({
+            id: row.Id, hwid: row.HwId, detectedIp: row.DetectedIp, detectedAt: row.DetectedAt, osVersion: row.OsVersion
+        })));
+    } catch(e) { res.json([]); }
+});
+
+app.post('/api/enroll/approve', async (req, res) => {
+    if (!dbPool) return res.json({success:false});
+    const { pendingId, proxyId, name } = req.body;
+    try {
+        const p = await dbPool.request().input('pid', sql.NVarChar, pendingId).query("SELECT * FROM PendingActors WHERE Id = @pid");
+        if (p.recordset.length === 0) return res.json({success:false, error: "Not found"});
+        const pending = p.recordset[0];
+        const actorId = `real-${Math.random().toString(36).substr(2,6)}`;
+        
+        await dbPool.request()
+            .input('aid', sql.NVarChar, actorId)
+            .input('hwid', sql.NVarChar, pending.HwId)
+            .input('gw', sql.NVarChar, proxyId)
+            .input('name', sql.NVarChar, name)
+            .input('ip', sql.NVarChar, pending.DetectedIp)
+            .input('os', sql.NVarChar, pending.OsVersion)
+            .query("INSERT INTO Actors (ActorId, HwId, GatewayId, Name, Status, LocalIp, LastSeen, OsVersion) VALUES (@aid, @hwid, @gw, @name, 'ONLINE', GETDATE(), @ip, @os)");
+            
+        await dbPool.request().input('pid', sql.NVarChar, pendingId).query("DELETE FROM PendingActors WHERE Id = @pid");
+        res.json({success: true});
+    } catch(e) { res.status(500).json({success:false, error:e.message}); }
+});
+
+app.delete('/api/enroll/pending/:id', async (req, res) => {
+    if (!dbPool) return res.json({success:false});
+    try {
+        await dbPool.request().input('id', sql.NVarChar, req.params.id).query("DELETE FROM PendingActors WHERE Id = @id");
+        res.json({success:true});
+    } catch(e) { res.json({success:false}); }
+});
+
+app.post('/api/enroll/generate', async (req, res) => {
+     if (!dbPool) return res.json({token: "ERROR"});
+     const { type, targetId, config } = req.body;
+     const token = `vpp-${Math.random().toString(36).substr(2,10)}`;
+     try {
+         await dbPool.request()
+            .input('t', sql.NVarChar, token)
+            .input('tp', sql.NVarChar, type)
+            .input('tid', sql.NVarChar, targetId)
+            .input('cfg', sql.NVarChar, JSON.stringify(config || {}))
+            .query("INSERT INTO EnrollmentTokens (Token, Type, TargetId, ConfigJson, CreatedAt, IsUsed) VALUES (@t, @tp, @tid, @cfg, GETDATE(), 0)");
+         res.json({token});
+     } catch(e) { res.status(500).json({error: e.message}); }
+});
+
+app.get('/api/enroll/config/:token', async (req, res) => {
+    if (!dbPool) return res.status(404).send("DB Error");
+    try {
+        const r = await dbPool.request().input('t', sql.NVarChar, req.params.token).query("SELECT * FROM EnrollmentTokens WHERE Token = @t");
+        if (r.recordset.length === 0) return res.status(404).send("Invalid Token");
+        res.send("OK");
+    } catch(e) { res.status(500).send("Error"); }
+});
+
+
+// --- GATEWAYS ---
+app.get('/api/gateways', async (req, res) => {
+    if (!dbPool) return res.json([]);
+    try {
+        const r = await dbPool.request().query("SELECT * FROM Gateways");
+        // Count actors per gateway
+        const gwCounts = {};
+        const countRes = await dbPool.request().query("SELECT GatewayId, COUNT(*) as C FROM Actors GROUP BY GatewayId");
+        countRes.recordset.forEach(row => gwCounts[row.GatewayId] = row.C);
+
+        res.json(r.recordset.map(g => ({
+            id: g.GatewayId, name: g.Name, location: g.Location, status: g.Status, ip: g.IpAddress, version: 'VPP-Proxy', connectedActors: gwCounts[g.GatewayId] || 0
+        })));
+    } catch(e) { res.json([]); }
+});
+
+app.post('/api/gateways', async (req, res) => {
+    if (!dbPool) return res.json({success: false});
+    const g = req.body;
+    try {
+        await dbPool.request()
+            .input('gid', sql.NVarChar, g.id)
+            .input('name', sql.NVarChar, g.name)
+            .input('loc', sql.NVarChar, g.location)
+            .input('ip', sql.NVarChar, g.ip)
+            .query("INSERT INTO Gateways (GatewayId, Name, Location, Status, IpAddress) VALUES (@gid, @name, @loc, 'OFFLINE', @ip)");
+        res.json({success: true});
+    } catch(e) { res.json({success:false}); }
+});
+
+app.delete('/api/gateways/:id', async (req, res) => {
+    if (!dbPool) return res.json({success: false});
+    try {
+        await dbPool.request().input('gid', sql.NVarChar, req.params.id).query("DELETE FROM Gateways WHERE GatewayId = @gid");
+        res.json({success: true});
+    } catch(e) { res.json({success:false}); }
+});
+
+
+// --- AGENT ENDPOINTS ---
+
+app.get('/api/agent/heartbeat', async (req, res) => {
+    if (!dbPool) return res.status(503).json({});
+    const { hwid } = req.query;
+    if (!hwid) return res.status(400).json({});
+    
+    try {
+        const actor = await dbPool.request().input('h', sql.NVarChar, hwid).query("SELECT ActorId, Status FROM Actors WHERE HwId = @h");
+        if (actor.recordset.length > 0) {
+            const a = actor.recordset[0];
+            await dbPool.request().input('aid', sql.NVarChar, a.ActorId).query("UPDATE Actors SET LastSeen = GETDATE() WHERE ActorId = @aid");
+            return res.json({ status: 'APPROVED', actorId: a.ActorId });
+        }
+        
+        const pending = await dbPool.request().input('h', sql.NVarChar, hwid).query("SELECT * FROM PendingActors WHERE HwId = @h");
+        if (pending.recordset.length === 0) {
+             const pid = `temp-${Math.random().toString(36).substr(2,6)}`;
+             const ip = getClientIp(req);
+             await dbPool.request()
+                .input('pid', sql.NVarChar, pid)
+                .input('h', sql.NVarChar, hwid)
+                .input('ip', sql.NVarChar, ip)
+                .query("INSERT INTO PendingActors (Id, HwId, DetectedIp, DetectedAt) VALUES (@pid, @h, @ip, GETDATE())");
+        }
+        res.json({ status: 'PENDING' });
+    } catch(e) { res.status(500).json({}); }
+});
+
+app.get('/api/agent/commands', async (req, res) => {
+    if (!dbPool) return res.json([]);
+    const { actorId } = req.query;
+    try {
+        await dbPool.request().query(`UPDATE Actors SET LastSeen = GETDATE(), Status = CASE WHEN Status = 'COMPROMISED' THEN 'COMPROMISED' ELSE 'ONLINE' END WHERE ActorId = '${actorId}'`);
+        const result = await dbPool.request().input('aid', sql.NVarChar, actorId).query("SELECT * FROM CommandQueue WHERE ActorId = @aid AND Status = 'PENDING'");
+        res.json(result.recordset.map(r => ({ id: r.JobId, command: r.Command })));
+    } catch(e) { res.json([]); }
+});
+
+app.post('/api/agent/result', async (req, res) => {
+    if (!dbPool) return res.json({});
+    const { jobId, status, output } = req.body;
+    try {
+        await dbPool.request()
+            .input('jid', sql.NVarChar, jobId)
+            .input('stat', sql.NVarChar, status)
+            .input('out', sql.NVarChar, output)
+            .query("UPDATE CommandQueue SET Status = @stat, Output = @out, UpdatedAt = GETDATE() WHERE JobId = @jid");
+        res.json({success: true});
+    } catch(e) { res.json({}); }
+});
+
+app.post('/api/agent/scan', async (req, res) => {
+    // Stores Wifi/BT results, can implement insertion into tables here
+    res.json({success:true});
+});
+
+app.post('/api/agent/alert', async (req, res) => { 
+    if (!dbPool) return res.json({success: false}); 
+    const { actorId } = req.query; 
+    const { type, details, sourceIp } = req.body; 
+    try { 
+        await dbPool.request().input('aid', sql.NVarChar, actorId || 'UNKNOWN').input('lvl', sql.NVarChar, 'CRITICAL').input('proc', sql.NVarChar, 'TRAP_MONITOR').input('msg', sql.NVarChar, details).input('src', sql.NVarChar, sourceIp || 'UNKNOWN').query("INSERT INTO Logs (LogId, ActorId, Level, Process, Message, Timestamp, SourceIp) VALUES (NEWID(), @aid, @lvl, @proc, @msg, GETDATE(), @src)"); 
+        if (actorId) { 
+            await dbPool.request().input('aid', sql.NVarChar, actorId).query("UPDATE Actors SET Status = 'COMPROMISED' WHERE ActorId = @aid"); 
+        } 
+        res.json({success: true}); 
+    } catch(e) { res.status(500).json({error: e.message}); } 
+});
+
+// --- COMMAND MANAGEMENT (UI) ---
+app.post('/api/commands/queue', async (req, res) => {
+    if (!dbPool) return res.status(503).json({error: 'DB Disconnected'});
+    const { actorId, command } = req.body;
+    try {
+        const jobId = `job-${Math.random().toString(36).substr(2,9)}`;
+        await dbPool.request()
+            .input('jid', sql.NVarChar, jobId)
+            .input('aid', sql.NVarChar, actorId)
+            .input('cmd', sql.NVarChar, command)
+            .query("INSERT INTO CommandQueue (JobId, ActorId, Command, Status, CreatedAt, UpdatedAt) VALUES (@jid, @aid, @cmd, 'PENDING', GETDATE(), GETDATE())");
+        res.json({ jobId });
+    } catch(e) { res.status(500).json({error: e.message}); }
+});
+
+app.get('/api/commands/:actorId', async (req, res) => {
+    if (!dbPool) return res.json([]);
+    try {
+        const result = await dbPool.request()
+            .input('aid', sql.NVarChar, req.params.actorId)
+            .query("SELECT * FROM CommandQueue WHERE ActorId = @aid ORDER BY CreatedAt DESC");
+        res.json(result.recordset.map(r => ({
+            id: r.JobId, actorId: r.ActorId, command: r.Command, status: r.Status, output: r.Output, createdAt: r.CreatedAt, updatedAt: r.UpdatedAt
+        })));
+    } catch(e) { res.json([]); }
+});
+
+// --- ACTOR MGMT ---
 
 app.get('/api/actors', async (req, res) => { if (!dbPool) return res.json([]); try { const result = await dbPool.request().query("SELECT * FROM Actors"); res.json(result.recordset.map(row => ({ id: row.ActorId, proxyId: row.GatewayId, name: row.Name, localIp: row.LocalIp, status: row.Status, lastSeen: row.LastSeen, osVersion: row.OsVersion, activeTunnels: row.TunnelsJson ? JSON.parse(row.TunnelsJson) : [], persona: row.Persona ? JSON.parse(row.Persona) : undefined, hasWifi: row.HasWifi, hasBluetooth: row.HasBluetooth }))); } catch (e) { res.status(500).json({error: e.message}); } });
 
-// ... (Other CRUD endpoints kept as is) ...
-
-// --- NEW REPORT HELPERS: DROPDOWNS ---
-app.get('/api/reports/filters', async (req, res) => {
-    if (!dbPool) return res.json({ attackers: [], actors: [], protocols: [] });
+app.put('/api/actors/:id', async (req, res) => {
+    if (!dbPool) return res.json({success: false});
+    const { name } = req.body;
     try {
-        const r1 = await dbPool.request().query("SELECT DISTINCT SourceIp FROM Logs WHERE SourceIp IS NOT NULL AND SourceIp != 'UNKNOWN'");
-        const r2 = await dbPool.request().query("SELECT DISTINCT ActorId, Name FROM Actors");
-        const r3 = await dbPool.request().query("SELECT DISTINCT Process FROM Logs");
-        
-        res.json({
-            attackers: r1.recordset.map(r => r.SourceIp),
-            actors: r2.recordset.map(r => ({ id: r.ActorId, name: r.Name })),
-            protocols: r3.recordset.map(r => r.Process)
-        });
-    } catch(e) { res.json({ attackers: [], actors: [], protocols: [] }); }
+        await dbPool.request().input('id', sql.NVarChar, req.params.id).input('name', sql.NVarChar, name).query("UPDATE Actors SET Name = @name WHERE ActorId = @id");
+        res.json({success: true});
+    } catch(e) { res.status(500).json({error: e.message}); }
 });
 
-// --- UPDATED REPORT GENERATION ---
+app.delete('/api/actors/:id', async (req, res) => {
+    if (!dbPool) return res.json({success: false});
+    try {
+        await dbPool.request().input('id', sql.NVarChar, req.params.id).query("DELETE FROM Actors WHERE ActorId = @id");
+        res.json({success: true});
+    } catch(e) { res.status(500).json({error: e.message}); }
+});
+
+app.put('/api/actors/:id/acknowledge', async (req, res) => {
+    if (!dbPool) return res.json({success: false});
+    try {
+        await dbPool.request().input('id', sql.NVarChar, req.params.id).query("UPDATE Actors SET Status = 'ONLINE' WHERE ActorId = @id");
+        res.json({success: true});
+    } catch(e) { res.status(500).json({error: e.message}); }
+});
+
+app.put('/api/actors/:id/tunnels', async (req, res) => {
+    if (!dbPool) return res.json({success: false});
+    const tunnels = req.body;
+    try {
+        await dbPool.request().input('id', sql.NVarChar, req.params.id).input('json', sql.NVarChar, JSON.stringify(tunnels)).query("UPDATE Actors SET TunnelsJson = @json WHERE ActorId = @id");
+        res.json({success: true});
+    } catch(e) { res.status(500).json({error: e.message}); }
+});
+
+app.put('/api/actors/:id/persona', async (req, res) => {
+    if (!dbPool) return res.json({success: false});
+    const persona = req.body;
+    try {
+        await dbPool.request().input('id', sql.NVarChar, req.params.id).input('json', sql.NVarChar, JSON.stringify(persona)).query("UPDATE Actors SET Persona = @json WHERE ActorId = @id");
+        res.json({success: true});
+    } catch(e) { res.status(500).json({error: e.message}); }
+});
+
+// --- REPORTS ---
+
 app.post('/api/reports/generate', async (req, res) => {
     if (!dbPool) return res.json({success: false});
     const { type, generatedBy, customBody, incidentDetails, incidentFilters } = req.body;
@@ -586,7 +826,24 @@ app.get('/api/reports', async (req, res) => { if (!dbPool) return res.json([]); 
 app.delete('/api/reports/:id', async (req, res) => { if (!dbPool) return res.status(503).json({success: false, error: 'DB Disconnected'}); try { await dbPool.request().input('rid', sql.NVarChar, req.params.id).query("DELETE FROM Reports WHERE ReportId = @rid"); res.json({success: true}); } catch(e) { res.status(500).json({success: false, error: e.message}); } });
 app.get('/api/logs', async (req, res) => { if (!dbPool) return res.json([]); try { const result = await dbPool.request().query(`SELECT TOP 100 L.*, A.Name as ActorName FROM Logs L LEFT JOIN Actors A ON L.ActorId = A.ActorId ORDER BY L.Timestamp DESC`); res.json(result.recordset.map(r => ({ id: r.LogId, actorId: r.ActorId, level: r.Level, process: r.Process, message: r.Message, sourceIp: r.SourceIp, timestamp: r.Timestamp, actorName: r.ActorName || 'System' }))); } catch(e) { res.json([]); } });
 
-// ... (Rest of file unchanged) ...
+// --- AUDIT ---
 app.post('/api/audit', async (req, res) => { if (!dbPool) return res.json({success: false}); const { username, action, details } = req.body; try { await dbPool.request().input('msg', sql.NVarChar, `[${username}] ${action}: ${details}`).query("INSERT INTO Logs (LogId, ActorId, Level, Process, Message, Timestamp) VALUES (NEWID(), 'system', 'INFO', 'AUDIT', @msg, GETDATE())"); sendToSyslog('INFO', 'AUDIT', `${username} ${action}: ${details}`); res.json({success: true}); } catch(e) { res.json({success: false}); } });
-// ...
+
+// --- WIRELESS RECON ---
+app.get('/api/recon/wifi', async (req, res) => {
+    if (!dbPool) return res.json([]);
+    try { const r = await dbPool.request().query("SELECT * FROM WifiNetworks ORDER BY LastSeen DESC"); res.json(r.recordset); } catch(e) { res.json([]); }
+});
+app.get('/api/recon/bluetooth', async (req, res) => {
+    if (!dbPool) return res.json([]);
+    try { const r = await dbPool.request().query("SELECT * FROM BluetoothDevices ORDER BY LastSeen DESC"); res.json(r.recordset); } catch(e) { res.json([]); }
+});
+
+// --- USER CRUD ---
+app.get('/api/users', async (req, res) => { if (!dbPool) return res.json([]); try { const r = await dbPool.request().query("SELECT UserId, Username, Role, MfaEnabled FROM Users"); res.json(r.recordset.map(u => ({ id: u.UserId, username: u.Username, role: u.Role, mfaEnabled: u.MfaEnabled }))); } catch(e) { res.json([]); } });
+app.post('/api/users', async (req, res) => { if (!dbPool) return res.json({success:false}); const u = req.body; try { await dbPool.request().input('id', sql.NVarChar, u.id).input('name', sql.NVarChar, u.username).input('hash', sql.NVarChar, u.passwordHash).input('role', sql.NVarChar, u.role).query("INSERT INTO Users (UserId, Username, PasswordHash, Role) VALUES (@id, @name, @hash, @role)"); res.json({success:true}); } catch(e) { res.json({success:false}); } });
+app.put('/api/users/:id', async (req, res) => { if (!dbPool) return res.json({success:false}); const u = req.body; try { await dbPool.request().input('id', sql.NVarChar, req.params.id).input('role', sql.NVarChar, u.role).query("UPDATE Users SET Role = @role WHERE UserId = @id"); if(u.passwordHash) await dbPool.request().input('id', sql.NVarChar, req.params.id).input('hash', sql.NVarChar, u.passwordHash).query("UPDATE Users SET PasswordHash = @hash WHERE UserId = @id"); res.json({success:true}); } catch(e) { res.json({success:false}); } });
+app.delete('/api/users/:id', async (req, res) => { if (!dbPool) return res.json({success:false}); try { await dbPool.request().input('id', sql.NVarChar, req.params.id).query("DELETE FROM Users WHERE UserId = @id"); res.json({success:true}); } catch(e) { res.json({success:false}); } });
+app.post('/api/users/:id/reset-mfa', async (req, res) => { if (!dbPool) return res.json({success:false}); try { await dbPool.request().input('id', sql.NVarChar, req.params.id).query("UPDATE Users SET MfaEnabled = 0, MfaSecret = NULL WHERE UserId = @id"); res.json({success:true}); } catch(e) { res.json({success:false}); } });
+
 app.listen(port, '0.0.0.0', () => { console.log(`Server listening on port ${port}`); });
