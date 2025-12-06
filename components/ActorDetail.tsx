@@ -1,17 +1,10 @@
-
-
-
-
-
-
-
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { Actor, LogEntry, ActorStatus, AiAnalysis, ProxyGateway, HoneyFile, ActiveTunnel, DevicePersona, CommandJob, LogLevel, User, UserPreferences, ForensicSnapshot, ForensicProcess, AttackSession } from '../types';
 import { executeRemoteCommand, getAvailableCloudTraps, toggleTunnelMock, AVAILABLE_PERSONAS, generateRandomLog, performForensicScan, getAttackSessions } from '../services/mockService';
 import { analyzeLogsWithAi, generateDeceptionContent } from '../services/aiService';
 import { updateActorName, queueSystemCommand, getActorCommands, deleteActor, updateActorTunnels, updateActorPersona, resetActorStatus, resetActorToFactory, updateActorHoneyFiles, toggleActorSentinel } from '../services/dbService';
 import Terminal from './Terminal';
-import { Cpu, Wifi, Shield, Bot, ArrowLeft, BrainCircuit, Router, Network, FileCode, Check, Activity, X, Printer, Camera, Server, Edit2, Trash2, Loader, ShieldCheck, AlertOctagon, Skull, ArrowRight, Terminal as TerminalIcon, Globe, ScanSearch, Power, RefreshCw, History as HistoryIcon, Thermometer, RefreshCcw, Siren, Eye, Fingerprint, Info, Cable, Search, Lock, Zap, FileText, HardDrive, List, Play, Pause, FastForward, Rewind, Film } from 'lucide-react';
+import { Cpu, Wifi, Shield, Bot, ArrowLeft, BrainCircuit, Router, Network, FileCode, Check, Activity, X, Printer, Camera, Server, Edit2, Trash2, Loader, ShieldCheck, AlertOctagon, Skull, ArrowRight, Terminal as TerminalIcon, Globe, ScanSearch, Power, RefreshCw, History as HistoryIcon, Thermometer, RefreshCcw, Siren, Eye, Fingerprint, Info, Cable, Search, Lock, Zap, FileText, HardDrive, List, Play, Pause, FastForward, Rewind, Film, Database, Monitor } from 'lucide-react';
 
 interface ActorDetailProps {
   actor: Actor;
@@ -847,7 +840,7 @@ const ActorDetail: React.FC<ActorDetailProps> = ({ actor, gateway, logs: initial
           <button onClick={() => setActiveTab('OVERVIEW')} className={`pb-3 text-sm font-bold border-b-2 transition-colors whitespace-nowrap ${activeTab === 'OVERVIEW' ? 'border-blue-500 text-blue-400' : 'border-transparent text-slate-500 hover:text-white'}`}>OVERVIEW</button>
           <button onClick={() => setActiveTab('TERMINAL')} className={`pb-3 text-sm font-bold border-b-2 transition-colors whitespace-nowrap ${activeTab === 'TERMINAL' ? 'border-blue-500 text-blue-400' : 'border-transparent text-slate-500 hover:text-white'}`}>LIVE TERMINAL</button>
           <button onClick={() => setActiveTab('DECEPTION')} className={`pb-3 text-sm font-bold border-b-2 transition-colors whitespace-nowrap ${activeTab === 'DECEPTION' ? 'border-purple-500 text-purple-400' : 'border-transparent text-slate-500 hover:text-white'}`}>DECEPTION & PERSONA</button>
-          <button onClick={() => setActiveTab('NETWORK')} className={`pb-3 text-sm font-bold border-b-2 transition-colors whitespace-nowrap ${activeTab === 'NETWORK' ? 'border-emerald-500 text-emerald-400' : 'border-transparent text-slate-500 hover:text-white'}`}>NETWORK & TUNNELS</button>
+          <button onClick={() => setActiveTab('NETWORK')} className={`pb-3 text-sm font-bold border-b-2 transition-colors whitespace-nowrap ${activeTab === 'NETWORK' ? 'border-emerald-500 text-emerald-400' : 'border-transparent text-slate-500 hover:text-white'}`}>TRAP PROJECTOR</button>
           <button onClick={() => setActiveTab('FORENSICS')} className={`pb-3 text-sm font-bold border-b-2 transition-colors whitespace-nowrap ${activeTab === 'FORENSICS' ? 'border-red-500 text-red-400' : 'border-transparent text-slate-500 hover:text-white'}`}>FORENSICS</button>
       </div>
 
@@ -1249,13 +1242,14 @@ const ActorDetail: React.FC<ActorDetailProps> = ({ actor, gateway, logs: initial
 
       {activeTab === 'NETWORK' && (
           <div className="space-y-6">
+              {/* SENTINEL MODE BANNER */}
               <div className={`rounded-xl border p-6 shadow-lg transition-all ${isSentinelEnabled ? 'bg-red-900/10 border-red-500/50 shadow-red-900/20' : 'bg-slate-800 border-slate-700'}`}>
                   <div className="flex justify-between items-start">
                       <div className="flex items-start">
                           <div className={`p-3 rounded-full mr-4 ${isSentinelEnabled ? 'bg-red-600 text-white animate-pulse' : 'bg-slate-700 text-slate-400'}`}><Siren className="w-6 h-6" /></div>
                           <div>
                               <h3 className={`text-lg font-bold ${isSentinelEnabled ? 'text-red-400' : 'text-white'}`}>TCP Sentinel (Paranoid Mode)</h3>
-                              <p className="text-slate-400 text-sm mt-1 max-w-md">When enabled, <span className="font-bold text-white">ANY</span> inbound connection attempt (SYN packet) to this actor will trigger a <span className="font-bold text-red-400">CRITICAL</span> alert, regardless of signature matching. Use during active lockdowns.</p>
+                              <p className="text-slate-400 text-sm mt-1 max-w-md">When enabled, <span className="font-bold text-white">ANY</span> inbound connection attempt (SYN packet) to this actor will trigger a <span className="font-bold text-red-400">CRITICAL</span> alert. Use during active lockdowns.</p>
                           </div>
                       </div>
                       <label className="relative inline-flex items-center cursor-pointer mt-1">
@@ -1264,45 +1258,131 @@ const ActorDetail: React.FC<ActorDetailProps> = ({ actor, gateway, logs: initial
                       </label>
                   </div>
               </div>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                  <div className="bg-slate-800 rounded-xl border border-slate-700 p-6 shadow-lg">
-                      <h3 className="text-lg font-bold text-white mb-4 flex items-center"><Network className="w-5 h-5 mr-2 text-emerald-400" /> Active Cloud Tunnels</h3>
-                      <div className="space-y-4">
-                          {tunnels.length === 0 && <div className="text-center py-8 text-slate-500 text-sm">No active tunnels. Services are local only.</div>}
+
+              {/* TRAP PROJECTOR UI */}
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6 h-[500px]">
+                  
+                  {/* LEFT: Active Tunnels Dashboard */}
+                  <div className="bg-slate-800 rounded-xl border border-slate-700 p-6 shadow-lg flex flex-col">
+                      <h3 className="text-lg font-bold text-white mb-2 flex items-center"><Network className="w-5 h-5 mr-2 text-emerald-400" /> Active Cloud Tunnels</h3>
+                      <p className="text-slate-400 text-xs mb-4">Live connections forwarded to the central server honeypots.</p>
+                      
+                      <div className="flex-1 space-y-4 overflow-y-auto pr-2">
+                          {tunnels.length === 0 && (
+                              <div className="h-full flex flex-col items-center justify-center text-slate-500 opacity-50 border-2 border-dashed border-slate-700 rounded-lg">
+                                  <Monitor className="w-12 h-12 mb-3" />
+                                  <p className="text-sm font-bold">No Active Projections</p>
+                                  <p className="text-xs">Select a trap from the catalog to project.</p>
+                              </div>
+                          )}
                           {tunnels.map(t => (
-                              <div key={t.id} className="bg-slate-900 border border-emerald-900/50 p-4 rounded-lg flex justify-between items-center">
-                                  <div><div className="font-bold text-emerald-400 text-sm">{t.trap.serviceType} Trap</div><div className="text-xs text-slate-400 font-mono mt-1">:{t.localPort} &rarr; {t.remoteEndpoint}</div><div className="text-[10px] text-slate-600 mt-1">Uptime: {Math.floor(Math.random()*100)}m • {t.status}</div></div>
-                                  <button onClick={() => handleStopTunnel(t.id)} className="bg-slate-800 hover:bg-red-900/50 text-slate-400 hover:text-red-400 p-2 rounded transition-colors"><Power className="w-4 h-4" /></button>
+                              <div key={t.id} className="bg-slate-900 border border-emerald-900/50 p-4 rounded-lg relative overflow-hidden group">
+                                  {/* Animated Activity Line */}
+                                  <div className="absolute top-0 left-0 w-full h-0.5 bg-gradient-to-r from-transparent via-emerald-500 to-transparent opacity-50 animate-shimmer"></div>
+                                  
+                                  <div className="flex justify-between items-start">
+                                      <div>
+                                          <div className="flex items-center">
+                                              <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse mr-2"></span>
+                                              <div className="font-bold text-emerald-400 text-sm">{t.trap.name}</div>
+                                          </div>
+                                          <div className="text-xs text-slate-400 font-mono mt-1 ml-4">
+                                              Local Port: <span className="text-white font-bold">{t.localPort}</span> &rarr; Cloud
+                                          </div>
+                                          <div className="text-[10px] text-slate-600 mt-2 ml-4 flex items-center">
+                                              <Activity className="w-3 h-3 mr-1" /> Uptime: {Math.floor(Math.random()*100)}m
+                                          </div>
+                                      </div>
+                                      <button onClick={() => handleStopTunnel(t.id)} className="bg-slate-800 hover:bg-red-900/50 text-slate-400 hover:text-red-400 p-2 rounded transition-colors border border-slate-700 hover:border-red-500">
+                                          <Power className="w-4 h-4" />
+                                      </button>
+                                  </div>
                               </div>
                           ))}
                       </div>
                   </div>
-                  <div className="bg-slate-800 rounded-xl border border-slate-700 p-6 shadow-lg">
-                      <h3 className="text-lg font-bold text-white mb-4 flex items-center"><Globe className="w-5 h-5 mr-2 text-blue-400" /> Cloud Services (Forwarding)</h3>
-                      <p className="text-slate-400 text-xs mb-4">Open ports on this device that forward traffic to high-interaction cloud honeypots.</p>
-                      <div className="space-y-3 mb-6 max-h-[400px] overflow-y-auto pr-2 scrollbar-thin scrollbar-thumb-slate-700">
+
+                  {/* RIGHT: Trap Catalog */}
+                  <div className="bg-slate-800 rounded-xl border border-slate-700 p-6 shadow-lg flex flex-col">
+                      <h3 className="text-lg font-bold text-white mb-2 flex items-center"><Database className="w-5 h-5 mr-2 text-blue-400" /> Trap Catalog</h3>
+                      <p className="text-slate-400 text-xs mb-4">Project high-interaction vulnerabilities from the server to this device.</p>
+                      
+                      <div className="flex-1 space-y-2 overflow-y-auto pr-2 scrollbar-thin scrollbar-thumb-slate-700">
                           {getAvailableCloudTraps().map(trap => {
                               const isActive = tunnels.some(t => t.trap.id === trap.id);
                               const isPending = pendingTunnel === trap.id;
                               const conflictingPorts = getTunnelConflicts(trap.id);
                               const hasConflict = conflictingPorts.length > 0 && !isActive;
+                              
                               return (
                                   <div key={trap.id} className="relative group">
-                                      <button onClick={() => !hasConflict && handleToggleTunnel(trap.id)} disabled={isPending || (hasConflict && !isActive)} className={`w-full text-left p-3 rounded border flex items-center justify-between transition-all ${isActive ? 'bg-emerald-900/10 border-emerald-500/50' : hasConflict ? 'bg-slate-900/40 border-slate-800 cursor-not-allowed grayscale opacity-60' : 'bg-slate-900 border-slate-700 hover:border-blue-500'}`}>
-                                          <div><div className={`font-bold text-sm ${isActive ? 'text-emerald-400' : 'text-slate-200'}`}>{trap.name}</div><div className="text-xs text-slate-500">{trap.serviceType} {hasConflict && <span className="text-red-400 ml-1">(Port Blocked)</span>}</div></div>
-                                          <div className="flex items-center">{isPending ? <Loader className="w-4 h-4 animate-spin text-blue-400" /> : (<div className={`w-8 h-4 rounded-full relative transition-colors ${isActive ? 'bg-emerald-500' : 'bg-slate-700'}`}><div className={`absolute top-0.5 w-3 h-3 bg-white rounded-full transition-all ${isActive ? 'left-4.5' : 'left-0.5'}`} style={{ left: isActive ? '18px' : '2px' }} /></div>)}</div>
+                                      <button 
+                                        onClick={() => !hasConflict && handleToggleTunnel(trap.id)} 
+                                        disabled={isPending || (hasConflict && !isActive)} 
+                                        className={`w-full text-left p-3 rounded border flex items-center justify-between transition-all ${
+                                            isActive 
+                                            ? 'bg-emerald-900/10 border-emerald-500/50' 
+                                            : hasConflict 
+                                                ? 'bg-slate-900/40 border-slate-800 cursor-not-allowed grayscale opacity-60' 
+                                                : 'bg-slate-900 border-slate-700 hover:border-blue-500 hover:bg-slate-800'
+                                        }`}
+                                      >
+                                          <div className="flex items-center">
+                                              <div className={`p-2 rounded mr-3 ${isActive ? 'bg-emerald-500/20 text-emerald-400' : 'bg-slate-800 text-slate-500'}`}>
+                                                  <Server className="w-4 h-4" />
+                                              </div>
+                                              <div>
+                                                  <div className={`font-bold text-sm ${isActive ? 'text-emerald-400' : 'text-slate-200'}`}>{trap.name}</div>
+                                                  <div className="text-xs text-slate-500">{trap.serviceType} <span className="opacity-50">({DEFAULT_TRAP_PORTS[trap.id] || 'Dynamic'})</span></div>
+                                              </div>
+                                          </div>
+                                          
+                                          <div className="flex items-center">
+                                              {isPending ? (
+                                                  <Loader className="w-4 h-4 animate-spin text-blue-400" />
+                                              ) : (
+                                                  <div className={`w-8 h-4 rounded-full relative transition-colors ${isActive ? 'bg-emerald-500' : 'bg-slate-700'}`}>
+                                                      <div className={`absolute top-0.5 w-3 h-3 bg-white rounded-full transition-all ${isActive ? 'left-[18px]' : 'left-0.5'}`} />
+                                                  </div>
+                                              )}
+                                          </div>
                                       </button>
-                                      {hasConflict && <div className="absolute inset-0 hidden group-hover:flex items-center justify-center pointer-events-none z-10"><div className="bg-red-900/90 text-red-200 text-xs px-2 py-1 rounded shadow-lg border border-red-500/50 backdrop-blur-[1px]">Port {conflictingPorts.join(', ')} occupied</div></div>}
+                                      
+                                      {hasConflict && (
+                                          <div className="absolute inset-0 hidden group-hover:flex items-center justify-center pointer-events-none z-10">
+                                              <div className="bg-red-900/90 text-red-200 text-xs px-2 py-1 rounded shadow-lg border border-red-500/50 backdrop-blur-[1px]">
+                                                  Port {conflictingPorts.join(', ')} occupied
+                                              </div>
+                                          </div>
+                                      )}
                                   </div>
                               );
                           })}
                       </div>
-                      <div className="border-t border-slate-700 pt-4">
-                          <h4 className="text-xs font-bold text-slate-400 uppercase mb-2">Custom Port Forward</h4>
+
+                      {/* Custom Forwarding */}
+                      <div className="border-t border-slate-700 pt-4 mt-2">
+                          <h4 className="text-xs font-bold text-slate-400 uppercase mb-2">Custom Projection</h4>
                           <div className="flex gap-2">
-                              <input placeholder="Port (e.g. 8080)" className="bg-slate-900 border border-slate-600 rounded px-2 py-1 text-xs text-white outline-none w-24" value={customPort} onChange={e => setCustomPort(e.target.value)} />
-                              <input placeholder="Service Name" className="bg-slate-900 border border-slate-600 rounded px-2 py-1 text-xs text-white outline-none flex-1" value={customService} onChange={e => setCustomService(e.target.value)} />
-                              <button onClick={handleStartCustomTunnel} disabled={!customPort} className="bg-blue-600 hover:bg-blue-500 text-white px-3 py-1 rounded text-xs font-bold">Open</button>
+                              <input 
+                                placeholder="Port (e.g. 8080)" 
+                                className="bg-slate-900 border border-slate-600 rounded px-2 py-2 text-xs text-white outline-none w-24 focus:border-blue-500" 
+                                value={customPort} 
+                                onChange={e => setCustomPort(e.target.value)} 
+                              />
+                              <input 
+                                placeholder="Service Name" 
+                                className="bg-slate-900 border border-slate-600 rounded px-2 py-2 text-xs text-white outline-none flex-1 focus:border-blue-500" 
+                                value={customService} 
+                                onChange={e => setCustomService(e.target.value)} 
+                              />
+                              <button 
+                                onClick={handleStartCustomTunnel} 
+                                disabled={!customPort} 
+                                className="bg-blue-600 hover:bg-blue-500 text-white px-3 py-1 rounded text-xs font-bold disabled:opacity-50"
+                              >
+                                OPEN
+                              </button>
                           </div>
                       </div>
                   </div>
