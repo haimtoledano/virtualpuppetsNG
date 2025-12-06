@@ -209,7 +209,8 @@ done
 
         # TELEMETRY COLLECTION
         # CPU: Approximate usage (100 - idle) from top batch mode
-        CPU_USAGE=\$(top -bn1 | grep "Cpu(s)" | sed "s/.*, *\([0-9.]*\)%* id.*/\1/" | awk '{print 100 - \$1}')
+        # Fixed regex backslashes for JS string interpolation
+        CPU_USAGE=\$(top -bn1 | grep "Cpu(s)" | sed "s/.*, *\\([0-9.]*\\)%* id.*/\\1/" | awk '{print 100 - \$1}')
         
         # RAM: Percent Used
         RAM_USAGE=\$(free | grep Mem | awk '{print \$3/\$2 * 100.0}')
