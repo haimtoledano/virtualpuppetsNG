@@ -8,7 +8,8 @@
 
 
 
-import { Actor, ProxyGateway, User, DbConfig, LogEntry, SystemConfig, Report, CommandJob, PendingActor, DevicePersona, WifiNetwork, BluetoothDevice } from '../types';
+
+import { Actor, ProxyGateway, User, DbConfig, LogEntry, SystemConfig, Report, CommandJob, PendingActor, DevicePersona, WifiNetwork, BluetoothDevice, AttackSession } from '../types';
 
 const API_BASE = '/api';
 
@@ -300,6 +301,15 @@ export const deleteReport = async (id: string): Promise<boolean> => {
         await fetch(`${API_BASE}/reports/${id}`, { method: 'DELETE' });
         return true;
     } catch { return false; }
+};
+
+// --- NEW: FETCH SESSIONS ---
+export const getAttackSessions = async (): Promise<AttackSession[]> => {
+    try {
+        const res = await fetch(`${API_BASE}/sessions`);
+        if (!res.ok) return [];
+        return await res.json();
+    } catch (e) { return []; }
 };
 
 // --- NEW: Delete Session ---

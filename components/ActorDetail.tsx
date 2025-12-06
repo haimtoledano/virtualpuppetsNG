@@ -1,11 +1,13 @@
 
 
 
+
+
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { Actor, LogEntry, ActorStatus, AiAnalysis, ProxyGateway, HoneyFile, ActiveTunnel, DevicePersona, CommandJob, LogLevel, User, UserPreferences, ForensicSnapshot, ForensicProcess, AttackSession } from '../types';
 import { executeRemoteCommand, getAvailableCloudTraps, toggleTunnelMock, AVAILABLE_PERSONAS, generateRandomLog, performForensicScan, getAttackSessions, deleteAttackSession } from '../services/mockService';
 import { analyzeLogsWithAi, generateDeceptionContent } from '../services/aiService';
-import { updateActorName, queueSystemCommand, getActorCommands, deleteActor, updateActorTunnels, updateActorPersona, resetActorStatus, resetActorToFactory, updateActorHoneyFiles, toggleActorSentinel, generateReport, deleteAttackSession as deleteAttackSessionProd } from '../services/dbService';
+import { updateActorName, queueSystemCommand, getActorCommands, deleteActor, updateActorTunnels, updateActorPersona, resetActorStatus, resetActorToFactory, updateActorHoneyFiles, toggleActorSentinel, generateReport, deleteAttackSession as deleteAttackSessionProd, getAttackSessions as getAttackSessionsProd } from '../services/dbService';
 import Terminal from './Terminal';
 import { Cpu, Wifi, Shield, Bot, ArrowLeft, BrainCircuit, Router, Network, FileCode, Check, Activity, X, Printer, Camera, Server, Edit2, Trash2, Loader, ShieldCheck, AlertOctagon, Skull, ArrowRight, Terminal as TerminalIcon, Globe, ScanSearch, Power, RefreshCw, History as HistoryIcon, Thermometer, RefreshCcw, Siren, Eye, Fingerprint, Info, Cable, Search, Lock, Zap, FileText, HardDrive, List, Play, Pause, FastForward, Rewind, Film, Database, Monitor, Save } from 'lucide-react';
 
@@ -31,6 +33,12 @@ const DEFAULT_TRAP_PORTS: Record<string, number> = {
     'trap-telnet': 23,
     'trap-vnc': 5900,
     'trap-postgres': 5432
+};
+
+const SERVER_TRAP_PORTS: Record<string, number> = {
+    'trap-ftp': 10021,
+    'trap-telnet': 10023,
+    'trap-redis': 10079
 };
 
 // --- GAUGE COMPONENT ---
@@ -242,16 +250,22 @@ const ActorDetail: React.FC<ActorDetailProps> = ({ actor, gateway, logs: initial
   // --- LOAD SESSIONS WHEN TAB CHANGES ---
   const handleLoadSessions = async () => {
       setIsRefreshingSessions(true);
-      // Construct current state from hooks to ensure new tunnels are passed to mock
-      const currentActorState = { 
-          ...actor, 
-          activeTunnels: tunnels, 
-          persona: activePersona,
-          status: (tunnels.length > 0 || isSentinelEnabled) ? ActorStatus.COMPROMISED : actor.status 
-      };
       
-      const sessions = await getAttackSessions(actor.id, currentActorState);
-      setRecordedSessions(sessions);
+      if (isProduction) {
+          // Use real API in production
+          const sessions = await getAttackSessionsProd();
+          setRecordedSessions(sessions);
+      } else {
+          // Mock mode
+          const currentActorState = { 
+              ...actor, 
+              activeTunnels: tunnels, 
+              persona: activePersona,
+              status: (tunnels.length > 0 || isSentinelEnabled) ? ActorStatus.COMPROMISED : actor.status 
+          };
+          const sessions = await getAttackSessions(actor.id, currentActorState);
+          setRecordedSessions(sessions);
+      }
       setIsRefreshingSessions(false);
   };
 
@@ -259,7 +273,7 @@ const ActorDetail: React.FC<ActorDetailProps> = ({ actor, gateway, logs: initial
       if (activeTab === 'FORENSICS' && forensicView === 'SESSIONS') {
           handleLoadSessions();
       }
-  }, [activeTab, forensicView, actor.id, actor, tunnels, activePersona, isSentinelEnabled]);
+  }, [activeTab, forensicView, actor.id, actor, tunnels, activePersona, isSentinelEnabled, isProduction]);
 
   // --- REPLAY LOGIC ---
   useEffect(() => {
@@ -536,7 +550,19 @@ const ActorDetail: React.FC<ActorDetailProps> = ({ actor, gateway, logs: initial
       const updatedTunnels = [...tunnels, newTunnel];
       setTunnels(updatedTunnels);
       if (isProduction) await updateActorTunnels(actor.id, updatedTunnels);
-      await handleCommand(`nohup socat TCP-LISTEN:${port},fork SYSTEM:'echo VPP_TRAP_SINK; cat' >/dev/null 2>&1 & # ${newTunnel.id}`);
+      
+      // Determine server IP (assume browser can resolve it, agent likely can too if DNS is setup, otherwise default to window.location.hostname for simple setups)
+      const serverIp = window.location.hostname;
+      const remotePort = SERVER_TRAP_PORTS[trapId];
+
+      if (isProduction && remotePort) {
+           // Tunnel to REAL Honeypot on Server
+           await handleCommand(`nohup socat TCP-LISTEN:${port},fork TCP:${serverIp}:${remotePort} >/dev/null 2>&1 & # ${newTunnel.id}`);
+      } else {
+           // Local Echo or Mock
+           await handleCommand(`nohup socat TCP-LISTEN:${port},fork SYSTEM:'echo VPP_TRAP_SINK; cat' >/dev/null 2>&1 & # ${newTunnel.id}`);
+      }
+      
       setPendingTunnel(null);
   };
 
@@ -1168,7 +1194,7 @@ const ActorDetail: React.FC<ActorDetailProps> = ({ actor, gateway, logs: initial
                                                     <span className="text-[10px] bg-red-900/50 text-red-300 px-1.5 rounded border border-red-800">{session.protocol}</span>
                                                 </div>
                                                 <div className="text-xs text-slate-400 font-mono mb-1">{session.attackerIp}</div>
-                                                <div className="text-[10px] text-slate-600">{session.durationSeconds}s Duration • {session.frames.length} Events</div>
+                                                <div className="text-[10px] text-slate-600">{session.durationSeconds.toFixed(1)}s Duration • {session.frames.length} Events</div>
                                                 
                                                 <button 
                                                     onClick={(e) => handleDeleteSession(e, session.id)}

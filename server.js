@@ -1,9 +1,3 @@
-
-
-
-
-
-
 import express from 'express';
 import path from 'path';
 import fs from 'fs';
@@ -14,6 +8,7 @@ import bodyParser from 'body-parser';
 import { authenticator } from 'otplib';
 import QRCode from 'qrcode';
 import dgram from 'dgram';
+import net from 'net';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -23,13 +18,24 @@ const port = process.env.PORT || 8080;
 const distPath = path.join(__dirname, 'dist');
 const CONFIG_FILE = path.join(__dirname, 'db-config.json');
 
+// --- HONEYPOT CONFIG ---
+const HONEYPOT_PORTS = {
+    FTP: 10021,
+    TELNET: 10023,
+    REDIS: 10079,
+    HTTP: 10080
+};
+
+// In-memory storage for active/recorded sessions
+// In a real app, flush this to DB
+let recordedSessions = []; 
+
 // --- MFA CONFIGURATION ---
 authenticator.options = { window: [2, 2] };
 
 app.use(cors());
 
 // --- MODIFIED BODY PARSER FOR DEBUGGING ---
-// We use 'verify' to capture the raw body content before JSON parsing fails
 app.use(bodyParser.json({
     limit: '10mb',
     verify: (req, res, buf) => {
@@ -52,6 +58,136 @@ const getClientIp = (req) => {
     const ip = forwarded ? forwarded.split(',')[0] : req.socket.remoteAddress;
     return ip ? ip.replace('::ffff:', '') : '0.0.0.0';
 };
+
+// --- REAL TCP HONEYPOTS ---
+
+const createSession = (socket, protocol) => {
+    const startTime = Date.now();
+    const sessionId = `sess-${protocol.toLowerCase()}-${startTime}`;
+    const remoteAddress = socket.remoteAddress ? socket.remoteAddress.replace('::ffff:', '') : 'Unknown';
+    
+    const session = {
+        id: sessionId,
+        actorId: 'unknown', // We infer this from context or keep generic
+        attackerIp: remoteAddress, // In forwarded mode, this is the Actor IP
+        protocol: protocol,
+        startTime: new Date(startTime),
+        durationSeconds: 0,
+        frames: []
+    };
+
+    recordedSessions.unshift(session);
+    // Keep only last 50 sessions
+    if (recordedSessions.length > 50) recordedSessions.pop();
+
+    return {
+        session,
+        record: (type, data) => {
+            const frame = {
+                time: Date.now() - startTime,
+                type: type, // 'INPUT' or 'OUTPUT'
+                data: data.toString()
+            };
+            session.frames.push(frame);
+            session.durationSeconds = (Date.now() - startTime) / 1000;
+        }
+    };
+};
+
+// 1. FTP Honeypot (Simulates VSFTPD)
+const startFtpServer = () => {
+    const server = net.createServer((socket) => {
+        const { record } = createSession(socket, 'FTP');
+        
+        const send = (msg) => {
+            socket.write(msg);
+            record('OUTPUT', msg);
+        };
+
+        // Initial Banner
+        setTimeout(() => send('220 (vsFTPd 2.3.4)\r\n'), 200);
+
+        socket.on('data', (data) => {
+            record('INPUT', data);
+            const cmd = data.toString().trim();
+            
+            if (cmd.startsWith('USER')) {
+                send('331 Please specify the password.\r\n');
+            } else if (cmd.startsWith('PASS')) {
+                setTimeout(() => send('530 Login incorrect.\r\n'), 500);
+            } else if (cmd.startsWith('QUIT')) {
+                send('221 Goodbye.\r\n');
+                socket.end();
+            } else {
+                send('500 Unknown command.\r\n');
+            }
+        });
+    });
+    server.listen(HONEYPOT_PORTS.FTP, () => console.log(`[Honeypot] FTP listening on ${HONEYPOT_PORTS.FTP}`));
+};
+
+// 2. Telnet Honeypot (Simulates Ubuntu Login)
+const startTelnetServer = () => {
+    const server = net.createServer((socket) => {
+        const { record } = createSession(socket, 'TELNET');
+        let state = 'LOGIN';
+
+        const send = (msg) => {
+            socket.write(msg);
+            record('OUTPUT', msg);
+        };
+
+        setTimeout(() => send('\r\nUbuntu 20.04.6 LTS\r\nserver login: '), 200);
+
+        socket.on('data', (data) => {
+            record('INPUT', data); // Telnet sends char by char often, but for simplicity
+            const input = data.toString().trim();
+            
+            if (state === 'LOGIN') {
+                send('Password: ');
+                state = 'PASS';
+            } else if (state === 'PASS') {
+                setTimeout(() => {
+                    send('\r\nLogin incorrect\r\n\r\nserver login: ');
+                    state = 'LOGIN';
+                }, 800);
+            }
+        });
+    });
+    server.listen(HONEYPOT_PORTS.TELNET, () => console.log(`[Honeypot] Telnet listening on ${HONEYPOT_PORTS.TELNET}`));
+};
+
+// 3. Redis Honeypot
+const startRedisServer = () => {
+    const server = net.createServer((socket) => {
+        const { record } = createSession(socket, 'REDIS');
+        
+        const send = (msg) => {
+            socket.write(msg);
+            record('OUTPUT', msg);
+        };
+
+        socket.on('data', (data) => {
+            record('INPUT', data);
+            const cmd = data.toString().trim().toUpperCase();
+            
+            if (cmd.includes('CONFIG') || cmd.includes('GET') || cmd.includes('SET')) {
+                 send('-NOAUTH Authentication required.\r\n');
+            } else if (cmd.includes('AUTH')) {
+                 send('-ERR invalid password\r\n');
+            } else {
+                 send('-ERR unknown command\r\n');
+            }
+        });
+    });
+    server.listen(HONEYPOT_PORTS.REDIS, () => console.log(`[Honeypot] Redis listening on ${HONEYPOT_PORTS.REDIS}`));
+};
+
+// Start Honeypots
+startFtpServer();
+startTelnetServer();
+startRedisServer();
+
 
 // --- SYSLOG FORWARDER ---
 let syslogConfig = { host: '', port: 514, enabled: false };
@@ -908,6 +1044,17 @@ app.get('/api/commands/:actorId', async (req, res) => {
         })));
     } catch(e) { res.json([]); }
 });
+
+// --- SESSION RECORDINGS API ---
+app.get('/api/sessions', (req, res) => {
+    res.json(recordedSessions);
+});
+
+app.delete('/api/sessions/:id', (req, res) => {
+    recordedSessions = recordedSessions.filter(s => s.id !== req.params.id);
+    res.json({ success: true });
+});
+
 
 // --- ACTOR MGMT ---
 
