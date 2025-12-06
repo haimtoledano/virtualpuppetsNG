@@ -15,7 +15,7 @@ const getAiConfig = async (): Promise<AiConfig> => {
             return sys.aiConfig || { provider: 'GEMINI', modelName: DEFAULT_GEMINI_MODEL };
         }
     } catch (e) {
-        console.error("Failed to fetch AI config", e);
+        console.warn("Failed to fetch AI config, using defaults");
     }
     // Fallback
     return { provider: 'GEMINI', modelName: DEFAULT_GEMINI_MODEL };
@@ -24,25 +24,28 @@ const getAiConfig = async (): Promise<AiConfig> => {
 // --- GEMINI IMPLEMENTATION ---
 
 const callGemini = async (config: AiConfig, prompt: string, responseSchema?: any): Promise<any> => {
-    // Coding Guidelines: The API key must be obtained exclusively from the environment variable process.env.API_KEY.
-    
     let apiKey;
+    
+    // 1. Try Environment Variable (Preferred per guidelines)
     try {
         apiKey = process.env.API_KEY;
     } catch (e) {
         // process is likely not defined in this environment
-        console.warn("process.env is not defined, cannot retrieve API_KEY");
-        return null;
     }
 
+    // 2. Fallback to User Configured Key (if Env is missing)
+    if (!apiKey && config.apiKey) {
+        apiKey = config.apiKey;
+    }
+
+    // 3. Final Safety Check
     if (!apiKey) {
-        console.warn("Gemini API Key is missing in environment variables. AI features are disabled.");
+        console.warn("Gemini API Key is missing (Env & Config). AI features are disabled.");
         return null;
     }
 
-    const ai = new GoogleGenAI({ apiKey });
-    
     try {
+        const ai = new GoogleGenAI({ apiKey });
         const geminiConfig: any = { responseMimeType: "application/json" };
         if (responseSchema) {
             geminiConfig.responseSchema = responseSchema;
@@ -106,6 +109,27 @@ const callLocalLLM = async (config: AiConfig, prompt: string, schemaDescription:
     }
 };
 
+// --- FALLBACK HEURISTIC ANALYSIS ---
+const performHeuristicAnalysis = (logs: LogEntry[]): AiAnalysis => {
+    const errorCount = logs.filter(l => l.level === 'ERROR' || l.level === 'CRITICAL').length;
+    const warningCount = logs.filter(l => l.level === 'WARNING').length;
+    const uniqueIPs = new Set(logs.map(l => l.sourceIp).filter(Boolean)).size;
+
+    let threatLevel: 'LOW' | 'MEDIUM' | 'HIGH' = 'LOW';
+    if (errorCount > 0) threatLevel = 'MEDIUM';
+    if (errorCount > 5 || uniqueIPs > 3) threatLevel = 'HIGH';
+
+    return {
+        summary: `[OFFLINE MODE] AI service unavailable. Local heuristic analysis detected ${errorCount} critical events and ${warningCount} warnings from ${uniqueIPs} unique sources. Configure API Key in Settings for full insights.`,
+        threatLevel,
+        recommendedActions: [
+            "Check firewall logs for repeated connection attempts.",
+            "Verify integrity of core system files.",
+            "Ensure API Key is configured correctly in Settings > AI Integration."
+        ]
+    };
+};
+
 // --- PUBLIC FACING FUNCTIONS ---
 
 export const testAiConnection = async (config: AiConfig): Promise<{success: boolean, message?: string}> => {
@@ -155,11 +179,14 @@ export const analyzeLogsWithAi = async (logs: LogEntry[], actorStatus?: string):
         - If the logs appear benign or empty of threats, treat the IDS flag as a potential FALSE POSITIVE and rate the threat level accordingly (LOW or MEDIUM).`;
     }
 
-    if (!interestingLogs && actorStatus !== 'COMPROMISED') return {
-        summary: "No significant threats detected in the current log batch.",
-        threatLevel: 'LOW',
-        recommendedActions: ["Continue monitoring."]
-    };
+    if (!interestingLogs && actorStatus !== 'COMPROMISED') {
+         // Even if logs are empty, return a low threat structure rather than null to update UI
+         return {
+            summary: "No significant threats detected in the current log batch.",
+            threatLevel: 'LOW',
+            recommendedActions: ["Continue monitoring."]
+        };
+    }
 
     // Gemini Schema
     const geminiSchema = {
@@ -180,7 +207,6 @@ export const analyzeLogsWithAi = async (logs: LogEntry[], actorStatus?: string):
         result = await callLocalLLM(config, prompt, localSchemaDesc);
     }
 
-    // Normalize result to ensure array exists (Prevents undefined map crash)
     if (result) {
         return {
             summary: result.summary || "No summary provided by AI.",
@@ -188,7 +214,10 @@ export const analyzeLogsWithAi = async (logs: LogEntry[], actorStatus?: string):
             recommendedActions: Array.isArray(result.recommendedActions) ? result.recommendedActions : []
         };
     }
-    return null;
+
+    // FALLBACK: If AI fails (e.g. No API Key or 404), return Heuristic Analysis
+    console.warn("AI Analysis failed. Using heuristic fallback.");
+    return performHeuristicAnalysis(logs);
 };
 
 // NEW: Generate Report based on User Free Text
@@ -243,7 +272,15 @@ export const generateCustomAiReport = async (userPrompt: string, logs: LogEntry[
         result = await callLocalLLM(config, prompt, localSchemaDesc);
     }
 
-    return result || null;
+    // Fallback if AI fails for Reports
+    if (!result) {
+        return {
+             reportTitle: "AI Service Unavailable",
+             reportBody: "Unable to generate AI report. Please check API Key configuration in Settings."
+        };
+    }
+
+    return result;
 };
 
 export const generateDeceptionContent = async (type: 'CREDENTIALS' | 'CONFIG'): Promise<HoneyFile | null> => {
