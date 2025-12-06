@@ -97,7 +97,7 @@ LOG_FILE="/var/log/vpp-agent.log"
 if [ "$EUID" -ne 0 ]; then echo "Please run as root"; exit 1; fi
 
 echo "--------------------------------------------------"
-echo "   Virtual Puppets Agent Bootstrap v7.1"
+echo "   Virtual Puppets Agent Bootstrap v7.2"
 echo "--------------------------------------------------"
 
 echo "[*] Checking dependencies..."
@@ -167,7 +167,7 @@ elif [[ "\$1" == "--update" ]]; then
     log "Agent update triggered"
     echo "Agent updated."
 else
-    echo "VPP Agent v2.1 - Status OK"
+    echo "VPP Agent v2.2.0 - Status OK"
     if [ -f "\$AGENT_DIR/sentinel_active" ]; then echo "Sentinel Mode: ACTIVE"; fi
 fi
 EOF_BIN

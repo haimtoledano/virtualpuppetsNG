@@ -3,6 +3,8 @@
 
 
 
+
+
 import React, { useState, useEffect, useCallback, Suspense } from 'react';
 import { generateInitialActors, generateRandomLog, generateGateways } from './services/mockService';
 import { dbQuery, dbUpdate, getSystemConfig, getPendingActors, approvePendingActor, rejectPendingActor, getSystemLogs, sendAuditLog, triggerFleetUpdate } from './services/dbService';
@@ -263,7 +265,7 @@ const App: React.FC = () => {
                                         className="bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white px-4 py-2 rounded-lg flex items-center font-bold text-xs border border-slate-700 transition-all disabled:opacity-50"
                                      >
                                          <RefreshCw className={`w-3 h-3 mr-2 ${isUpdatingFleet ? 'animate-spin' : ''}`} />
-                                         {isUpdatingFleet ? 'PUSHING UPDATE...' : 'UPDATE ALL AGENTS (v2.0)'}
+                                         {isUpdatingFleet ? 'PUSHING UPDATE...' : 'UPDATE ALL AGENTS (v2.2)'}
                                      </button>
                                      <button 
                                         onClick={() => setIsEnrollmentOpen(true)} 
@@ -279,7 +281,7 @@ const App: React.FC = () => {
                                 <div className="flex items-center text-blue-300">
                                     <Zap className="w-4 h-4 mr-2" />
                                     <span className="font-bold mr-2">Agent Versioning:</span>
-                                    <span>Latest Stable: <span className="text-white font-mono">v2.0.0</span></span>
+                                    <span>Latest Stable: <span className="text-white font-mono">v2.2.0</span></span>
                                 </div>
                                 <div className="flex items-center text-xs text-slate-400">
                                     <span className="mr-3">{actors.filter(a => a.protocolVersion === 'VPP-1.2').length} agents outdated</span>
