@@ -1,13 +1,3 @@
-
-
-
-
-
-
-
-
-
-
 import { Actor, ActorStatus, LogEntry, LogLevel, ProxyGateway, CloudTrap, ActiveTunnel, PendingActor, ProvisioningStatus, DevicePersona, WifiNetwork, BluetoothDevice } from '../types';
 
 const LOCATIONS = ['Tel Aviv HQ', 'New York Branch', 'London DC', 'Frankfurt AWS'];
@@ -211,7 +201,7 @@ export const generateRandomLog = (actors: Actor[]): LogEntry => {
   };
 };
 
-export const executeRemoteCommand = async (actorId: string, command: string): Promise<string> => {
+export const executeRemoteCommand = async (actorId: string, command: string, mockContext?: Actor): Promise<string> => {
   return new Promise((resolve) => {
     setTimeout(() => {
       if (command.startsWith('tcpdump')) {
@@ -225,7 +215,6 @@ export const executeRemoteCommand = async (actorId: string, command: string): Pr
       } else if (command.includes('killall') || command.includes('pkill')) {
         resolve(`[${actorId}] Process terminated.`);
       } else if (command.startsWith('vpp-agent --set-persona')) {
-        // Extract name to make it look real, though simple regex suffices for mock
         const match = command.match(/"([^"]+)"/);
         const name = match ? match[1] : 'Unknown';
         resolve(`
@@ -278,6 +267,29 @@ Fetched 229 kB in 2s (115 kB/s)
 Reading package lists... Done
 [VPP-PROXY] Cached hits: 3, Upstream hits: 2
         `);
+      } else if (command.includes('ss -lntup')) {
+          // Dynamic Scan Result based on Actor Context
+          let output = `Netid State      Recv-Q Send-Q Local Address:Port               Peer Address:Port              Process                                         
+tcp   LISTEN      0      128          0.0.0.0:22                    0.0.0.0:*                  users:(("sshd",pid=812,fd=3))`;
+          
+          if (mockContext) {
+              // Add Tunnels (socat)
+              if (mockContext.activeTunnels) {
+                  mockContext.activeTunnels.forEach((t, idx) => {
+                      output += `\ntcp   LISTEN      0      5            0.0.0.0:${t.localPort}                  0.0.0.0:*                  users:(("socat",pid=${1000+idx},fd=4))`;
+                  });
+              }
+              // Add Persona Ports (vpp-agent)
+              if (mockContext.persona && mockContext.persona.openPorts) {
+                  mockContext.persona.openPorts.forEach((p, idx) => {
+                      // Avoid duplicates
+                      if (!mockContext.activeTunnels?.some(t => t.localPort === p) && p !== 22) {
+                         output += `\ntcp   LISTEN      0      128          0.0.0.0:${p}                    0.0.0.0:*                  users:(("vpp-agent",pid=${2000+idx},fd=5))`;
+                      }
+                  });
+              }
+          }
+          resolve(output);
       } else if (command.includes('apt-get dist-upgrade')) {
         resolve(`
 Reading package lists... Done

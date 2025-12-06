@@ -4,7 +4,7 @@ import { executeRemoteCommand, getAvailableCloudTraps, toggleTunnelMock, AVAILAB
 import { analyzeLogsWithAi, generateDeceptionContent } from '../services/aiService';
 import { updateActorName, queueSystemCommand, getActorCommands, deleteActor, updateActorTunnels, updateActorPersona, resetActorStatus, resetActorToFactory, updateActorHoneyFiles, toggleActorSentinel } from '../services/dbService';
 import Terminal from './Terminal';
-import { Cpu, Wifi, Shield, Bot, ArrowLeft, BrainCircuit, Router, Network, FileCode, Check, Activity, X, Printer, Camera, Server, Edit2, Trash2, Loader, ShieldCheck, AlertOctagon, Skull, ArrowRight, Terminal as TerminalIcon, Globe, ScanSearch, Power, RefreshCw, History as HistoryIcon, Thermometer, RefreshCcw, Siren, Eye, Fingerprint, Info, Cable } from 'lucide-react';
+import { Cpu, Wifi, Shield, Bot, ArrowLeft, BrainCircuit, Router, Network, FileCode, Check, Activity, X, Printer, Camera, Server, Edit2, Trash2, Loader, ShieldCheck, AlertOctagon, Skull, ArrowRight, Terminal as TerminalIcon, Globe, ScanSearch, Power, RefreshCw, History as HistoryIcon, Thermometer, RefreshCcw, Siren, Eye, Fingerprint, Info, Cable, Search } from 'lucide-react';
 
 interface ActorDetailProps {
   actor: Actor;
@@ -129,6 +129,10 @@ const ActorDetail: React.FC<ActorDetailProps> = ({ actor, gateway, logs: initial
   // Topology Reset State
   const [topologyDismissedTime, setTopologyDismissedTime] = useState<number>(0);
 
+  // --- NEW: PORT SCAN STATE ---
+  const [scannedPorts, setScannedPorts] = useState<{system: any[], application: any[]} | null>(null);
+  const [isScanningPorts, setIsScanningPorts] = useState(false);
+
   // --- PERSISTENCE FOR TOPOLOGY VIEW ---
   // If user is logged in, use server-side preferences. If Mock, fallback to localStorage.
   useEffect(() => {
@@ -204,6 +208,17 @@ const ActorDetail: React.FC<ActorDetailProps> = ({ actor, gateway, logs: initial
     return () => clearInterval(interval);
   }, [actor.id, isScanningIp, isProduction]);
 
+  // --- POLL FOR PORT SCAN RESULTS ---
+  useEffect(() => {
+      if (!isScanningPorts) return;
+      
+      const scanJob = commandHistory.find(c => c.command === 'ss -lntup' && c.status === 'COMPLETED');
+      if (scanJob && scanJob.output) {
+          parsePortScan(scanJob.output);
+          setIsScanningPorts(false);
+      }
+  }, [commandHistory, isScanningPorts]);
+
   const handleFetchIp = async () => {
       // Prevent duplicate scans if one is already pending/running
       let hasPending = false;
@@ -231,13 +246,16 @@ const ActorDetail: React.FC<ActorDetailProps> = ({ actor, gateway, logs: initial
       await handleCommand('hostname -I');
   };
 
-  const handleCommand = async (cmd: string) => {
+  const handleCommand = async (cmd: string): Promise<string> => {
+      let jobId = '';
       if (isProduction) {
-          await queueSystemCommand(actor.id, cmd);
+          const id = await queueSystemCommand(actor.id, cmd);
+          jobId = id || '';
       } else {
           // Mock Mode Execution
+          jobId = `job-mock-${Date.now()}`;
           const newJob: CommandJob = {
-              id: `job-mock-${Date.now()}`,
+              id: jobId,
               actorId: actor.id,
               command: cmd,
               status: 'RUNNING',
@@ -247,7 +265,8 @@ const ActorDetail: React.FC<ActorDetailProps> = ({ actor, gateway, logs: initial
           setCommandHistory(prev => [newJob, ...prev]);
           
           // Simulate latency
-          executeRemoteCommand(actor.id, cmd).then(output => {
+          // Pass the actor object as context for MOCK specific commands like ss -lntup
+          executeRemoteCommand(actor.id, cmd, actor).then(output => {
                setCommandHistory(prev => prev.map(job => 
                   job.id === newJob.id 
                   ? { ...job, status: 'COMPLETED', output } 
@@ -261,6 +280,61 @@ const ActorDetail: React.FC<ActorDetailProps> = ({ actor, gateway, logs: initial
                }
           });
       }
+      return jobId;
+  };
+
+  const handleScanPorts = async () => {
+      setIsScanningPorts(true);
+      setScannedPorts(null);
+      await handleCommand('ss -lntup');
+  };
+
+  const parsePortScan = (output: string) => {
+      const lines = output.split('\n');
+      const system: any[] = [];
+      const application: any[] = [];
+      
+      const getServiceName = (p: number) => {
+          if (p === 21) return 'FTP';
+          if (p === 22) return 'SSH';
+          if (p === 23) return 'Telnet';
+          if (p === 53) return 'DNS';
+          if (p === 80) return 'HTTP';
+          if (p === 443) return 'HTTPS';
+          return 'TCP';
+      };
+
+      lines.forEach(line => {
+          // Regex to parse ss -lntup
+          // Example: tcp LISTEN 0 128 0.0.0.0:22 0.0.0.0:* users:(("sshd",pid=123,fd=3))
+          const match = line.match(/(udp|tcp)\s+\w+\s+\d+\s+\d+\s+(?:[\d\.]+|\[::\]):(\d+)\s+[\d\.\*\[\]:]+\s+users:\(\("([^"]+)"/);
+          if (match) {
+              const proto = match[1].toUpperCase();
+              const port = parseInt(match[2]);
+              const process = match[3];
+
+              const item = {
+                  port,
+                  proto,
+                  service: getServiceName(port),
+                  source: process
+              };
+
+              // Logic to distinguish VPP vs System
+              // VPP uses 'socat' for tunnels and 'vpp-agent' (or python/node) for personas
+              if (process.includes('socat') || process.includes('vpp-agent') || process.includes('python')) {
+                   item.service = process.includes('socat') ? 'Tunnel' : 'Persona';
+                   application.push(item);
+              } else {
+                   system.push(item);
+              }
+          }
+      });
+
+      setScannedPorts({ 
+          system: system.sort((a,b) => a.port - b.port), 
+          application: application.sort((a,b) => a.port - b.port) 
+      });
   };
 
   const handleSaveName = async () => {
@@ -515,6 +589,12 @@ const ActorDetail: React.FC<ActorDetailProps> = ({ actor, gateway, logs: initial
 
   // --- PORT EXPOSURE LOGIC (SYSTEM vs APPLICATION) ---
   const portExposure = useMemo(() => {
+      // If we have a scan result, prefer that
+      if (scannedPorts) {
+          return scannedPorts;
+      }
+
+      // Fallback: Estimate based on config
       const getServiceName = (p: number) => {
           if (p === 21) return 'FTP';
           if (p === 22) return 'SSH';
@@ -570,17 +650,9 @@ const ActorDetail: React.FC<ActorDetailProps> = ({ actor, gateway, logs: initial
       });
 
       return { system, application: application.sort((a,b) => a.port - b.port) };
-  }, [activePersona, tunnels]);
+  }, [activePersona, tunnels, scannedPorts]);
 
   const activeThreats = threatTopology.attackers;
-
-  // Formatting helpers
-  const getTempColor = (temp?: number) => {
-      if (!temp) return 'bg-slate-700';
-      if (temp < 60) return 'bg-emerald-500';
-      if (temp < 80) return 'bg-yellow-500';
-      return 'bg-red-500';
-  };
 
   return (
     <div className="space-y-6 animate-fade-in pb-10">
@@ -888,10 +960,29 @@ const ActorDetail: React.FC<ActorDetailProps> = ({ actor, gateway, logs: initial
                <div className="flex flex-col space-y-6">
                    {/* PORT EXPOSURE ANALYSIS */}
                    <div className="bg-slate-800 rounded-xl border border-slate-700 p-6 shadow-lg">
-                       <h3 className="text-lg font-bold text-white mb-4 flex items-center">
-                           <Cable className="w-5 h-5 mr-2 text-indigo-400" />
-                           Port Exposure Analysis
-                       </h3>
+                       <div className="flex justify-between items-center mb-4">
+                           <h3 className="text-lg font-bold text-white flex items-center">
+                               <Cable className="w-5 h-5 mr-2 text-indigo-400" />
+                               Port Exposure Analysis
+                           </h3>
+                           <button 
+                             onClick={handleScanPorts}
+                             disabled={isScanningPorts}
+                             className="bg-indigo-900 hover:bg-indigo-800 text-indigo-300 px-3 py-1.5 rounded text-xs font-bold transition-colors flex items-center border border-indigo-700 disabled:opacity-50"
+                           >
+                             <Search className={`w-3 h-3 mr-2 ${isScanningPorts ? 'animate-spin' : ''}`} />
+                             {isScanningPorts ? 'SCANNING...' : 'LIVE SCAN'}
+                           </button>
+                       </div>
+                       
+                       {/* Alert Banner if showing estimated data */}
+                       {!scannedPorts && (
+                           <div className="bg-yellow-500/10 border border-yellow-500/20 text-yellow-500 text-[10px] p-2 rounded mb-3 flex items-center">
+                               <Info className="w-3 h-3 mr-2" />
+                               Showing estimated configuration. Run Live Scan to map active sockets.
+                           </div>
+                       )}
+
                        <div className="grid grid-cols-2 gap-6">
                            
                            {/* System Level */}
@@ -900,14 +991,21 @@ const ActorDetail: React.FC<ActorDetailProps> = ({ actor, gateway, logs: initial
                                    <Server className="w-3 h-3 mr-1.5" /> Native / OS Level
                                </div>
                                <div className="space-y-2">
-                                   {portExposure.system.map((p, idx) => (
-                                       <div key={idx} className="flex justify-between items-center bg-slate-900/50 p-2 rounded border border-slate-700/50">
-                                           <div className="flex items-center">
-                                               <span className="text-sm font-mono font-bold text-slate-300 mr-2">{p.port}/{p.proto}</span>
+                                   {portExposure.system.length === 0 ? (
+                                       <div className="text-[10px] text-slate-600 italic py-1">No system ports detected.</div>
+                                   ) : (
+                                       portExposure.system.map((p, idx) => (
+                                           <div key={idx} className="flex justify-between items-center bg-slate-900/50 p-2 rounded border border-slate-700/50">
+                                               <div className="flex items-center">
+                                                   <span className="text-sm font-mono font-bold text-slate-300 mr-2">{p.port}/{p.proto}</span>
+                                               </div>
+                                               <div className="flex flex-col items-end">
+                                                   <span className="text-[10px] text-slate-500">{p.service}</span>
+                                                   <span className="text-[9px] text-slate-600 font-mono truncate max-w-[60px]" title={p.source}>{p.source}</span>
+                                               </div>
                                            </div>
-                                           <span className="text-[10px] text-slate-500">{p.service}</span>
-                                       </div>
-                                   ))}
+                                       ))
+                                   )}
                                </div>
                            </div>
 
@@ -918,14 +1016,17 @@ const ActorDetail: React.FC<ActorDetailProps> = ({ actor, gateway, logs: initial
                                </div>
                                <div className="space-y-2">
                                    {portExposure.application.length === 0 ? (
-                                       <div className="text-[10px] text-slate-600 italic py-2">No application ports exposed.</div>
+                                       <div className="text-[10px] text-slate-600 italic py-1">No application ports exposed.</div>
                                    ) : (
                                        portExposure.application.map((p, idx) => (
                                            <div key={idx} className="flex justify-between items-center bg-indigo-900/20 p-2 rounded border border-indigo-500/30">
                                                <div className="flex items-center">
                                                    <span className="text-sm font-mono font-bold text-indigo-300 mr-2">{p.port}/{p.proto}</span>
                                                </div>
-                                               <span className="text-[10px] text-indigo-200/70 truncate w-20 text-right" title={p.source}>{p.service}</span>
+                                               <div className="flex flex-col items-end">
+                                                    <span className="text-[10px] text-indigo-200/70 truncate w-20 text-right">{p.service}</span>
+                                                    <span className="text-[9px] text-indigo-400/50 font-mono truncate w-20 text-right" title={p.source}>{p.source}</span>
+                                               </div>
                                            </div>
                                        ))
                                    )}
