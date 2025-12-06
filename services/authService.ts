@@ -1,4 +1,6 @@
-import { User } from '../types';
+
+
+import { User, UserPreferences } from '../types';
 import { checkDbExists } from './dbService';
 
 const API_BASE = '/api';
@@ -34,6 +36,20 @@ export const loginUser = async (username: string, password: string): Promise<{ s
   } catch (e) {
       return { success: false, error: "Network Error" };
   }
+};
+
+export const saveUserPreferences = async (userId: string, preferences: UserPreferences): Promise<boolean> => {
+    try {
+        const res = await fetch(`${API_BASE}/users/${userId}/preferences`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(preferences)
+        });
+        const data = await res.json();
+        return data.success;
+    } catch (e) {
+        return false;
+    }
 };
 
 export const setupMfa = async (userId: string): Promise<{ secret: string; qrCode: string }> => {

@@ -2,6 +2,8 @@
 
 
 
+
+
 import express from 'express';
 import path from 'path';
 import fs from 'fs';
@@ -444,7 +446,7 @@ const runSchemaMigrations = async (pool) => {
     const req = new sql.Request(pool);
     const tables = {
         'SystemConfig': `ConfigKey NVARCHAR(50) PRIMARY KEY, ConfigValue NVARCHAR(MAX)`,
-        'Users': `UserId NVARCHAR(50) PRIMARY KEY, Username NVARCHAR(100), PasswordHash NVARCHAR(255), Role NVARCHAR(20), MfaEnabled BIT DEFAULT 0, MfaSecret NVARCHAR(100), LastLogin DATETIME`,
+        'Users': `UserId NVARCHAR(50) PRIMARY KEY, Username NVARCHAR(100), PasswordHash NVARCHAR(255), Role NVARCHAR(20), MfaEnabled BIT DEFAULT 0, MfaSecret NVARCHAR(100), LastLogin DATETIME, Preferences NVARCHAR(MAX)`,
         'Gateways': `GatewayId NVARCHAR(50) PRIMARY KEY, Name NVARCHAR(100), Location NVARCHAR(100), Status NVARCHAR(20), IpAddress NVARCHAR(50), Lat FLOAT, Lng FLOAT`,
         'Actors': `ActorId NVARCHAR(50) PRIMARY KEY, HwId NVARCHAR(100), GatewayId NVARCHAR(50), Name NVARCHAR(100), Status NVARCHAR(20), LocalIp NVARCHAR(50), LastSeen DATETIME, Config NVARCHAR(MAX), OsVersion NVARCHAR(100), TunnelsJson NVARCHAR(MAX), Persona NVARCHAR(MAX), HoneyFilesJson NVARCHAR(MAX), HasWifi BIT DEFAULT 0, HasBluetooth BIT DEFAULT 0, CpuLoad FLOAT DEFAULT 0, MemoryUsage FLOAT DEFAULT 0, Temperature FLOAT DEFAULT 0, TcpSentinelEnabled BIT DEFAULT 0`,
         'Logs': `LogId NVARCHAR(50) PRIMARY KEY, ActorId NVARCHAR(50), Level NVARCHAR(20), Process NVARCHAR(50), Message NVARCHAR(MAX), SourceIp NVARCHAR(50), Timestamp DATETIME`,
@@ -461,13 +463,18 @@ const runSchemaMigrations = async (pool) => {
             const check = await req.query(`SELECT * FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_NAME = '${name}'`);
             if (check.recordset.length === 0) {
                 await req.query(`CREATE TABLE ${name} (${schema})`);
-            } else if (name === 'Actors') {
-                // Ensure columns exist if table already exists
-                try { await req.query(`ALTER TABLE Actors ADD CpuLoad FLOAT DEFAULT 0`); } catch(e){}
-                try { await req.query(`ALTER TABLE Actors ADD MemoryUsage FLOAT DEFAULT 0`); } catch(e){}
-                try { await req.query(`ALTER TABLE Actors ADD Temperature FLOAT DEFAULT 0`); } catch(e){}
-                try { await req.query(`ALTER TABLE Actors ADD HoneyFilesJson NVARCHAR(MAX)`); } catch(e){}
-                try { await req.query(`ALTER TABLE Actors ADD TcpSentinelEnabled BIT DEFAULT 0`); } catch(e){}
+            } else {
+                if (name === 'Actors') {
+                    // Ensure columns exist if table already exists
+                    try { await req.query(`ALTER TABLE Actors ADD CpuLoad FLOAT DEFAULT 0`); } catch(e){}
+                    try { await req.query(`ALTER TABLE Actors ADD MemoryUsage FLOAT DEFAULT 0`); } catch(e){}
+                    try { await req.query(`ALTER TABLE Actors ADD Temperature FLOAT DEFAULT 0`); } catch(e){}
+                    try { await req.query(`ALTER TABLE Actors ADD HoneyFilesJson NVARCHAR(MAX)`); } catch(e){}
+                    try { await req.query(`ALTER TABLE Actors ADD TcpSentinelEnabled BIT DEFAULT 0`); } catch(e){}
+                }
+                if (name === 'Users') {
+                    try { await req.query(`ALTER TABLE Users ADD Preferences NVARCHAR(MAX)`); } catch(e){}
+                }
             }
         } catch (e) { }
     }
@@ -497,7 +504,39 @@ init();
 
 app.get('/api/health', (req, res) => { res.json({ status: 'active', mode: getDbConfig()?.isConnected ? 'PRODUCTION' : 'MOCK_OR_SETUP', dbConnected: !!dbPool }); });
 app.post('/api/setup/db', async (req, res) => { try { await connectToDb(req.body); fs.writeFileSync(CONFIG_FILE, JSON.stringify({...req.body, isConnected: true}, null, 2)); await runSchemaMigrations(dbPool); await refreshSyslogConfig(dbPool); res.json({ success: true }); } catch (err) { res.status(500).json({ success: false, error: err.message }); } });
-app.post('/api/login', async (req, res) => { if (!dbPool) return res.json({success: false, error: "DB not connected"}); const { username, password } = req.body; const hash = `btoa_hash_${password}`; try { const result = await dbPool.request().input('u', sql.NVarChar, username).query("SELECT * FROM Users WHERE Username = @u"); if (result.recordset.length > 0) { const user = result.recordset[0]; if (user.PasswordHash === hash) { return res.json({ success: true, user: { id: user.UserId, username: user.Username, role: user.Role, mfaEnabled: user.MfaEnabled } }); } } res.json({ success: false, error: "Invalid credentials" }); } catch (e) { res.json({ success: false, error: e.message }); } });
+app.post('/api/login', async (req, res) => { 
+    if (!dbPool) return res.json({success: false, error: "DB not connected"}); 
+    const { username, password } = req.body; 
+    const hash = `btoa_hash_${password}`; 
+    try { 
+        const result = await dbPool.request().input('u', sql.NVarChar, username).query("SELECT * FROM Users WHERE Username = @u"); 
+        if (result.recordset.length > 0) { 
+            const user = result.recordset[0]; 
+            if (user.PasswordHash === hash) { 
+                return res.json({ success: true, user: { 
+                    id: user.UserId, 
+                    username: user.Username, 
+                    role: user.Role, 
+                    mfaEnabled: user.MfaEnabled,
+                    preferences: user.Preferences ? JSON.parse(user.Preferences) : {}
+                } }); 
+            } 
+        } 
+        res.json({ success: false, error: "Invalid credentials" }); 
+    } catch (e) { res.json({ success: false, error: e.message }); } 
+});
+
+app.put('/api/users/:id/preferences', async (req, res) => {
+    if (!dbPool) return res.json({success: false});
+    const preferences = req.body;
+    try {
+        await dbPool.request()
+            .input('id', sql.NVarChar, req.params.id)
+            .input('prefs', sql.NVarChar, JSON.stringify(preferences))
+            .query("UPDATE Users SET Preferences = @prefs WHERE UserId = @id");
+        res.json({success: true});
+    } catch(e) { res.status(500).json({error: e.message}); }
+});
 
 // --- SYSTEM CONFIG ---
 app.get('/api/config/system', async (req, res) => {

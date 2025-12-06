@@ -125,6 +125,10 @@ export interface PendingActor {
 
 export type UserRole = 'SUPERADMIN' | 'ADMIN' | 'VIEWER';
 
+export interface UserPreferences {
+  topologyDismissed?: Record<string, number>; // actorId -> timestamp
+}
+
 export interface User {
   id: string;
   username: string;
@@ -133,6 +137,7 @@ export interface User {
   mfaEnabled: boolean;
   mfaSecret?: string;
   lastLogin?: Date;
+  preferences?: UserPreferences;
 }
 
 export interface DbConfig {

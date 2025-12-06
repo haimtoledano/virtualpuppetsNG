@@ -1,10 +1,13 @@
 
 
 
+
+
 import React, { useState, useEffect, useCallback, Suspense } from 'react';
 import { generateInitialActors, generateRandomLog, generateGateways } from './services/mockService';
 import { dbQuery, dbUpdate, getSystemConfig, getPendingActors, approvePendingActor, rejectPendingActor, getSystemLogs, sendAuditLog, triggerFleetUpdate } from './services/dbService';
-import { Actor, LogEntry, ProxyGateway, PendingActor, ActorStatus, User, SystemConfig } from './types';
+import { saveUserPreferences } from './services/authService';
+import { Actor, LogEntry, ProxyGateway, PendingActor, ActorStatus, User, SystemConfig, UserPreferences } from './types';
 import { LayoutDashboard, Settings as SettingsIcon, Network, Plus, LogOut, User as UserIcon, FileText, Globe, Router, Radio, Loader, RefreshCw, Zap } from 'lucide-react';
 
 // Lazy Load Components to split chunks
@@ -185,6 +188,25 @@ const App: React.FC = () => {
       setCurrentUser(null);
       localStorage.removeItem('vpp_user');
   };
+
+  const handleUpdateUserPreferences = async (newPrefs: UserPreferences) => {
+      if (!currentUser) return;
+      
+      const updatedUser = {
+          ...currentUser,
+          preferences: {
+              ...currentUser.preferences,
+              ...newPrefs
+          }
+      };
+      
+      setCurrentUser(updatedUser);
+      localStorage.setItem('vpp_user', JSON.stringify(updatedUser));
+      
+      if (isProduction) {
+          await saveUserPreferences(currentUser.id, updatedUser.preferences || {});
+      }
+  };
   
   const handleFleetUpdate = async () => {
       if (!confirm("This will trigger a remote update for all online actors. They may restart. Continue?")) return;
@@ -219,6 +241,8 @@ const App: React.FC = () => {
                     logs={logs.filter(l => l.actorId === selectedActorId)} 
                     onBack={() => setSelectedActorId(null)} 
                     isProduction={isProduction}
+                    currentUser={currentUser}
+                    onUpdatePreferences={handleUpdateUserPreferences}
                 />
             ) : (
                 <>

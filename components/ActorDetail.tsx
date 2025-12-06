@@ -13,8 +13,10 @@
 
 
 
+
+
 import React, { useState, useEffect, useMemo } from 'react';
-import { Actor, LogEntry, ActorStatus, AiAnalysis, ProxyGateway, HoneyFile, ActiveTunnel, DevicePersona, CommandJob, LogLevel } from '../types';
+import { Actor, LogEntry, ActorStatus, AiAnalysis, ProxyGateway, HoneyFile, ActiveTunnel, DevicePersona, CommandJob, LogLevel, User, UserPreferences } from '../types';
 import { executeRemoteCommand, getAvailableCloudTraps, toggleTunnelMock, AVAILABLE_PERSONAS, generateRandomLog } from '../services/mockService';
 import { analyzeLogsWithAi, generateDeceptionContent } from '../services/aiService';
 import { updateActorName, queueSystemCommand, getActorCommands, deleteActor, updateActorTunnels, updateActorPersona, resetActorStatus, resetActorToFactory, updateActorHoneyFiles, toggleActorSentinel } from '../services/dbService';
@@ -27,6 +29,8 @@ interface ActorDetailProps {
   logs: LogEntry[];
   onBack: () => void;
   isProduction?: boolean;
+  currentUser?: User | null;
+  onUpdatePreferences?: (prefs: UserPreferences) => void;
 }
 
 const DEFAULT_TRAP_PORTS: Record<string, number> = {
@@ -96,7 +100,7 @@ const Gauge = ({ value, label, type, unit = '%', icon: Icon }: { value: number, 
 };
 
 
-const ActorDetail: React.FC<ActorDetailProps> = ({ actor, gateway, logs: initialLogs, onBack, isProduction }) => {
+const ActorDetail: React.FC<ActorDetailProps> = ({ actor, gateway, logs: initialLogs, onBack, isProduction, currentUser, onUpdatePreferences }) => {
   const [activeTab, setActiveTab] = useState<'OVERVIEW' | 'TERMINAL' | 'DECEPTION' | 'NETWORK'>('OVERVIEW');
   
   // Local log state for "Live Telemetry" injection
@@ -143,15 +147,33 @@ const ActorDetail: React.FC<ActorDetailProps> = ({ actor, gateway, logs: initial
   const [topologyDismissedTime, setTopologyDismissedTime] = useState<number>(0);
 
   // --- PERSISTENCE FOR TOPOLOGY VIEW ---
+  // If user is logged in, use server-side preferences. If Mock, fallback to localStorage.
   useEffect(() => {
-      const saved = localStorage.getItem(`vpp_topology_dismissed_${actor.id}`);
-      setTopologyDismissedTime(saved ? parseInt(saved, 10) : 0);
-  }, [actor.id]);
+      if (currentUser?.preferences?.topologyDismissed?.[actor.id]) {
+          setTopologyDismissedTime(currentUser.preferences.topologyDismissed[actor.id]);
+      } else if (!isProduction) {
+          // Fallback for Mock Mode
+          const saved = localStorage.getItem(`vpp_topology_dismissed_mock_${actor.id}`);
+          setTopologyDismissedTime(saved ? parseInt(saved, 10) : 0);
+      } else {
+          setTopologyDismissedTime(0);
+      }
+  }, [actor.id, currentUser, isProduction]);
 
   const handleClearTopology = () => {
       const now = Date.now();
       setTopologyDismissedTime(now);
-      localStorage.setItem(`vpp_topology_dismissed_${actor.id}`, now.toString());
+
+      if (currentUser && onUpdatePreferences) {
+          onUpdatePreferences({
+              topologyDismissed: {
+                  ...(currentUser.preferences?.topologyDismissed || {}),
+                  [actor.id]: now
+              }
+          });
+      } else if (!isProduction) {
+          localStorage.setItem(`vpp_topology_dismissed_mock_${actor.id}`, now.toString());
+      }
   };
 
   // --- MOCK SIMULATION FOR LIVE TELEMETRY ---
