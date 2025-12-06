@@ -1,27 +1,10 @@
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 import React, { useState, useEffect, useMemo } from 'react';
 import { Actor, LogEntry, ActorStatus, AiAnalysis, ProxyGateway, HoneyFile, ActiveTunnel, DevicePersona, CommandJob, LogLevel, User, UserPreferences } from '../types';
 import { executeRemoteCommand, getAvailableCloudTraps, toggleTunnelMock, AVAILABLE_PERSONAS, generateRandomLog } from '../services/mockService';
 import { analyzeLogsWithAi, generateDeceptionContent } from '../services/aiService';
 import { updateActorName, queueSystemCommand, getActorCommands, deleteActor, updateActorTunnels, updateActorPersona, resetActorStatus, resetActorToFactory, updateActorHoneyFiles, toggleActorSentinel } from '../services/dbService';
 import Terminal from './Terminal';
-import { Cpu, Wifi, Shield, Bot, ArrowLeft, BrainCircuit, Router, Network, FileCode, Check, Activity, X, Printer, Camera, Server, Edit2, Trash2, Loader, ShieldCheck, AlertOctagon, Skull, ArrowRight, Terminal as TerminalIcon, Globe, ScanSearch, Power, RefreshCw, History as HistoryIcon, Thermometer, RefreshCcw, Siren, Eye, Fingerprint, Info } from 'lucide-react';
+import { Cpu, Wifi, Shield, Bot, ArrowLeft, BrainCircuit, Router, Network, FileCode, Check, Activity, X, Printer, Camera, Server, Edit2, Trash2, Loader, ShieldCheck, AlertOctagon, Skull, ArrowRight, Terminal as TerminalIcon, Globe, ScanSearch, Power, RefreshCw, History as HistoryIcon, Thermometer, RefreshCcw, Siren, Eye, Fingerprint, Info, Cable } from 'lucide-react';
 
 interface ActorDetailProps {
   actor: Actor;
@@ -530,6 +513,65 @@ const ActorDetail: React.FC<ActorDetailProps> = ({ actor, gateway, logs: initial
       };
   }, [displayLogs, actor.localIp, displayedLocalIp, topologyDismissedTime]);
 
+  // --- PORT EXPOSURE LOGIC (SYSTEM vs APPLICATION) ---
+  const portExposure = useMemo(() => {
+      const getServiceName = (p: number) => {
+          if (p === 21) return 'FTP';
+          if (p === 22) return 'SSH';
+          if (p === 23) return 'Telnet';
+          if (p === 80) return 'HTTP';
+          if (p === 443) return 'HTTPS';
+          if (p === 554) return 'RTSP';
+          if (p === 3306) return 'MySQL';
+          if (p === 3389) return 'RDP';
+          if (p === 5432) return 'PostgreSQL';
+          if (p === 8080) return 'HTTP-Alt';
+          return 'TCP-Service';
+      };
+
+      // 1. System Ports (Native OS)
+      const system = [
+          { port: 22, proto: 'TCP', service: 'SSH (Mgmt)', source: 'Host OS' }
+      ];
+
+      // 2. Application Ports (VPP Enforced)
+      const application: any[] = [];
+      
+      // From Persona
+      if (activePersona && activePersona.openPorts) {
+          activePersona.openPorts.forEach(p => {
+              // Avoid duplicates if tunnel is on same port
+              if (!application.some(a => a.port === p)) {
+                  application.push({ 
+                      port: p, 
+                      proto: 'TCP', 
+                      service: getServiceName(p), 
+                      source: `Persona: ${activePersona.name}` 
+                  });
+              }
+          });
+      }
+
+      // From Tunnels
+      tunnels.forEach(t => {
+          // Update existing or push new
+          const existingIdx = application.findIndex(a => a.port === t.localPort);
+          if (existingIdx >= 0) {
+              application[existingIdx].source = 'Cloud Tunnel (Override)';
+              application[existingIdx].service = t.trap.serviceType;
+          } else {
+              application.push({
+                  port: t.localPort,
+                  proto: 'TCP',
+                  service: t.trap.serviceType,
+                  source: 'Cloud Tunnel'
+              });
+          }
+      });
+
+      return { system, application: application.sort((a,b) => a.port - b.port) };
+  }, [activePersona, tunnels]);
+
   const activeThreats = threatTopology.attackers;
 
   // Formatting helpers
@@ -801,7 +843,7 @@ const ActorDetail: React.FC<ActorDetailProps> = ({ actor, gateway, logs: initial
       {activeTab === 'OVERVIEW' && (
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
               {/* AI Analysis */}
-              <div className="bg-slate-800 rounded-xl border border-slate-700 p-6 shadow-lg">
+              <div className="bg-slate-800 rounded-xl border border-slate-700 p-6 shadow-lg h-full">
                   <div className="flex justify-between items-center mb-4">
                       <h3 className="text-lg font-bold text-white flex items-center"><BrainCircuit className="w-5 h-5 mr-2 text-purple-400" /> AI Threat Analysis</h3>
                       <button 
@@ -842,19 +884,71 @@ const ActorDetail: React.FC<ActorDetailProps> = ({ actor, gateway, logs: initial
                   )}
               </div>
 
-               {/* Recent Activity */}
-               <div className="bg-slate-800 rounded-xl border border-slate-700 p-6 shadow-lg flex flex-col">
-                   <h3 className="text-lg font-bold text-white mb-4 flex items-center"><Activity className="w-5 h-5 mr-2 text-blue-400" /> Recent Activity</h3>
-                   <div className="flex-1 overflow-y-auto max-h-[300px] space-y-2 pr-2 scrollbar-thin scrollbar-thumb-slate-700">
-                       {displayLogs.slice(0, 20).map(log => (
-                           <div key={log.id} className="text-xs border-b border-slate-700/50 pb-2 mb-2 last:border-0">
-                               <div className="flex justify-between text-slate-500 mb-1">
-                                   <span>{new Date(log.timestamp).toLocaleTimeString()}</span>
-                                   <span className={log.level === 'CRITICAL' ? 'text-red-500 font-bold' : log.level === 'WARNING' ? 'text-yellow-500' : 'text-blue-400'}>{log.level}</span>
+               {/* Right Column: Ports + Activity */}
+               <div className="flex flex-col space-y-6">
+                   {/* PORT EXPOSURE ANALYSIS */}
+                   <div className="bg-slate-800 rounded-xl border border-slate-700 p-6 shadow-lg">
+                       <h3 className="text-lg font-bold text-white mb-4 flex items-center">
+                           <Cable className="w-5 h-5 mr-2 text-indigo-400" />
+                           Port Exposure Analysis
+                       </h3>
+                       <div className="grid grid-cols-2 gap-6">
+                           
+                           {/* System Level */}
+                           <div>
+                               <div className="text-xs font-bold text-slate-500 uppercase mb-2 flex items-center border-b border-slate-700 pb-1">
+                                   <Server className="w-3 h-3 mr-1.5" /> Native / OS Level
                                </div>
-                               <div className="text-slate-300 font-mono break-all">{log.message}</div>
+                               <div className="space-y-2">
+                                   {portExposure.system.map((p, idx) => (
+                                       <div key={idx} className="flex justify-between items-center bg-slate-900/50 p-2 rounded border border-slate-700/50">
+                                           <div className="flex items-center">
+                                               <span className="text-sm font-mono font-bold text-slate-300 mr-2">{p.port}/{p.proto}</span>
+                                           </div>
+                                           <span className="text-[10px] text-slate-500">{p.service}</span>
+                                       </div>
+                                   ))}
+                               </div>
                            </div>
-                       ))}
+
+                           {/* Application Level */}
+                           <div>
+                               <div className="text-xs font-bold text-slate-500 uppercase mb-2 flex items-center border-b border-slate-700 pb-1">
+                                   <Globe className="w-3 h-3 mr-1.5" /> VPP Application Level
+                               </div>
+                               <div className="space-y-2">
+                                   {portExposure.application.length === 0 ? (
+                                       <div className="text-[10px] text-slate-600 italic py-2">No application ports exposed.</div>
+                                   ) : (
+                                       portExposure.application.map((p, idx) => (
+                                           <div key={idx} className="flex justify-between items-center bg-indigo-900/20 p-2 rounded border border-indigo-500/30">
+                                               <div className="flex items-center">
+                                                   <span className="text-sm font-mono font-bold text-indigo-300 mr-2">{p.port}/{p.proto}</span>
+                                               </div>
+                                               <span className="text-[10px] text-indigo-200/70 truncate w-20 text-right" title={p.source}>{p.service}</span>
+                                           </div>
+                                       ))
+                                   )}
+                               </div>
+                           </div>
+
+                       </div>
+                   </div>
+
+                   {/* Recent Activity */}
+                   <div className="bg-slate-800 rounded-xl border border-slate-700 p-6 shadow-lg flex-1 flex flex-col">
+                       <h3 className="text-lg font-bold text-white mb-4 flex items-center"><Activity className="w-5 h-5 mr-2 text-blue-400" /> Recent Activity</h3>
+                       <div className="flex-1 overflow-y-auto max-h-[300px] space-y-2 pr-2 scrollbar-thin scrollbar-thumb-slate-700">
+                           {displayLogs.slice(0, 20).map(log => (
+                               <div key={log.id} className="text-xs border-b border-slate-700/50 pb-2 mb-2 last:border-0">
+                                   <div className="flex justify-between text-slate-500 mb-1">
+                                       <span>{new Date(log.timestamp).toLocaleTimeString()}</span>
+                                       <span className={log.level === 'CRITICAL' ? 'text-red-500 font-bold' : log.level === 'WARNING' ? 'text-yellow-500' : 'text-blue-400'}>{log.level}</span>
+                                   </div>
+                                   <div className="text-slate-300 font-mono break-all">{log.message}</div>
+                               </div>
+                           ))}
+                       </div>
                    </div>
                </div>
           </div>
