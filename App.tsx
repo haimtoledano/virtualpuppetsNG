@@ -1,9 +1,11 @@
 
+
+
 import React, { useState, useEffect, useCallback, Suspense } from 'react';
 import { generateInitialActors, generateRandomLog, generateGateways } from './services/mockService';
-import { dbQuery, dbUpdate, getSystemConfig, getPendingActors, approvePendingActor, rejectPendingActor, getSystemLogs, sendAuditLog } from './services/dbService';
+import { dbQuery, dbUpdate, getSystemConfig, getPendingActors, approvePendingActor, rejectPendingActor, getSystemLogs, sendAuditLog, triggerFleetUpdate } from './services/dbService';
 import { Actor, LogEntry, ProxyGateway, PendingActor, ActorStatus, User, SystemConfig } from './types';
-import { LayoutDashboard, Settings as SettingsIcon, Network, Plus, LogOut, User as UserIcon, FileText, Globe, Router, Radio, Loader } from 'lucide-react';
+import { LayoutDashboard, Settings as SettingsIcon, Network, Plus, LogOut, User as UserIcon, FileText, Globe, Router, Radio, Loader, RefreshCw, Zap } from 'lucide-react';
 
 // Lazy Load Components to split chunks
 const Dashboard = React.lazy(() => import('./components/Dashboard'));
@@ -37,6 +39,7 @@ const App: React.FC = () => {
   const [selectedActorId, setSelectedActorId] = useState<string | null>(null);
   const [pendingActors, setPendingActors] = useState<PendingActor[]>([]);
   const [isEnrollmentOpen, setIsEnrollmentOpen] = useState(false);
+  const [isUpdatingFleet, setIsUpdatingFleet] = useState(false);
 
   useEffect(() => {
       if (!currentUser || !isProduction) return;
@@ -182,6 +185,20 @@ const App: React.FC = () => {
       setCurrentUser(null);
       localStorage.removeItem('vpp_user');
   };
+  
+  const handleFleetUpdate = async () => {
+      if (!confirm("This will trigger a remote update for all online actors. They may restart. Continue?")) return;
+      
+      setIsUpdatingFleet(true);
+      if (isProduction) {
+          await triggerFleetUpdate(actors);
+      } else {
+          // Mock delay
+          await new Promise(r => setTimeout(r, 2000));
+          alert("Mock update command sent to 120 agents.");
+      }
+      setIsUpdatingFleet(false);
+  };
 
   if (isProduction && !currentUser) return (
     <Suspense fallback={<div className="min-h-screen bg-cyber-900 flex items-center justify-center text-blue-500 font-mono text-sm tracking-wider">INITIALIZING SECURE ENVIRONMENT...</div>}>
@@ -212,19 +229,51 @@ const App: React.FC = () => {
                     {activeTab === 'wireless' && <WirelessRecon isProduction={isProduction} actors={actors} />}
                     {activeTab === 'settings' && <Settings isProduction={isProduction} onToggleProduction={toggleProductionMode} currentUser={currentUser} />}
                     {activeTab === 'actors' && (
-                        <div className="space-y-6 animate-fade-in">
-                            <div className="flex justify-between items-center mb-4">
+                        <div className="space-y-6 animate-fade-in pb-10">
+                            <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
                                 <h2 className="text-2xl font-bold text-slate-200">Global Fleet</h2>
-                                <button onClick={() => setIsEnrollmentOpen(true)} className="bg-blue-600 hover:bg-blue-500 text-white px-4 py-2 rounded-lg flex items-center font-bold text-sm shadow-lg"><Plus className="w-4 h-4 mr-2" />Enroll New Device</button>
+                                <div className="flex space-x-2">
+                                     <button 
+                                        onClick={handleFleetUpdate}
+                                        disabled={isUpdatingFleet}
+                                        className="bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white px-4 py-2 rounded-lg flex items-center font-bold text-xs border border-slate-700 transition-all disabled:opacity-50"
+                                     >
+                                         <RefreshCw className={`w-3 h-3 mr-2 ${isUpdatingFleet ? 'animate-spin' : ''}`} />
+                                         {isUpdatingFleet ? 'PUSHING UPDATE...' : 'UPDATE ALL AGENTS (v2.0)'}
+                                     </button>
+                                     <button 
+                                        onClick={() => setIsEnrollmentOpen(true)} 
+                                        className="bg-blue-600 hover:bg-blue-500 text-white px-4 py-2 rounded-lg flex items-center font-bold text-sm shadow-lg shadow-blue-900/20"
+                                     >
+                                         <Plus className="w-4 h-4 mr-2" />Enroll New Device
+                                     </button>
+                                </div>
                             </div>
+
+                            {/* Software Version Banner */}
+                            <div className="bg-gradient-to-r from-blue-900/20 to-slate-800 border border-blue-500/30 rounded-lg p-3 flex justify-between items-center text-sm">
+                                <div className="flex items-center text-blue-300">
+                                    <Zap className="w-4 h-4 mr-2" />
+                                    <span className="font-bold mr-2">Agent Versioning:</span>
+                                    <span>Latest Stable: <span className="text-white font-mono">v2.0.0</span></span>
+                                </div>
+                                <div className="flex items-center text-xs text-slate-400">
+                                    <span className="mr-3">{actors.filter(a => a.protocolVersion === 'VPP-1.2').length} agents outdated</span>
+                                    {actors.length > 0 && <span className="bg-emerald-500/20 text-emerald-400 px-2 py-0.5 rounded">System Healthy</span>}
+                                </div>
+                            </div>
+
                             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
                                 {actors.map(actor => (
                                     <div key={actor.id} onClick={() => setSelectedActorId(actor.id)} className={`cursor-pointer bg-slate-800 p-6 rounded-xl border hover:border-blue-500 transition-all shadow-lg ${actor.status === 'COMPROMISED' ? 'border-red-500 shadow-red-500/20' : 'border-slate-700'}`}>
-                                        <div className="flex justify-between items-start">
+                                        <div className="flex justify-between items-start mb-2">
                                             <h3 className="text-lg font-bold text-slate-200">{actor.name}</h3>
+                                            <span className={`text-[10px] px-1.5 py-0.5 rounded ${actor.protocolVersion === 'VPP-1.2' ? 'bg-yellow-500/10 text-yellow-500' : 'bg-slate-700 text-slate-400'}`}>
+                                                {actor.protocolVersion || 'v1.0'}
+                                            </span>
                                         </div>
-                                        <p className="text-sm text-slate-500 font-mono">{actor.localIp}</p>
-                                        <div className="mt-4 flex justify-between text-xs text-slate-400">
+                                        <p className="text-sm text-slate-500 font-mono mb-4">{actor.localIp}</p>
+                                        <div className="flex justify-between text-xs text-slate-400">
                                             <span>Status: <span className={actor.status === 'ONLINE' ? 'text-emerald-400' : actor.status === 'COMPROMISED' ? 'text-red-500 font-bold animate-pulse' : 'text-red-400'}>{actor.status}</span></span>
                                             <span className="text-slate-500">{gateways.find(g => g.id === actor.proxyId)?.name || 'Direct'}</span>
                                         </div>

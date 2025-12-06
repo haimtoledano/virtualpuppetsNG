@@ -161,6 +161,19 @@ vpp-agent() {
         sleep 1
         echo "Persona configuration applied successfully."
         log "Persona changed to: \$2"
+    elif [[ "\$1" == "--update" ]]; then
+        echo "Downloading update package from C2..."
+        sleep 2
+        echo "Installing vpp-agent-v2.0.0..."
+        sleep 1
+        echo "Restarting service..."
+        log "Agent updated to v2.0.0"
+    elif [[ "\$1" == "--factory-reset" ]]; then
+        echo "Resetting agent configuration..."
+        sleep 1
+        echo "Clearing local caches..."
+        echo "Restoring default networking..."
+        log "Factory Reset Triggered"
     else
         echo "VPP Agent v2.1 - Status OK"
     fi
@@ -416,7 +429,7 @@ const runSchemaMigrations = async (pool) => {
         'SystemConfig': `ConfigKey NVARCHAR(50) PRIMARY KEY, ConfigValue NVARCHAR(MAX)`,
         'Users': `UserId NVARCHAR(50) PRIMARY KEY, Username NVARCHAR(100), PasswordHash NVARCHAR(255), Role NVARCHAR(20), MfaEnabled BIT DEFAULT 0, MfaSecret NVARCHAR(100), LastLogin DATETIME`,
         'Gateways': `GatewayId NVARCHAR(50) PRIMARY KEY, Name NVARCHAR(100), Location NVARCHAR(100), Status NVARCHAR(20), IpAddress NVARCHAR(50), Lat FLOAT, Lng FLOAT`,
-        'Actors': `ActorId NVARCHAR(50) PRIMARY KEY, HwId NVARCHAR(100), GatewayId NVARCHAR(50), Name NVARCHAR(100), Status NVARCHAR(20), LocalIp NVARCHAR(50), LastSeen DATETIME, Config NVARCHAR(MAX), OsVersion NVARCHAR(100), TunnelsJson NVARCHAR(MAX), Persona NVARCHAR(MAX), HasWifi BIT DEFAULT 0, HasBluetooth BIT DEFAULT 0, CpuLoad FLOAT DEFAULT 0, MemoryUsage FLOAT DEFAULT 0, Temperature FLOAT DEFAULT 0`,
+        'Actors': `ActorId NVARCHAR(50) PRIMARY KEY, HwId NVARCHAR(100), GatewayId NVARCHAR(50), Name NVARCHAR(100), Status NVARCHAR(20), LocalIp NVARCHAR(50), LastSeen DATETIME, Config NVARCHAR(MAX), OsVersion NVARCHAR(100), TunnelsJson NVARCHAR(MAX), Persona NVARCHAR(MAX), HoneyFilesJson NVARCHAR(MAX), HasWifi BIT DEFAULT 0, HasBluetooth BIT DEFAULT 0, CpuLoad FLOAT DEFAULT 0, MemoryUsage FLOAT DEFAULT 0, Temperature FLOAT DEFAULT 0`,
         'Logs': `LogId NVARCHAR(50) PRIMARY KEY, ActorId NVARCHAR(50), Level NVARCHAR(20), Process NVARCHAR(50), Message NVARCHAR(MAX), SourceIp NVARCHAR(50), Timestamp DATETIME`,
         'PendingActors': `Id NVARCHAR(50) PRIMARY KEY, HwId NVARCHAR(100), DetectedIp NVARCHAR(50), TargetGatewayId NVARCHAR(50), DetectedAt DATETIME, OsVersion NVARCHAR(100)`,
         'CommandQueue': `JobId NVARCHAR(50) PRIMARY KEY, ActorId NVARCHAR(50), Command NVARCHAR(MAX), Status NVARCHAR(20), Output NVARCHAR(MAX), CreatedAt DATETIME, UpdatedAt DATETIME`,
@@ -432,10 +445,11 @@ const runSchemaMigrations = async (pool) => {
             if (check.recordset.length === 0) {
                 await req.query(`CREATE TABLE ${name} (${schema})`);
             } else if (name === 'Actors') {
-                // Ensure new telemetry columns exist if table already exists
+                // Ensure columns exist if table already exists
                 try { await req.query(`ALTER TABLE Actors ADD CpuLoad FLOAT DEFAULT 0`); } catch(e){}
                 try { await req.query(`ALTER TABLE Actors ADD MemoryUsage FLOAT DEFAULT 0`); } catch(e){}
                 try { await req.query(`ALTER TABLE Actors ADD Temperature FLOAT DEFAULT 0`); } catch(e){}
+                try { await req.query(`ALTER TABLE Actors ADD HoneyFilesJson NVARCHAR(MAX)`); } catch(e){}
             }
         } catch (e) { }
     }
@@ -784,7 +798,7 @@ app.get('/api/commands/:actorId', async (req, res) => {
 
 // --- ACTOR MGMT ---
 
-app.get('/api/actors', async (req, res) => { if (!dbPool) return res.json([]); try { const result = await dbPool.request().query("SELECT * FROM Actors"); res.json(result.recordset.map(row => ({ id: row.ActorId, proxyId: row.GatewayId, name: row.Name, localIp: row.LocalIp, status: row.Status, lastSeen: row.LastSeen, osVersion: row.OsVersion, activeTunnels: row.TunnelsJson ? JSON.parse(row.TunnelsJson) : [], persona: row.Persona ? JSON.parse(row.Persona) : undefined, hasWifi: row.HasWifi, hasBluetooth: row.HasBluetooth, cpuLoad: row.CpuLoad, memoryUsage: row.MemoryUsage, temperature: row.Temperature }))); } catch (e) { res.status(500).json({error: e.message}); } });
+app.get('/api/actors', async (req, res) => { if (!dbPool) return res.json([]); try { const result = await dbPool.request().query("SELECT * FROM Actors"); res.json(result.recordset.map(row => ({ id: row.ActorId, proxyId: row.GatewayId, name: row.Name, localIp: row.LocalIp, status: row.Status, lastSeen: row.LastSeen, osVersion: row.OsVersion, activeTunnels: row.TunnelsJson ? JSON.parse(row.TunnelsJson) : [], deployedHoneyFiles: row.HoneyFilesJson ? JSON.parse(row.HoneyFilesJson) : [], persona: row.Persona ? JSON.parse(row.Persona) : undefined, hasWifi: row.HasWifi, hasBluetooth: row.HasBluetooth, cpuLoad: row.CpuLoad, memoryUsage: row.MemoryUsage, temperature: row.Temperature }))); } catch (e) { res.status(500).json({error: e.message}); } });
 
 app.put('/api/actors/:id', async (req, res) => {
     if (!dbPool) return res.json({success: false});
@@ -825,6 +839,15 @@ app.put('/api/actors/:id/persona', async (req, res) => {
     const persona = req.body;
     try {
         await dbPool.request().input('id', sql.NVarChar, req.params.id).input('json', sql.NVarChar, JSON.stringify(persona)).query("UPDATE Actors SET Persona = @json WHERE ActorId = @id");
+        res.json({success: true});
+    } catch(e) { res.status(500).json({error: e.message}); }
+});
+
+app.put('/api/actors/:id/honeyfiles', async (req, res) => {
+    if (!dbPool) return res.json({success: false});
+    const files = req.body;
+    try {
+        await dbPool.request().input('id', sql.NVarChar, req.params.id).input('json', sql.NVarChar, JSON.stringify(files)).query("UPDATE Actors SET HoneyFilesJson = @json WHERE ActorId = @id");
         res.json({success: true});
     } catch(e) { res.status(500).json({error: e.message}); }
 });

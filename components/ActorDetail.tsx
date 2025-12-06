@@ -1,11 +1,13 @@
 
+
+
 import React, { useState, useEffect, useMemo } from 'react';
 import { Actor, LogEntry, ActorStatus, AiAnalysis, ProxyGateway, HoneyFile, ActiveTunnel, DevicePersona, CommandJob, LogLevel } from '../types';
 import { executeRemoteCommand, getAvailableCloudTraps, toggleTunnelMock, AVAILABLE_PERSONAS, generateRandomLog } from '../services/mockService';
 import { analyzeLogsWithAi, generateDeceptionContent } from '../services/aiService';
-import { updateActorName, queueSystemCommand, getActorCommands, deleteActor, updateActorTunnels, updateActorPersona, resetActorStatus } from '../services/dbService';
+import { updateActorName, queueSystemCommand, getActorCommands, deleteActor, updateActorTunnels, updateActorPersona, resetActorStatus, resetActorToFactory, updateActorHoneyFiles } from '../services/dbService';
 import Terminal from './Terminal';
-import { Cpu, Wifi, Shield, Bot, ArrowLeft, BrainCircuit, Router, Network, FileCode, Check, Activity, X, Printer, Camera, Server, Edit2, Trash2, Loader, ShieldCheck, AlertOctagon, Skull, ArrowRight, Terminal as TerminalIcon, Globe, ScanSearch, Power, RefreshCw, History as HistoryIcon, Thermometer } from 'lucide-react';
+import { Cpu, Wifi, Shield, Bot, ArrowLeft, BrainCircuit, Router, Network, FileCode, Check, Activity, X, Printer, Camera, Server, Edit2, Trash2, Loader, ShieldCheck, AlertOctagon, Skull, ArrowRight, Terminal as TerminalIcon, Globe, ScanSearch, Power, RefreshCw, History as HistoryIcon, Thermometer, RefreshCcw } from 'lucide-react';
 
 interface ActorDetailProps {
   actor: Actor;
@@ -97,6 +99,7 @@ const ActorDetail: React.FC<ActorDetailProps> = ({ actor, gateway, logs: initial
   const [isEditingName, setIsEditingName] = useState(false);
   const [editedName, setEditedName] = useState(actor.name);
   const [isDeleting, setIsDeleting] = useState(false);
+  const [isResetting, setIsResetting] = useState(false);
 
   // Command & Terminal State
   const [commandHistory, setCommandHistory] = useState<CommandJob[]>([]);
@@ -272,6 +275,25 @@ const ActorDetail: React.FC<ActorDetailProps> = ({ actor, gateway, logs: initial
       actor.status = ActorStatus.ONLINE;
   };
 
+  // --- NEW: Factory Reset Handler ---
+  const handleFactoryReset = async () => {
+      if (!confirm(`Warning: This will clear all tunnels, deception files, and reset the agent state for ${actor.name}. Continue?`)) return;
+      
+      setIsResetting(true);
+      if (isProduction) {
+          await resetActorToFactory(actor.id);
+      } else {
+          await handleCommand('vpp-agent --factory-reset');
+      }
+      
+      // Clean UI State
+      setTunnels([]);
+      setHoneyFiles([]);
+      actor.status = ActorStatus.ONLINE;
+      
+      setTimeout(() => setIsResetting(false), 2000);
+  };
+
   const handleDeployDeception = async (type: 'CREDENTIALS' | 'CONFIG') => {
       setIsGeneratingDeception(true);
       const file = await generateDeceptionContent(type);
@@ -281,7 +303,12 @@ const ActorDetail: React.FC<ActorDetailProps> = ({ actor, gateway, logs: initial
           // Update the file object to reflect the actual path
           const updatedFile = { ...file, path: '/home/' };
           
-          setHoneyFiles(prev => [...prev, updatedFile]);
+          // In production, we need to persist this list to DB
+          const newFilesList = [...honeyFiles, updatedFile];
+          setHoneyFiles(newFilesList);
+          
+          if (isProduction) await updateActorHoneyFiles(actor.id, newFilesList);
+          
           await handleCommand(`echo "${file.contentPreview}" > ${targetPath}`);
       }
       setIsGeneratingDeception(false);
@@ -498,9 +525,21 @@ const ActorDetail: React.FC<ActorDetailProps> = ({ actor, gateway, logs: initial
                             className="bg-emerald-600 hover:bg-emerald-500 text-white px-4 py-2 rounded-lg font-bold flex items-center shadow-lg shadow-emerald-600/20"
                         >
                             <ShieldCheck className="w-4 h-4 mr-2" />
-                            ACKNOWLEDGE & RESET
+                            ACKNOWLEDGE ALERT
                         </button>
                     )}
+                    
+                    {/* FACTORY RESET BUTTON */}
+                    <button 
+                        onClick={handleFactoryReset}
+                        disabled={isResetting}
+                        className={`bg-orange-700/80 hover:bg-orange-600 text-white px-4 py-2 rounded-lg font-bold flex items-center shadow-lg transition-colors ${isResetting ? 'opacity-70' : ''}`}
+                        title="Reset to Base State"
+                    >
+                        {isResetting ? <Loader className="w-4 h-4 animate-spin mr-2" /> : <RefreshCcw className="w-4 h-4 mr-2" />}
+                        {isResetting ? 'RESETTING...' : 'FACTORY RESET'}
+                    </button>
+
                     <button 
                         onClick={handleDeleteActor} 
                         disabled={isDeleting}

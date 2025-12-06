@@ -1,6 +1,8 @@
 
 
 
+
+
 import { Actor, ProxyGateway, User, DbConfig, LogEntry, SystemConfig, Report, CommandJob, PendingActor, DevicePersona, WifiNetwork, BluetoothDevice } from '../types';
 
 const API_BASE = '/api';
@@ -97,12 +99,48 @@ export const resetActorStatus = async (id: string) => {
     });
 };
 
+// --- NEW: Factory Reset Actor ---
+export const resetActorToFactory = async (id: string) => {
+    // 1. Reset Status to ONLINE
+    await resetActorStatus(id);
+    // 2. Clear Tunnels
+    await updateActorTunnels(id, []);
+    // 3. Clear HoneyFiles
+    await updateActorHoneyFiles(id, []);
+    // 4. Send Command to Agent to clear local state
+    await queueSystemCommand(id, 'vpp-agent --factory-reset');
+    
+    // Note: Persona is NOT reset automatically to keep the "mask" consistent, 
+    // unless explicitly desired. If needed: await updateActorPersona(id, DEFAULT_PERSONA);
+};
+
+// --- NEW: Fleet Update ---
+export const triggerFleetUpdate = async (actors: Actor[]) => {
+    const onlineActors = actors.filter(a => a.status === 'ONLINE' || a.status === 'COMPROMISED');
+    
+    // Batch queue commands
+    const promises = onlineActors.map(actor => {
+        return queueSystemCommand(actor.id, 'vpp-agent --update --version=2.0.0');
+    });
+    
+    await Promise.all(promises);
+};
+
 // --- NEW: Update Actor Tunnels Persistence ---
 export const updateActorTunnels = async (actorId: string, tunnels: any[]) => {
     await fetch(`${API_BASE}/actors/${actorId}/tunnels`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(tunnels)
+    });
+};
+
+// --- NEW: Update Actor HoneyFiles Persistence ---
+export const updateActorHoneyFiles = async (actorId: string, files: any[]) => {
+    await fetch(`${API_BASE}/actors/${actorId}/honeyfiles`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(files)
     });
 };
 

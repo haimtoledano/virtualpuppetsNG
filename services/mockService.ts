@@ -94,6 +94,7 @@ export const generateInitialActors = (gateways: ProxyGateway[]): Actor[] => {
         activeTools: ['vpp-agent', 'tcpdump'],
         protocolVersion: 'VPP-1.2',
         activeTunnels: [],
+        deployedHoneyFiles: [],
         persona: AVAILABLE_PERSONAS[0],
         hasWifi: Math.random() > 0.5,
         hasBluetooth: Math.random() > 0.6
@@ -164,6 +165,26 @@ export const executeRemoteCommand = async (actorId: string, command: string): Pr
         resolve(`[${actorId}] Process terminated.`);
       } else if (command.startsWith('vpp-agent --set-persona')) {
         resolve(`Updating system persona...\nPersona configuration applied successfully.`);
+      } else if (command.includes('vpp-agent --factory-reset')) {
+        resolve(`
+[VPP-AGENT] Initiating Factory Reset...
+[INFO] Stopping network services... OK
+[INFO] Clearing tunnel configurations... OK
+[INFO] Removing deception artifacts... OK
+[INFO] Restoring default iptables policies... OK
+[VPP-AGENT] Reset Complete. Agent is now in base state.
+        `);
+      } else if (command.includes('vpp-agent --update')) {
+          resolve(`
+[VPP-UPDATER] Checking for updates...
+[INFO] Found version: v2.0.0-stable
+[INFO] Downloading package (4.2MB)... [====================] 100%
+[INFO] Verifying signature... OK
+[INFO] Stopping vpp-agent service...
+[INFO] Installing new binaries...
+[INFO] Restarting service...
+[VPP-AGENT] Update Successful. Running version v2.0.0.
+          `);
       } else if (command.includes('apt-get update')) {
         resolve(`
 Hit:1 http://archive.ubuntu.com/ubuntu jammy InRelease
