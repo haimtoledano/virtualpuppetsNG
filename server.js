@@ -1,6 +1,7 @@
 
 
 
+
 import express from 'express';
 import path from 'path';
 import fs from 'fs';
@@ -100,7 +101,7 @@ LOG_FILE="/var/log/vpp-agent.log"
 if [ "$EUID" -ne 0 ]; then echo "Please run as root"; exit 1; fi
 
 echo "--------------------------------------------------"
-echo "   Virtual Puppets Agent Bootstrap v7.0"
+echo "   Virtual Puppets Agent Bootstrap v7.1"
 echo "--------------------------------------------------"
 
 echo "[*] Checking dependencies..."
@@ -137,10 +138,49 @@ HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" \
 if [ "$HTTP_CODE" -ne "200" ]; then echo "[!] Registration failed."; exit 1; fi
 echo "[+] Registration successful. Waiting for approval..."
 
+# --- INSTALL VPP-AGENT BINARY ---
+cat <<'EOF_BIN' > /usr/local/bin/vpp-agent
+#!/bin/bash
+AGENT_DIR="/opt/vpp-agent"
+LOG_FILE="/var/log/vpp-agent.log"
+
+log() { echo "[$(date '+%Y-%m-%d %H:%M:%S')] \$1" >> \$LOG_FILE; }
+
+if [[ "\$1" == "--set-persona" ]]; then
+    echo "Updating system persona..."
+    sleep 1
+    echo "Persona configuration applied successfully."
+    log "Persona changed to: \$2"
+elif [[ "\$1" == "--set-sentinel" ]]; then
+    if [[ "\$2" == "on" ]]; then
+            touch "\$AGENT_DIR/sentinel_active"
+            log "SENTINEL MODE ENABLED (Paranoid)"
+            echo "Sentinel Mode: ON"
+            # Force immediate visual feedback in logs
+            echo "SENTINEL MODE ACTIVE" >> \$LOG_FILE
+    else
+            rm -f "\$AGENT_DIR/sentinel_active"
+            log "Sentinel Mode Disabled"
+            echo "Sentinel Mode: OFF"
+    fi
+elif [[ "\$1" == "--factory-reset" ]]; then
+    echo "Resetting agent configuration..."
+    rm -f "\$AGENT_DIR/sentinel_active"
+    log "Factory Reset Triggered"
+elif [[ "\$1" == "--update" ]]; then
+    log "Agent update triggered"
+    echo "Agent updated."
+else
+    echo "VPP Agent v2.1 - Status OK"
+    if [ -f "\$AGENT_DIR/sentinel_active" ]; then echo "Sentinel Mode: ACTIVE"; fi
+fi
+EOF_BIN
+chmod +x /usr/local/bin/vpp-agent
+
 cat <<EOF > $AGENT_DIR/agent.sh
 #!/bin/bash
 # Ensure standard paths are available
-export PATH=\$PATH:/usr/sbin:/sbin:/usr/bin:/bin
+export PATH=\$PATH:/usr/sbin:/sbin:/usr/bin:/bin:/usr/local/bin
 
 SERVER="$SERVER_URL"
 MY_HWID="$HWID"
@@ -156,43 +196,7 @@ log() { echo "[$(date '+%Y-%m-%d %H:%M:%S')] \$1" >> \$LOGF; }
 
 log "Agent Started. Initializing..."
 
-vpp-agent() {
-    log "VPP-Agent Command: \$*"
-    if [[ "\$1" == "--set-persona" ]]; then
-        echo "Updating system persona..."
-        sleep 1
-        echo "Persona configuration applied successfully."
-        log "Persona changed to: \$2"
-    elif [[ "\$1" == "--set-sentinel" ]]; then
-        if [[ "\$2" == "on" ]]; then
-             touch "\$AGENT_DIR/sentinel_active"
-             log "SENTINEL MODE ENABLED (Paranoid)"
-             echo "Sentinel Mode: ON"
-        else
-             rm -f "\$AGENT_DIR/sentinel_active"
-             log "Sentinel Mode Disabled"
-             echo "Sentinel Mode: OFF"
-        fi
-    elif [[ "\$1" == "--update" ]]; then
-        echo "Downloading update package from C2..."
-        sleep 2
-        echo "Installing vpp-agent-v2.0.0..."
-        sleep 1
-        echo "Restarting service..."
-        log "Agent updated to v2.0.0"
-    elif [[ "\$1" == "--factory-reset" ]]; then
-        echo "Resetting agent configuration..."
-        sleep 1
-        echo "Clearing local caches..."
-        echo "Restoring default networking..."
-        log "Factory Reset Triggered"
-    else
-        echo "VPP Agent v2.1 - Status OK"
-    fi
-    return 0
-}
-export -f vpp-agent
-
+# vpp-route function stub if needed, though usually just a command wrapper
 vpp-route() {
     log "VPP-Route Command: \$*"
     echo "Routing table updated."
@@ -278,7 +282,8 @@ done
 
         if [ "\$SENTINEL_MODE" = true ]; then
              # PARANOID MODE: Check for ANY established connection that is NOT loopback
-             # Excluding 127.0.0.1 and ::1
+             # Excluding 127.0.0.1, ::1, and our own C2 connection if possible (though generic exclusion is safer)
+             # Note: We grep -v for loopback
              RAW_LINES=\$(ss -ntap state established state syn-recv | grep -v "127.0.0.1" | grep -v "::1")
         else
              # NORMAL MODE: Only look for socat traps
@@ -351,9 +356,11 @@ while true; do
                 
                 curl -s -X POST -H "Content-Type: application/json" -d '{"jobId":"'"\$JOB_ID"'","status":"RUNNING","output":"Executing..."}' --max-time 10 "\$SERVER/api/agent/result" > /dev/null
                 
-                printf "%s\n" "\$CMD" > "\$AGENT_DIR/job.sh"
+                # Execute Job
+                printf "#!/bin/bash\n%s\n" "\$CMD" > "\$AGENT_DIR/job.sh"
                 chmod +x "\$AGENT_DIR/job.sh"
 
+                # Run with timeout
                 OUTPUT=\$(timeout 10s "\$AGENT_DIR/job.sh" 2>&1); EXIT_CODE=\$?
                 rm -f "\$AGENT_DIR/job.sh"
                 

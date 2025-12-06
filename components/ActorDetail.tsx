@@ -5,6 +5,8 @@
 
 
 
+
+
 import React, { useState, useEffect, useMemo } from 'react';
 import { Actor, LogEntry, ActorStatus, AiAnalysis, ProxyGateway, HoneyFile, ActiveTunnel, DevicePersona, CommandJob, LogLevel } from '../types';
 import { executeRemoteCommand, getAvailableCloudTraps, toggleTunnelMock, AVAILABLE_PERSONAS, generateRandomLog } from '../services/mockService';
@@ -425,6 +427,13 @@ const ActorDetail: React.FC<ActorDetailProps> = ({ actor, gateway, logs: initial
       
       // Send the visible command to the agent so it can activate its internal monitoring loop
       await handleCommand(`vpp-agent --set-sentinel ${newState ? 'on' : 'off'}`);
+      
+      // Force refresh of command list shortly after to show success state
+      if (isProduction) {
+          setTimeout(() => {
+              getActorCommands(actor.id).then(setCommandHistory);
+          }, 1500);
+      }
   };
 
   const handleTestLog = () => {
