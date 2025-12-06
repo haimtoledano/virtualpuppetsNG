@@ -587,7 +587,7 @@ const ActorDetail: React.FC<ActorDetailProps> = ({ actor, gateway, logs: initial
 
   // --- THREAT TOPOLOGY LOGIC ---
   const threatTopology = useMemo(() => {
-      const threats = new Map<string, { ip: string, protocol: string, count: number }>();
+      const threats = new Map<string, { ip: string, protocol: string, count: number, port?: string }>();
       const intercepted: string[] = [];
       const ipRegex = /(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})/;
 
@@ -599,6 +599,13 @@ const ActorDetail: React.FC<ActorDetailProps> = ({ actor, gateway, logs: initial
           if (log.sourceIp === 'Address' || log.message.includes('Address:Port')) return;
 
           let attackerIp = log.sourceIp;
+          let destPort = undefined;
+
+          // Attempt to extract destination port from message "to IP:PORT"
+          const portMatch = log.message.match(/to\s+(?:[0-9.]+|\[.*?\]):(\d+)/);
+          if (portMatch) {
+              destPort = portMatch[1];
+          }
 
           // If no structured SourceIP, try to extract from message (common in raw syslog/socat)
           if (!attackerIp && (log.level === 'WARNING' || log.level === 'CRITICAL')) {
@@ -613,9 +620,15 @@ const ActorDetail: React.FC<ActorDetailProps> = ({ actor, gateway, logs: initial
           }
 
           if (attackerIp && (log.level === 'WARNING' || log.level === 'CRITICAL')) {
-              const existing = threats.get(attackerIp) || { ip: attackerIp, protocol: log.process, count: 0 };
-              existing.count++;
-              threats.set(attackerIp, existing);
+              let existing = threats.get(attackerIp);
+              if (!existing) {
+                   existing = { ip: attackerIp, protocol: log.process, count: 0, port: destPort };
+                   threats.set(attackerIp, existing);
+              } else {
+                   existing.count++;
+                   // If port wasn't set by a newer log, update it
+                   if (!existing.port && destPort) existing.port = destPort;
+              }
           }
           // Simple heuristic for command interception in logs
           if (log.message.includes('cmd:') || log.message.includes('Executing') || log.message.includes('stdin')) {
@@ -927,10 +940,13 @@ const ActorDetail: React.FC<ActorDetailProps> = ({ actor, gateway, logs: initial
                                     <div className="w-full h-0.5 bg-slate-700 relative overflow-hidden">
                                         <div className="absolute inset-0 bg-red-500/50 animate-progress"></div>
                                     </div>
-                                    {/* Protocol Label */}
-                                    <span className="absolute top-0 left-1/2 -translate-x-1/2 -translate-y-1/2 bg-slate-900 px-2 text-[10px] text-red-300 font-mono border border-red-900 rounded">
-                                        {threat.protocol.toUpperCase()}
-                                    </span>
+                                    {/* Protocol & Port Label */}
+                                    <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
+                                        <span className="bg-slate-900 px-2 text-[10px] text-red-300 font-mono border border-red-900 rounded z-10">
+                                            {threat.protocol.toUpperCase()}
+                                        </span>
+                                        {threat.port && <span className="text-[9px] text-red-400 font-bold bg-slate-900/80 px-1 rounded -mt-px z-10">:{threat.port}</span>}
+                                    </div>
                                     {/* Arrow Head */}
                                     <ArrowRight className="absolute right-0 text-slate-700 w-4 h-4" />
                                 </div>
