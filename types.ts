@@ -177,12 +177,19 @@ export interface AuthState {
 // --- Report Types ---
 
 export interface ReportContent {
-  totalEvents: number;
-  criticalEvents: number;
-  activeNodes: number;
-  compromisedNodes: number;
-  topAttackers: { ip: string; count: number }[];
+  totalEvents?: number;
+  criticalEvents?: number;
+  activeNodes?: number;
+  compromisedNodes?: number;
+  topAttackers?: { ip: string; count: number }[];
   summaryText: string;
+  // For Manual Reports
+  customBody?: string;
+  incidentDetails?: {
+      incidentTime: string;
+      vector: string;
+      mitigation: string;
+  };
 }
 
 export interface Report {
@@ -191,7 +198,7 @@ export interface Report {
   generatedBy: string;
   dateRange: string;
   createdAt: Date;
-  type: 'SECURITY_AUDIT' | 'ACTIVITY_SUMMARY' | 'INCIDENT_LOG';
+  type: 'SECURITY_AUDIT' | 'ACTIVITY_SUMMARY' | 'INCIDENT_LOG' | 'CUSTOM';
   status: 'READY' | 'GENERATING';
   content?: ReportContent; // JSON data for the report
 }

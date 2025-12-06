@@ -117,9 +117,8 @@ if command -v apt-get &> /dev/null; then
     if ! command -v nmcli &> /dev/null; then apt-get install -y network-manager -qq; fi
     if ! command -v hcitool &> /dev/null; then apt-get install -y bluez -qq; fi
     if ! command -v ss &> /dev/null; then apt-get install -y iproute2 -qq; fi
+    if ! command -v awk &> /dev/null; then apt-get install -y gawk -qq; fi
     if ! command -v socat &> /dev/null; then apt-get install -y socat -qq; fi
-    if ! command -v netstat &> /dev/null; then apt-get install -y net-tools -qq; fi
-    if ! command -v lsof &> /dev/null; then apt-get install -y lsof -qq; fi
 fi
 
 HWID=$(cat /sys/class/net/eth0/address 2>/dev/null || cat /sys/class/net/wlan0/address 2>/dev/null || hostname)
@@ -961,7 +960,7 @@ app.get('/api/agent/heartbeat', async (req, res) => {
 
 app.post('/api/reports/generate', async (req, res) => {
     if (!dbPool) return res.json({success: false});
-    const { type, generatedBy } = req.body;
+    const { type, generatedBy, customBody, incidentDetails } = req.body;
     try {
         const r1 = await dbPool.request().query("SELECT COUNT(*) as C FROM Logs");
         const r2 = await dbPool.request().query("SELECT COUNT(*) as C FROM Actors WHERE Status = 'ONLINE'");
@@ -971,12 +970,21 @@ app.post('/api/reports/generate', async (req, res) => {
             totalEvents: r1.recordset[0].C,
             activeNodes: r2.recordset[0].C,
             compromisedNodes: r3.recordset[0].C,
-            topAttackers: [],
-            summaryText: "Automated analysis of system telemetry indicates normal operating parameters with sporadic anomalies detected."
+            topAttackers: [], // Populate if Security Audit
+            summaryText: type === 'CUSTOM' ? customBody : "Automated analysis of system telemetry.",
+            // Specific Fields
+            customBody: customBody,
+            incidentDetails: incidentDetails
         };
         
+        // If Audit, get attackers
+        if (type === 'SECURITY_AUDIT') {
+             // Mock attackers for now, in production you'd query Logs GROUP BY SourceIp
+             content.topAttackers = []; 
+        }
+        
         const rid = `rep-${Math.random().toString(36).substr(2,6)}`;
-        const title = `Security Audit - ${new Date().toLocaleDateString()}`;
+        const title = type === 'CUSTOM' ? 'Analyst Note' : type === 'INCIDENT_LOG' ? 'Incident Response Log' : `Security Audit - ${new Date().toLocaleDateString()}`;
         
         await dbPool.request().input('rid', sql.NVarChar, rid).input('json', sql.NVarChar, JSON.stringify(content)).query(`INSERT INTO Reports (ReportId, Title, GeneratedBy, Type, CreatedAt, ContentJson) VALUES ('${title}', '${title}', '${generatedBy}', '${type}', GETDATE(), @json)`);
         res.json({success: true});

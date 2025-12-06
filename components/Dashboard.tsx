@@ -1,3 +1,4 @@
+
 import React, { useMemo } from 'react';
 import { Actor, ActorStatus, LogEntry, LogLevel, ProxyGateway } from '../types';
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid, LineChart, Line } from 'recharts';
@@ -80,12 +81,12 @@ const Dashboard: React.FC<DashboardProps> = ({ gateways, actors, logs, onActorSe
   );
 
   return (
-    <div className="space-y-4 animate-fade-in pb-4">
+    <div className="flex flex-col h-[calc(100vh-100px)] space-y-4 animate-fade-in pb-2 overflow-hidden">
         
       {/* Alert Banner for Compromised Nodes */}
       {compromisedNodes.length > 0 && (
-          <div className="bg-red-500/10 border border-red-500 rounded-lg p-3 flex flex-col md:flex-row items-center justify-between animate-pulse shadow-lg shadow-red-900/20">
-              <div className="flex items-center mb-2 md:mb-0">
+          <div className="bg-red-500/10 border border-red-500 rounded-lg p-2 flex flex-col md:flex-row items-center justify-between animate-pulse shadow-lg shadow-red-900/20 shrink-0">
+              <div className="flex items-center mb-1 md:mb-0">
                   <AlertTriangle className="text-red-500 w-5 h-5 mr-3" />
                   <div>
                       <h3 className="text-red-400 font-bold text-sm tracking-wide">ACTIVE THREAT DETECTED</h3>
@@ -107,7 +108,7 @@ const Dashboard: React.FC<DashboardProps> = ({ gateways, actors, logs, onActorSe
       )}
 
       {/* Top Stats Cards - Compact */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 shrink-0">
         <div className="bg-slate-800 p-3 rounded-lg border border-slate-700 flex items-center shadow-lg">
             <div className="p-2 bg-indigo-500/20 rounded-full mr-3">
                 <Network className="text-indigo-400 w-5 h-5" />
@@ -149,14 +150,13 @@ const Dashboard: React.FC<DashboardProps> = ({ gateways, actors, logs, onActorSe
         </div>
       </div>
 
-      {/* Main Content Split */}
-      {/* LG: Fixed height calculated from viewport. Mobile: Auto height with fixed-height children. */}
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-4 lg:h-[calc(100vh-220px)]">
+      {/* Main Content Split - Use flex-1 to fill remaining height */}
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-4 flex-1 min-h-0">
         
         {/* Left Col: Charts & Fleet Matrix (7 cols) */}
-        <div className="lg:col-span-7 flex flex-col space-y-4 h-[600px] lg:h-full">
+        <div className="lg:col-span-7 flex flex-col space-y-4 h-full min-h-0">
             
-            <div className="flex space-x-4 h-1/3 min-h-[200px]">
+            <div className="flex space-x-4 h-1/3 min-h-[180px] shrink-0">
                 {/* Traffic Chart */}
                 <div className="bg-slate-800 rounded-lg border border-slate-700 p-3 shadow-lg flex-1">
                     <h3 className="text-xs font-semibold text-slate-400 mb-2 flex items-center">
@@ -181,11 +181,12 @@ const Dashboard: React.FC<DashboardProps> = ({ gateways, actors, logs, onActorSe
 
                  {/* Top Attackers Panel */}
                  <div className="bg-slate-800 rounded-lg border border-slate-700 p-3 shadow-lg w-1/3 overflow-hidden flex flex-col">
-                    <h3 className="text-xs font-semibold text-slate-400 mb-2 flex items-center">
+                    <h3 className="text-xs font-semibold text-slate-400 mb-2 flex items-center shrink-0">
                         <Skull className="w-3 h-3 mr-2 text-red-400" />
                         TOP THREATS
                     </h3>
-                    <div className="flex-1 overflow-y-auto space-y-2 scrollbar-thin">
+                    {/* Internal Scroll Here */}
+                    <div className="flex-1 overflow-y-auto space-y-2 scrollbar-thin scrollbar-thumb-slate-600 scrollbar-track-slate-800 pr-1">
                         {topAttackers.length === 0 ? (
                             <div className="text-slate-600 text-xs text-center mt-4">No active threats</div>
                         ) : (
@@ -204,8 +205,8 @@ const Dashboard: React.FC<DashboardProps> = ({ gateways, actors, logs, onActorSe
             </div>
 
             {/* Fleet Matrix - Remaining Height */}
-            <div className="bg-slate-800 rounded-lg border border-slate-700 p-4 shadow-lg flex-1 overflow-hidden flex flex-col min-h-0">
-                <h3 className="text-xs font-semibold text-slate-400 mb-3 flex justify-between items-center">
+            <div className="bg-slate-800 rounded-lg border border-slate-700 p-4 shadow-lg flex-1 flex flex-col min-h-0 overflow-hidden">
+                <h3 className="text-xs font-semibold text-slate-400 mb-3 flex justify-between items-center shrink-0">
                     <span>FLEET MATRIX ({stats.totalActors} NODES)</span>
                     <div className="flex items-center space-x-3 text-[10px] font-normal">
                         <span className="flex items-center"><span className="w-2 h-2 bg-emerald-500 rounded-sm mr-1"></span> ONLINE</span>
@@ -214,7 +215,8 @@ const Dashboard: React.FC<DashboardProps> = ({ gateways, actors, logs, onActorSe
                     </div>
                 </h3>
                 
-                <div className="flex-1 overflow-y-auto pr-1 space-y-4 scrollbar-thin scrollbar-thumb-slate-700">
+                {/* Internal Scroll Here */}
+                <div className="flex-1 overflow-y-auto pr-2 space-y-4 scrollbar-thin scrollbar-thumb-slate-600 scrollbar-track-slate-800">
                     {/* Assigned Gateways */}
                     {gateways.map(gw => {
                         const gwActors = actors.filter(a => a.proxyId === gw.id);
@@ -265,8 +267,8 @@ const Dashboard: React.FC<DashboardProps> = ({ gateways, actors, logs, onActorSe
             </div>
         </div>
 
-        {/* Right Col: Terminal (5 cols) - Full Height on Desktop, Fixed height on Mobile */}
-        <div className="lg:col-span-5 h-[350px] lg:h-full">
+        {/* Right Col: Terminal (5 cols) - Full Height */}
+        <div className="lg:col-span-5 h-full min-h-0 flex flex-col">
             <Terminal logs={recentLogs} height="h-full" />
         </div>
 

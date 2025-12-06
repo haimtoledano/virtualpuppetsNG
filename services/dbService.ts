@@ -228,12 +228,13 @@ export const getReports = async (): Promise<Report[]> => {
     } catch { return []; }
 };
 
-export const generateReport = async (type: string, generatedBy: string): Promise<boolean> => {
+// Updated signature to handle custom data
+export const generateReport = async (payload: any): Promise<boolean> => {
     try {
         await fetch(`${API_BASE}/reports/generate`, {
              method: 'POST',
              headers: { 'Content-Type': 'application/json' },
-             body: JSON.stringify({ type, generatedBy })
+             body: JSON.stringify(payload)
         });
         return true;
     } catch { return false; }
