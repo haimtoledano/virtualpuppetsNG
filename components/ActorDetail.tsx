@@ -618,8 +618,8 @@ const ActorDetail: React.FC<ActorDetailProps> = ({ actor, gateway, logs: initial
           }, 15000);
 
       } else {
-          // MOCK MODE
-          const data = await performForensicScan(actor.id);
+          // MOCK MODE: Pass actor context for dynamic forensic generation
+          const data = await performForensicScan(actor.id, actor);
           setForensicData(data);
           setIsGatheringForensics(false);
       }
@@ -987,7 +987,7 @@ const ActorDetail: React.FC<ActorDetailProps> = ({ actor, gateway, logs: initial
                                             </thead>
                                             <tbody className="divide-y divide-slate-700 bg-slate-800">
                                                 {forensicData.processes.map((proc, i) => (
-                                                    <tr key={i} className={`hover:bg-slate-700/50 ${proc.risk === 'HIGH' ? 'bg-red-900/10' : ''}`}>
+                                                    <tr key={i} className={`hover:bg-slate-700/50 ${proc.risk === 'HIGH' ? 'bg-red-900/10' : proc.risk === 'MEDIUM' ? 'bg-yellow-900/10' : ''}`}>
                                                         <td className="p-2 font-mono text-slate-400">{proc.pid}</td>
                                                         <td className="p-2 text-white">{proc.user}</td>
                                                         <td className="p-2 text-slate-300">{proc.cpu}</td>
@@ -996,7 +996,9 @@ const ActorDetail: React.FC<ActorDetailProps> = ({ actor, gateway, logs: initial
                                                         <td className="p-2 text-right">
                                                             {proc.risk === 'HIGH' 
                                                                 ? <span className="bg-red-600 text-white px-1.5 py-0.5 rounded text-[10px] font-bold">HIGH</span>
-                                                                : <span className="text-slate-600 text-[10px]">LOW</span>
+                                                                : proc.risk === 'MEDIUM' 
+                                                                    ? <span className="bg-yellow-600 text-white px-1.5 py-0.5 rounded text-[10px] font-bold">MED</span>
+                                                                    : <span className="text-slate-600 text-[10px]">LOW</span>
                                                             }
                                                         </td>
                                                     </tr>

