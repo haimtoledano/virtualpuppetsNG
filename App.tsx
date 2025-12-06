@@ -5,6 +5,8 @@
 
 
 
+
+
 import React, { useState, useEffect, useCallback, Suspense } from 'react';
 import { generateInitialActors, generateRandomLog, generateGateways } from './services/mockService';
 import { dbQuery, dbUpdate, getSystemConfig, getPendingActors, approvePendingActor, rejectPendingActor, getSystemLogs, sendAuditLog, triggerFleetUpdate } from './services/dbService';
@@ -45,6 +47,7 @@ const App: React.FC = () => {
   const [pendingActors, setPendingActors] = useState<PendingActor[]>([]);
   const [isEnrollmentOpen, setIsEnrollmentOpen] = useState(false);
   const [isUpdatingFleet, setIsUpdatingFleet] = useState(false);
+  const [autoForensicTarget, setAutoForensicTarget] = useState<string | null>(null);
 
   useEffect(() => {
       if (!currentUser || !isProduction) return;
@@ -223,6 +226,11 @@ const App: React.FC = () => {
       }
       setIsUpdatingFleet(false);
   };
+  
+  const handleQuickForensic = (actorId: string) => {
+      setSelectedActorId(actorId);
+      setAutoForensicTarget(actorId);
+  };
 
   if (isProduction && !currentUser) return (
     <Suspense fallback={<div className="min-h-screen bg-cyber-900 flex items-center justify-center text-blue-500 font-mono text-sm tracking-wider">INITIALIZING SECURE ENVIRONMENT...</div>}>
@@ -241,14 +249,15 @@ const App: React.FC = () => {
                     actor={selectedActor} 
                     gateway={selectedActorGateway} 
                     logs={logs.filter(l => l.actorId === selectedActorId)} 
-                    onBack={() => setSelectedActorId(null)} 
+                    onBack={() => { setSelectedActorId(null); setAutoForensicTarget(null); }} 
                     isProduction={isProduction}
                     currentUser={currentUser}
                     onUpdatePreferences={handleUpdateUserPreferences}
+                    autoRunForensic={autoForensicTarget === selectedActor.id}
                 />
             ) : (
                 <>
-                    {activeTab === 'dashboard' && <Dashboard gateways={gateways} actors={actors} logs={logs} onActorSelect={setSelectedActorId} />}
+                    {activeTab === 'dashboard' && <Dashboard gateways={gateways} actors={actors} logs={logs} onActorSelect={setSelectedActorId} onQuickForensic={handleQuickForensic} />}
                     {activeTab === 'map' && <WarRoomMap gateways={gateways} actors={actors} />}
                     {activeTab === 'reports' && <Reports currentUser={currentUser} logs={logs} actors={actors} />}
                     {activeTab === 'gateways' && <GatewayManager gateways={gateways} onRefresh={loadProductionData} domain={systemConfig?.domain || 'vpp.io'} isProduction={isProduction} />}

@@ -1,10 +1,12 @@
+
+
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { Actor, LogEntry, ActorStatus, AiAnalysis, ProxyGateway, HoneyFile, ActiveTunnel, DevicePersona, CommandJob, LogLevel, User, UserPreferences, ForensicSnapshot, ForensicProcess, AttackSession } from '../types';
 import { executeRemoteCommand, getAvailableCloudTraps, toggleTunnelMock, AVAILABLE_PERSONAS, generateRandomLog, performForensicScan, getAttackSessions } from '../services/mockService';
 import { analyzeLogsWithAi, generateDeceptionContent } from '../services/aiService';
-import { updateActorName, queueSystemCommand, getActorCommands, deleteActor, updateActorTunnels, updateActorPersona, resetActorStatus, resetActorToFactory, updateActorHoneyFiles, toggleActorSentinel } from '../services/dbService';
+import { updateActorName, queueSystemCommand, getActorCommands, deleteActor, updateActorTunnels, updateActorPersona, resetActorStatus, resetActorToFactory, updateActorHoneyFiles, toggleActorSentinel, generateReport } from '../services/dbService';
 import Terminal from './Terminal';
-import { Cpu, Wifi, Shield, Bot, ArrowLeft, BrainCircuit, Router, Network, FileCode, Check, Activity, X, Printer, Camera, Server, Edit2, Trash2, Loader, ShieldCheck, AlertOctagon, Skull, ArrowRight, Terminal as TerminalIcon, Globe, ScanSearch, Power, RefreshCw, History as HistoryIcon, Thermometer, RefreshCcw, Siren, Eye, Fingerprint, Info, Cable, Search, Lock, Zap, FileText, HardDrive, List, Play, Pause, FastForward, Rewind, Film, Database, Monitor } from 'lucide-react';
+import { Cpu, Wifi, Shield, Bot, ArrowLeft, BrainCircuit, Router, Network, FileCode, Check, Activity, X, Printer, Camera, Server, Edit2, Trash2, Loader, ShieldCheck, AlertOctagon, Skull, ArrowRight, Terminal as TerminalIcon, Globe, ScanSearch, Power, RefreshCw, History as HistoryIcon, Thermometer, RefreshCcw, Siren, Eye, Fingerprint, Info, Cable, Search, Lock, Zap, FileText, HardDrive, List, Play, Pause, FastForward, Rewind, Film, Database, Monitor, Save } from 'lucide-react';
 
 interface ActorDetailProps {
   actor: Actor;
@@ -14,6 +16,7 @@ interface ActorDetailProps {
   isProduction?: boolean;
   currentUser?: User | null;
   onUpdatePreferences?: (prefs: UserPreferences) => void;
+  autoRunForensic?: boolean;
 }
 
 const DEFAULT_TRAP_PORTS: Record<string, number> = {
@@ -89,7 +92,7 @@ const Gauge = ({ value, label, type, unit = '%', icon: Icon }: { value: number, 
 };
 
 
-const ActorDetail: React.FC<ActorDetailProps> = ({ actor, gateway, logs: initialLogs, onBack, isProduction, currentUser, onUpdatePreferences }) => {
+const ActorDetail: React.FC<ActorDetailProps> = ({ actor, gateway, logs: initialLogs, onBack, isProduction, currentUser, onUpdatePreferences, autoRunForensic }) => {
   const [activeTab, setActiveTab] = useState<'OVERVIEW' | 'TERMINAL' | 'DECEPTION' | 'NETWORK' | 'FORENSICS'>('OVERVIEW');
   
   // Local log state for "Live Telemetry" injection
@@ -143,6 +146,8 @@ const ActorDetail: React.FC<ActorDetailProps> = ({ actor, gateway, logs: initial
   const [isGatheringForensics, setIsGatheringForensics] = useState(false);
   const [forensicData, setForensicData] = useState<ForensicSnapshot | null>(null);
   const [forensicView, setForensicView] = useState<'SNAPSHOT' | 'SESSIONS'>('SNAPSHOT');
+  const [isSavingReport, setIsSavingReport] = useState(false);
+  const hasAutoRunRef = useRef(false);
   
   // GHOST MODE / REPLAY STATE
   const [recordedSessions, setRecordedSessions] = useState<AttackSession[]>([]);
@@ -276,6 +281,17 @@ const ActorDetail: React.FC<ActorDetailProps> = ({ actor, gateway, logs: initial
           setReplayContent(content);
       }
   }, [replayTime, activeSession]);
+
+  // --- AUTO RUN FORENSIC LOGIC ---
+  useEffect(() => {
+      if (autoRunForensic && !hasAutoRunRef.current) {
+          hasAutoRunRef.current = true;
+          setActiveTab('FORENSICS');
+          setForensicView('SNAPSHOT');
+          // Add small delay to allow tab switch rendering
+          setTimeout(() => handleForensicScan(), 100);
+      }
+  }, [autoRunForensic]);
 
   const handleFetchIp = async () => {
       let hasPending = false;
@@ -624,6 +640,25 @@ const ActorDetail: React.FC<ActorDetailProps> = ({ actor, gateway, logs: initial
           setIsGatheringForensics(false);
       }
   };
+  
+  const handleSaveForensicReport = async () => {
+      if (!forensicData || !currentUser) return;
+      setIsSavingReport(true);
+      
+      const payload = {
+          type: 'FORENSIC_SNAPSHOT',
+          generatedBy: currentUser.username,
+          snapshotData: forensicData
+      };
+      
+      const success = await generateReport(payload);
+      if (success) {
+          alert("Snapshot saved successfully to System Reports.");
+      } else {
+          alert("Failed to save report.");
+      }
+      setIsSavingReport(false);
+  };
 
   // --- THREAT TOPOLOGY LOGIC ---
   const threatTopology = useMemo(() => {
@@ -933,7 +968,17 @@ const ActorDetail: React.FC<ActorDetailProps> = ({ actor, gateway, logs: initial
                     {/* --- SNAPSHOT VIEW --- */}
                     {forensicView === 'SNAPSHOT' && (
                         <>
-                            <div className="flex justify-end mb-4">
+                            <div className="flex justify-end mb-4 space-x-3">
+                                {forensicData && (
+                                    <button
+                                        onClick={handleSaveForensicReport}
+                                        disabled={isSavingReport}
+                                        className="bg-slate-700 hover:bg-slate-600 text-white px-4 py-2 rounded font-bold text-sm flex items-center transition-colors"
+                                    >
+                                        {isSavingReport ? <Loader className="w-4 h-4 mr-2 animate-spin"/> : <Save className="w-4 h-4 mr-2"/>}
+                                        SAVE AS REPORT
+                                    </button>
+                                )}
                                 <button 
                                     onClick={handleForensicScan}
                                     disabled={isGatheringForensics}

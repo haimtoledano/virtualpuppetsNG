@@ -2,6 +2,8 @@
 
 
 
+
+
 import express from 'express';
 import path from 'path';
 import fs from 'fs';
@@ -979,7 +981,7 @@ app.put('/api/actors/:id/sentinel', async (req, res) => {
 
 app.post('/api/reports/generate', async (req, res) => {
     if (!dbPool) return res.json({success: false});
-    const { type, generatedBy, customBody, incidentDetails, incidentFilters } = req.body;
+    const { type, generatedBy, customBody, incidentDetails, incidentFilters, snapshotData } = req.body;
     
     try {
         const r1 = await dbPool.request().query("SELECT COUNT(*) as C FROM Logs");
@@ -993,7 +995,8 @@ app.post('/api/reports/generate', async (req, res) => {
             summaryText: "Report Generated.",
             customBody: customBody || '', // AI Text or Manual Text
             incidentDetails: incidentDetails,
-            incidentFilters: incidentFilters
+            incidentFilters: incidentFilters,
+            snapshotData: snapshotData // NEW: Pass forensic snapshot data to report
         };
         
         let title = `Report - ${new Date().toLocaleDateString()}`;
@@ -1030,6 +1033,10 @@ app.post('/api/reports/generate', async (req, res) => {
         }
         else if (type === 'CUSTOM') {
             title = 'Analyst Note';
+        }
+        else if (type === 'FORENSIC_SNAPSHOT') {
+             title = `Forensic Snapshot - ${new Date().toLocaleTimeString()}`;
+             content.summaryText = "Volatile system state capture for incident analysis.";
         }
         
         const rid = `rep-${Math.random().toString(36).substr(2,6)}`;

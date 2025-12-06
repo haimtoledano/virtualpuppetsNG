@@ -1,8 +1,10 @@
 
+
+
 import React, { useMemo } from 'react';
 import { Actor, ActorStatus, LogEntry, LogLevel, ProxyGateway } from '../types';
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid, LineChart, Line } from 'recharts';
-import { ShieldAlert, Server, Activity, Terminal as TerminalIcon, AlertTriangle, Network, Router, Cpu, Info, Globe, Skull, Cloud } from 'lucide-react';
+import { ShieldAlert, Server, Activity, Terminal as TerminalIcon, AlertTriangle, Network, Router, Cpu, Info, Globe, Skull, Cloud, Zap } from 'lucide-react';
 import Terminal from './Terminal';
 
 interface DashboardProps {
@@ -10,9 +12,10 @@ interface DashboardProps {
   actors: Actor[];
   logs: LogEntry[];
   onActorSelect?: (id: string) => void;
+  onQuickForensic?: (id: string) => void;
 }
 
-const Dashboard: React.FC<DashboardProps> = ({ gateways, actors, logs, onActorSelect }) => {
+const Dashboard: React.FC<DashboardProps> = ({ gateways, actors, logs, onActorSelect, onQuickForensic }) => {
   
   const stats = useMemo(() => {
     return {
@@ -95,15 +98,27 @@ const Dashboard: React.FC<DashboardProps> = ({ gateways, actors, logs, onActorSe
                       </p>
                   </div>
               </div>
-              {onActorSelect && (
-                  <button 
-                    onClick={() => onActorSelect(compromisedNodes[0].id)}
-                    className="bg-red-600 hover:bg-red-500 text-white px-4 py-1.5 rounded text-xs font-bold transition-colors shadow-lg shadow-red-600/20 flex items-center"
-                  >
-                      <ShieldAlert className="w-3 h-3 mr-2" />
-                      INVESTIGATE
-                  </button>
-              )}
+              <div className="flex space-x-2">
+                 {onQuickForensic && (
+                      <button 
+                        onClick={() => onQuickForensic(compromisedNodes[0].id)}
+                        className="bg-red-900/50 hover:bg-red-800 text-white border border-red-500 px-4 py-1.5 rounded text-xs font-bold transition-colors shadow-lg flex items-center"
+                        title="Run immediate forensic analysis"
+                      >
+                          <Zap className="w-3 h-3 mr-2" />
+                          SNAPSHOT
+                      </button>
+                  )}
+                  {onActorSelect && (
+                      <button 
+                        onClick={() => onActorSelect(compromisedNodes[0].id)}
+                        className="bg-red-600 hover:bg-red-500 text-white px-4 py-1.5 rounded text-xs font-bold transition-colors shadow-lg shadow-red-600/20 flex items-center"
+                      >
+                          <ShieldAlert className="w-3 h-3 mr-2" />
+                          INVESTIGATE
+                      </button>
+                  )}
+              </div>
           </div>
       )}
 

@@ -1,12 +1,8 @@
-
-
-
-
 import React, { useState, useEffect, useRef } from 'react';
 import { Report, SystemConfig, User, LogEntry, Actor } from '../types';
 import { getReports, generateReport, getSystemConfig, deleteReport } from '../services/dbService';
 import { generateCustomAiReport } from '../services/aiService';
-import { FileText, Download, Loader, Eye, X, Printer, ShieldCheck, Plus, AlertTriangle, PenTool, Search, Calendar, Server, Filter, Bot, BarChart2, Trash2 } from 'lucide-react';
+import { FileText, Download, Loader, Eye, X, Printer, ShieldCheck, Plus, AlertTriangle, PenTool, Search, Calendar, Server, Filter, Bot, BarChart2, Trash2, Cpu, Network, Key, Save } from 'lucide-react';
 import mermaid from 'mermaid';
 
 interface ReportsProps {
@@ -273,18 +269,53 @@ const Reports: React.FC<ReportsProps> = ({ currentUser, logs = [], actors = [] }
                                    </div>
                                </div>
                           )}
+                          
+                          {/* 3. FORENSIC SNAPSHOT DISPLAY */}
+                          {report.type === 'FORENSIC_SNAPSHOT' && report.content.snapshotData && (
+                              <div className="space-y-6 mb-8">
+                                  <div className="grid grid-cols-2 gap-4">
+                                       <div className="border p-4 bg-slate-50 rounded">
+                                            <h4 className="font-bold text-xs uppercase mb-2 flex items-center"><Cpu className="w-3 h-3 mr-1"/> Top Processes</h4>
+                                            <table className="w-full text-xs">
+                                                <thead><tr className="border-b border-slate-300"><th className="text-left">PID</th><th>CMD</th><th className="text-right">CPU</th></tr></thead>
+                                                <tbody>
+                                                    {report.content.snapshotData.processes.slice(0,5).map((p,i) => (
+                                                        <tr key={i} className="border-b border-slate-200">
+                                                            <td className="font-mono">{p.pid}</td>
+                                                            <td className="truncate max-w-[100px]">{p.command}</td>
+                                                            <td className="text-right">{p.cpu}%</td>
+                                                        </tr>
+                                                    ))}
+                                                </tbody>
+                                            </table>
+                                       </div>
+                                       <div className="border p-4 bg-slate-50 rounded">
+                                            <h4 className="font-bold text-xs uppercase mb-2 flex items-center"><Network className="w-3 h-3 mr-1"/> Network</h4>
+                                            <div className="text-[10px] font-mono whitespace-pre-wrap overflow-hidden h-32">
+                                                {report.content.snapshotData.connections.slice(0,5).join('\n')}
+                                            </div>
+                                       </div>
+                                  </div>
+                                  <div className="border p-4 bg-slate-50 rounded">
+                                       <h4 className="font-bold text-xs uppercase mb-2 flex items-center"><Key className="w-3 h-3 mr-1"/> Auth Log Snippet</h4>
+                                       <div className="text-[10px] font-mono whitespace-pre-wrap bg-white border p-2 rounded">
+                                            {report.content.snapshotData.authLogs.slice(0,5).join('\n')}
+                                       </div>
+                                  </div>
+                              </div>
+                          )}
 
-                          {/* 3. BODY TEXT (Summary or Custom/AI with Mermaid) */}
+                          {/* 4. BODY TEXT (Summary or Custom/AI with Mermaid) */}
                           <div className="mb-8">
                               <h3 className="text-sm font-bold uppercase border-b border-slate-300 mb-4 pb-1">
-                                  {report.type === 'CUSTOM' ? 'Analyst Notes' : report.type === 'AI_INSIGHT' ? 'AI Assessment & Visualization' : 'Executive Summary'}
+                                  {report.type === 'CUSTOM' ? 'Analyst Notes' : report.type === 'AI_INSIGHT' ? 'AI Assessment & Visualization' : report.type === 'FORENSIC_SNAPSHOT' ? 'Artifact Summary' : 'Executive Summary'}
                               </h3>
                               <div className="text-sm leading-relaxed text-slate-700 text-justify font-serif">
                                   {renderBodyWithMermaid(report.content.customBody || report.content.summaryText || '')}
                               </div>
                           </div>
 
-                          {/* 4. TOP ATTACKERS (Only for Audit) */}
+                          {/* 5. TOP ATTACKERS (Only for Audit) */}
                           {report.type === 'SECURITY_AUDIT' && report.content.topAttackers && (
                               <div className="mb-8">
                                   <h3 className="text-sm font-bold uppercase border-b border-slate-300 mb-2 pb-1">Top Threat Sources</h3>
@@ -340,13 +371,13 @@ const Reports: React.FC<ReportsProps> = ({ currentUser, logs = [], actors = [] }
         {/* Creator Modal */}
         {isCreatorOpen && (
              <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-40 flex items-center justify-center p-4">
-                 <div className="bg-slate-800 border border-slate-600 rounded-xl w-full max-w-xl shadow-2xl p-6 overflow-hidden">
-                     <div className="flex justify-between items-center mb-6">
+                 <div className="bg-slate-800 border border-slate-600 rounded-xl w-full max-w-xl shadow-2xl p-6 overflow-hidden max-h-[90vh] flex flex-col">
+                     <div className="flex justify-between items-center mb-6 shrink-0">
                          <h3 className="text-xl font-bold text-white flex items-center"><PenTool className="w-5 h-5 mr-2 text-blue-400" /> Generate Report</h3>
                          <button onClick={() => setIsCreatorOpen(false)}><X className="w-5 h-5 text-slate-500 hover:text-white"/></button>
                      </div>
                      
-                     <div className="space-y-4">
+                     <div className="space-y-4 overflow-y-auto flex-1 pr-2">
                          {/* Report Type Select */}
                          <div>
                              <label className="block text-slate-400 text-xs font-bold uppercase mb-2">Report Type</label>
@@ -382,34 +413,43 @@ const Reports: React.FC<ReportsProps> = ({ currentUser, logs = [], actors = [] }
                                      <div>
                                          <label className="text-xs text-slate-500 block mb-1">Date Range</label>
                                          <select className="w-full bg-slate-800 border border-slate-600 rounded p-2 text-white text-xs outline-none" 
-                                             value={filters.dateRange} onChange={e => setFilters({...filters, dateRange: e.target.value})}>
+                                             value={filters.dateRange} 
+                                             onChange={(e) => setFilters({...filters, dateRange: e.target.value})}
+                                         >
                                              <option value="LAST_24H">Last 24 Hours</option>
                                              <option value="LAST_7D">Last 7 Days</option>
                                              <option value="LAST_30D">Last 30 Days</option>
-                                         </select>
-                                     </div>
-                                     <div>
-                                         <label className="text-xs text-slate-500 block mb-1">Target Actor (Victim)</label>
-                                         <select className="w-full bg-slate-800 border border-slate-600 rounded p-2 text-white text-xs outline-none"
-                                              value={filters.targetActorId} onChange={e => setFilters({...filters, targetActorId: e.target.value})}>
-                                             <option value="">-- All Actors --</option>
-                                             {actors.map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
-                                         </select>
-                                     </div>
-                                     <div>
-                                         <label className="text-xs text-slate-500 block mb-1">Attacker IP</label>
-                                         <select className="w-full bg-slate-800 border border-slate-600 rounded p-2 text-white text-xs outline-none"
-                                              value={filters.attackerIp} onChange={e => setFilters({...filters, attackerIp: e.target.value})}>
-                                             <option value="">-- All IPs --</option>
-                                             {availableAttackers.map(ip => <option key={ip} value={ip}>{ip}</option>)}
+                                             <option value="ALL">All Time</option>
                                          </select>
                                      </div>
                                      <div>
                                          <label className="text-xs text-slate-500 block mb-1">Protocol / Service</label>
-                                         <select className="w-full bg-slate-800 border border-slate-600 rounded p-2 text-white text-xs outline-none"
-                                              value={filters.protocol} onChange={e => setFilters({...filters, protocol: e.target.value})}>
-                                             <option value="">-- All Protocols --</option>
+                                         <select className="w-full bg-slate-800 border border-slate-600 rounded p-2 text-white text-xs outline-none" 
+                                             value={filters.protocol} 
+                                             onChange={(e) => setFilters({...filters, protocol: e.target.value})}
+                                         >
+                                             <option value="">Any Protocol</option>
                                              {availableProtocols.map(p => <option key={p} value={p}>{p}</option>)}
+                                         </select>
+                                     </div>
+                                     <div>
+                                         <label className="text-xs text-slate-500 block mb-1">Source IP</label>
+                                         <select className="w-full bg-slate-800 border border-slate-600 rounded p-2 text-white text-xs outline-none" 
+                                             value={filters.attackerIp} 
+                                             onChange={(e) => setFilters({...filters, attackerIp: e.target.value})}
+                                         >
+                                             <option value="">Any IP</option>
+                                             {availableAttackers.map(ip => <option key={ip} value={ip}>{ip}</option>)}
+                                         </select>
+                                     </div>
+                                      <div>
+                                         <label className="text-xs text-slate-500 block mb-1">Target Actor</label>
+                                         <select className="w-full bg-slate-800 border border-slate-600 rounded p-2 text-white text-xs outline-none" 
+                                             value={filters.targetActorId} 
+                                             onChange={(e) => setFilters({...filters, targetActorId: e.target.value})}
+                                         >
+                                             <option value="">Any Node</option>
+                                             {actors.map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
                                          </select>
                                      </div>
                                  </div>
@@ -417,42 +457,29 @@ const Reports: React.FC<ReportsProps> = ({ currentUser, logs = [], actors = [] }
                          )}
 
                          {reportType === 'AI_INSIGHT' && (
-                             <div className="space-y-3">
-                                 {!aiResult ? (
-                                    <>
-                                        <div>
-                                            <label className="block text-slate-400 text-xs font-bold uppercase mb-2">Natural Language Prompt</label>
-                                            <textarea 
-                                                className="w-full bg-slate-900 border border-slate-700 rounded p-3 text-white text-sm h-32 focus:border-purple-500 outline-none placeholder-slate-600"
-                                                placeholder="E.g., 'Summarize all SSH brute force attempts from China last week and suggest mitigations.'"
-                                                value={aiPrompt}
-                                                onChange={e => setAiPrompt(e.target.value)}
-                                            />
-                                        </div>
-                                        <button 
-                                            onClick={handleGenerateAi}
-                                            disabled={isGenerating || !aiPrompt}
-                                            className="w-full bg-purple-600 hover:bg-purple-500 text-white font-bold py-2 rounded flex justify-center items-center"
-                                        >
-                                            {isGenerating ? <Loader className="animate-spin w-4 h-4 mr-2" /> : <Bot className="w-4 h-4 mr-2" />}
-                                            GENERATE INSIGHT
-                                        </button>
-                                    </>
-                                 ) : (
-                                     <div className="bg-slate-900 border border-purple-500/50 rounded p-4 max-h-[300px] overflow-y-auto">
-                                         <div className="flex justify-between items-center mb-2">
-                                            <h4 className="text-purple-400 font-bold text-sm">{aiResult.title}</h4>
-                                            <button onClick={() => setAiResult(null)} className="text-xs text-slate-500 hover:text-white">Reset</button>
-                                         </div>
-                                         <div className="text-slate-300 text-xs whitespace-pre-wrap">
-                                            {/* Preview text only, hide mermaid code blocks in simple preview */}
-                                            {aiResult.body.replace(/```mermaid[\s\S]*?```/g, '[Infographic Generated]')}
-                                         </div>
-                                         {aiResult.body.includes('```mermaid') && (
-                                              <div className="mt-2 text-xs text-emerald-400 flex items-center">
-                                                  <BarChart2 className="w-3 h-3 mr-1" /> Infographic Ready
-                                              </div>
-                                         )}
+                             <div className="space-y-4">
+                                 <div className="bg-purple-900/20 border border-purple-500/30 p-3 rounded text-sm text-purple-200">
+                                     <p>Describe what you want to investigate. The AI will analyze relevant logs and generate a report with visualizations.</p>
+                                 </div>
+                                 <textarea 
+                                    className="w-full bg-slate-900 border border-slate-600 rounded p-3 text-white text-sm outline-none h-24 focus:border-purple-500"
+                                    placeholder="e.g. Analyze SSH login attempts from Russian IP addresses in the last 24 hours and visualize the timeline."
+                                    value={aiPrompt}
+                                    onChange={(e) => setAiPrompt(e.target.value)}
+                                 />
+                                 <button 
+                                    onClick={handleGenerateAi}
+                                    disabled={isGenerating || !aiPrompt}
+                                    className="w-full bg-purple-600 hover:bg-purple-500 text-white font-bold py-2 rounded flex justify-center items-center disabled:opacity-50"
+                                 >
+                                     {isGenerating ? <Loader className="w-4 h-4 animate-spin mr-2" /> : <Bot className="w-4 h-4 mr-2" />}
+                                     {isGenerating ? 'AI Processing...' : 'Generate Analysis'}
+                                 </button>
+                                 
+                                 {aiResult && (
+                                     <div className="bg-slate-900 p-3 rounded border border-purple-500/50">
+                                         <div className="text-xs font-bold text-purple-400 uppercase mb-1">AI Preview: {aiResult.title}</div>
+                                         <div className="text-xs text-slate-400 line-clamp-3">{aiResult.body}</div>
                                      </div>
                                  )}
                              </div>
@@ -460,90 +487,69 @@ const Reports: React.FC<ReportsProps> = ({ currentUser, logs = [], actors = [] }
 
                          {reportType === 'CUSTOM' && (
                              <div>
-                                 <label className="block text-slate-400 text-xs font-bold uppercase mb-2">Report Content</label>
+                                 <label className="block text-slate-400 text-xs font-bold uppercase mb-2">Report Content (Markdown)</label>
                                  <textarea 
-                                     className="w-full bg-slate-900 border border-slate-700 rounded p-3 text-white text-sm h-40 focus:border-blue-500 outline-none"
-                                     placeholder="Type your manual analysis here..."
-                                     value={customBody}
-                                     onChange={e => setCustomBody(e.target.value)}
+                                    className="w-full bg-slate-900 border border-slate-600 rounded p-3 text-white text-sm outline-none h-48 focus:border-slate-500 font-mono"
+                                    placeholder="Enter report details..."
+                                    value={customBody}
+                                    onChange={(e) => setCustomBody(e.target.value)}
                                  />
                              </div>
                          )}
+                     </div>
 
+                     <div className="mt-6 pt-4 border-t border-slate-700 flex justify-end">
                          <button 
                             onClick={handleSaveReport}
                             disabled={isGenerating || (reportType === 'AI_INSIGHT' && !aiResult)}
-                            className="w-full bg-emerald-600 hover:bg-emerald-500 text-white font-bold py-3 rounded-lg flex justify-center items-center mt-4"
+                            className="bg-emerald-600 hover:bg-emerald-500 text-white px-6 py-2 rounded font-bold shadow-lg flex items-center disabled:opacity-50 disabled:cursor-not-allowed"
                          >
-                            {isGenerating ? <Loader className="animate-spin w-5 h-5" /> : 'SAVE REPORT TO ARCHIVE'}
+                            {isGenerating ? <Loader className="w-4 h-4 animate-spin mr-2"/> : <Save className="w-4 h-4 mr-2"/>}
+                            Save to Archive
                          </button>
                      </div>
                  </div>
              </div>
         )}
 
-        {/* Reports Table */}
-        <div className="bg-slate-800 rounded-xl border border-slate-700 overflow-hidden shadow-lg">
-             <table className="w-full text-left text-sm">
-                <thead className="bg-slate-900 text-slate-400">
-                    <tr>
-                        <th className="p-4 font-bold uppercase text-xs">Report Name</th>
-                        <th className="p-4 font-bold uppercase text-xs">Type</th>
-                        <th className="p-4 font-bold uppercase text-xs">Generated By</th>
-                        <th className="p-4 font-bold uppercase text-xs">Created</th>
-                        <th className="p-4 font-bold uppercase text-xs text-right">Actions</th>
-                    </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-700">
-                    {reports.length === 0 ? (
-                        <tr>
-                            <td colSpan={5} className="p-8 text-center text-slate-500">No reports generated yet.</td>
-                        </tr>
-                    ) : (
-                        reports.map(report => (
-                            <tr key={report.id} className="hover:bg-slate-700/30 transition-colors group">
-                                <td className="p-4 font-medium text-white flex items-center">
-                                    <FileText className="w-4 h-4 mr-2 text-slate-400" />
-                                    {report.title}
-                                </td>
-                                <td className="p-4">
-                                    <span className={`px-2 py-1 rounded text-[10px] font-bold ${
-                                        report.type === 'SECURITY_AUDIT' ? 'bg-blue-500/20 text-blue-400' :
-                                        report.type === 'INCIDENT_LOG' ? 'bg-red-500/20 text-red-400' :
-                                        report.type === 'AI_INSIGHT' ? 'bg-purple-500/20 text-purple-400' :
-                                        'bg-slate-500/20 text-slate-400'
-                                    }`}>
-                                        {report.type.replace('_', ' ')}
-                                    </span>
-                                </td>
-                                <td className="p-4 text-slate-300">{report.generatedBy}</td>
-                                <td className="p-4 text-slate-500">{new Date(report.createdAt).toLocaleString()}</td>
-                                <td className="p-4 text-right">
-                                    <div className="flex justify-end space-x-2">
-                                        <button 
-                                            onClick={() => setViewReport(report)}
-                                            className="text-blue-400 hover:text-white transition-colors flex items-center px-2 py-1 hover:bg-slate-700 rounded"
-                                            title="View"
-                                        >
-                                            <Eye className="w-4 h-4 mr-1" /> View
-                                        </button>
-                                        <button 
-                                            onClick={(e) => handleDeleteReport(report.id, e)}
-                                            className="text-slate-500 hover:text-red-400 transition-colors flex items-center px-2 py-1 hover:bg-slate-700 rounded"
-                                            title="Delete"
-                                        >
-                                            <Trash2 className="w-4 h-4" />
-                                        </button>
-                                    </div>
-                                </td>
-                            </tr>
-                        ))
-                    )}
-                </tbody>
-            </table>
+        {/* Reports Grid */}
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+            {reports.map(report => (
+                <div key={report.id} onClick={() => setViewReport(report)} className="bg-slate-800 rounded-xl border border-slate-700 p-6 shadow-lg hover:border-blue-500 transition-all cursor-pointer group relative">
+                    <div className="flex justify-between items-start mb-4">
+                        <div className={`p-3 rounded-lg ${report.type === 'SECURITY_AUDIT' ? 'bg-blue-900/30 text-blue-400' : report.type === 'INCIDENT_LOG' ? 'bg-red-900/30 text-red-400' : report.type === 'AI_INSIGHT' ? 'bg-purple-900/30 text-purple-400' : 'bg-slate-700 text-slate-400'}`}>
+                            {report.type === 'SECURITY_AUDIT' ? <ShieldCheck className="w-6 h-6"/> : report.type === 'INCIDENT_LOG' ? <AlertTriangle className="w-6 h-6"/> : report.type === 'AI_INSIGHT' ? <Bot className="w-6 h-6"/> : <FileText className="w-6 h-6"/>}
+                        </div>
+                        <span className="text-[10px] text-slate-500 font-mono">{new Date(report.createdAt).toLocaleDateString()}</span>
+                    </div>
+                    <h3 className="text-lg font-bold text-white mb-2 line-clamp-1">{report.title}</h3>
+                    <div className="text-xs text-slate-400 mb-4">Generated by <span className="text-slate-300">{report.generatedBy}</span></div>
+                    <div className="flex justify-between items-center text-xs text-blue-400 font-bold opacity-0 group-hover:opacity-100 transition-opacity">
+                         <span className="flex items-center"><Eye className="w-3 h-3 mr-1"/> View Document</span>
+                    </div>
+                    
+                    <button 
+                        onClick={(e) => handleDeleteReport(report.id, e)}
+                        className="absolute top-4 right-4 text-slate-600 hover:text-red-500 opacity-0 group-hover:opacity-100 transition-opacity p-2"
+                        title="Delete Report"
+                    >
+                        <Trash2 className="w-4 h-4" />
+                    </button>
+                </div>
+            ))}
+            
+            {reports.length === 0 && (
+                <div className="col-span-full flex flex-col items-center justify-center p-12 bg-slate-800/50 rounded-xl border border-slate-700 border-dashed text-slate-500">
+                    <FileText className="w-12 h-12 mb-4 opacity-50" />
+                    <p>No reports generated yet.</p>
+                </div>
+            )}
         </div>
 
-        {viewReport && <ReportModal report={viewReport} onClose={() => setViewReport(null)} />}
+        {/* View Modal */}
+        {viewReport && (
+            <ReportModal report={viewReport} onClose={() => setViewReport(null)} />
+        )}
     </div>
   );
 };

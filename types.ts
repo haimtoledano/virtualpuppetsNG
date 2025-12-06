@@ -214,6 +214,9 @@ export interface ReportContent {
       affectedSystems?: string[];
       eventCount?: number;
   };
+  
+  // New: Forensic Snapshot Data
+  snapshotData?: ForensicSnapshot;
 }
 
 export interface Report {
@@ -222,7 +225,7 @@ export interface Report {
   generatedBy: string;
   dateRange: string;
   createdAt: Date;
-  type: 'SECURITY_AUDIT' | 'INCIDENT_LOG' | 'CUSTOM' | 'AI_INSIGHT';
+  type: 'SECURITY_AUDIT' | 'INCIDENT_LOG' | 'CUSTOM' | 'AI_INSIGHT' | 'FORENSIC_SNAPSHOT';
   status: 'READY' | 'GENERATING';
   content?: ReportContent; // JSON data for the report
 }
