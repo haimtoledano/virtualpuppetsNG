@@ -1,9 +1,3 @@
-
-
-
-
-
-
 import express from 'express';
 import path from 'path';
 import fs from 'fs';
@@ -270,6 +264,10 @@ done
     COUNTER=0
     DEBUG_MODE=true
     
+    # Cache for Alert Throttling (Associative Array requires Bash 4.0+)
+    # Format: [IP-PORT]="TIMESTAMP"
+    declare -A ALERT_THROTTLE
+    
     while true; do
         if [ -f "\$AGENT_DIR/vpp-id" ]; then
              ACTOR_ID=\$(cat "\$AGENT_DIR/vpp-id")
@@ -284,8 +282,6 @@ done
 
         if [ "\$SENTINEL_MODE" = true ]; then
              # PARANOID MODE: Check for ANY established connection that is NOT loopback
-             # Excluding 127.0.0.1, ::1, and our own C2 connection if possible (though generic exclusion is safer)
-             # Note: We grep -v for loopback
              RAW_LINES=\$(ss -ntap state established state syn-recv | grep -v "127.0.0.1" | grep -v "::1")
         else
              # NORMAL MODE: Only look for socat traps
@@ -297,7 +293,8 @@ done
                 log "DEBUG: Network activity detected: \$RAW_LINES"
              fi
              
-             echo "\$RAW_LINES" | while read -r LINE; do
+             # Process Substitution to preserve Associative Array scope
+             while read -r LINE; do
                  if [ -z "\$LINE" ]; then continue; fi
                  
                  # ss -ntap output format usually: State Recv-Q Send-Q Local Address:Port Peer Address:Port
@@ -308,9 +305,30 @@ done
                  PEER_IP=\${PEER_IP#[}
                  PEER_IP=\${PEER_IP%]}
                  
-                 # Basic filtering to avoid self-reporting (though loopback grep above handles most)
+                 # Extract Destination Port (Local Port on the Agent)
+                 LOCAL_PORT=\${LOCAL##*:}
+                 
+                 # Basic filtering to avoid self-reporting
                  if [[ "\$PEER_IP" != "*" && "\$PEER_IP" != "0.0.0.0" && "\$PEER_IP" != "::" && "\$PEER_IP" != "" ]]; then
                      
+                     # --- ALERT THROTTLING LOGIC ---
+                     THROTTLE_KEY="\${PEER_IP}-\${LOCAL_PORT}"
+                     NOW_SEC=\$(date +%s)
+                     LAST_ALERT_TIME=\${ALERT_THROTTLE[\$THROTTLE_KEY]}
+                     
+                     # Suppress if last alert was sent less than 60 seconds ago for this exact signature
+                     if [ ! -z "\$LAST_ALERT_TIME" ] && [ \$((NOW_SEC - LAST_ALERT_TIME)) -lt 60 ]; then
+                        # Log locally in debug but do not send to C2
+                        if [ "\$DEBUG_MODE" = true ]; then
+                             log "DEBUG: Suppressing duplicate alert for \$THROTTLE_KEY"
+                        fi
+                        continue
+                     fi
+                     
+                     # Update Cache
+                     ALERT_THROTTLE[\$THROTTLE_KEY]=\$NOW_SEC
+                     # ------------------------------
+
                      TIMESTAMP=\$(date '+%Y/%m/%d %H:%M:%S')
                      
                      if [ "\$SENTINEL_MODE" = true ]; then
@@ -331,7 +349,7 @@ done
                          sleep 2 
                      fi
                  fi
-             done
+             done <<< "\$RAW_LINES"
         else
              if [ "\$DEBUG_MODE" = true ] && [ $((COUNTER % 20)) -eq 0 ]; then
                 log "DEBUG: No suspicious sockets found."
