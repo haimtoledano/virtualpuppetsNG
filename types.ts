@@ -260,3 +260,21 @@ export interface BluetoothDevice {
   actorName: string;
   lastSeen: Date;
 }
+
+// --- NEW: Forensic Types ---
+export interface ForensicProcess {
+    pid: string;
+    user: string;
+    cpu: string;
+    mem: string;
+    command: string;
+    risk: 'LOW' | 'MEDIUM' | 'HIGH';
+}
+
+export interface ForensicSnapshot {
+    timestamp: Date;
+    processes: ForensicProcess[];
+    connections: string[]; // Raw netstat output lines
+    authLogs: string[]; // Last 10 lines of auth.log
+    openFiles: string[]; // lsof output for suspicious processes
+}
