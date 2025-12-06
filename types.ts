@@ -1,5 +1,6 @@
 
 
+
 export enum ActorStatus {
   ONLINE = 'ONLINE',
   OFFLINE = 'OFFLINE',
@@ -277,4 +278,22 @@ export interface ForensicSnapshot {
     connections: string[]; // Raw netstat output lines
     authLogs: string[]; // Last 10 lines of auth.log
     openFiles: string[]; // lsof output for suspicious processes
+}
+
+// --- NEW: Ghost Mode / Session Replay ---
+
+export interface SessionFrame {
+    time: number; // Milliseconds from start
+    type: 'INPUT' | 'OUTPUT';
+    data: string;
+}
+
+export interface AttackSession {
+    id: string;
+    actorId: string;
+    attackerIp: string;
+    protocol: 'SSH' | 'TELNET';
+    startTime: Date;
+    durationSeconds: number;
+    frames: SessionFrame[];
 }

@@ -3,13 +3,15 @@
 
 
 
-import React, { useState, useEffect, useMemo } from 'react';
-import { Actor, LogEntry, ActorStatus, AiAnalysis, ProxyGateway, HoneyFile, ActiveTunnel, DevicePersona, CommandJob, LogLevel, User, UserPreferences, ForensicSnapshot, ForensicProcess } from '../types';
-import { executeRemoteCommand, getAvailableCloudTraps, toggleTunnelMock, AVAILABLE_PERSONAS, generateRandomLog, performForensicScan } from '../services/mockService';
+
+
+import React, { useState, useEffect, useMemo, useRef } from 'react';
+import { Actor, LogEntry, ActorStatus, AiAnalysis, ProxyGateway, HoneyFile, ActiveTunnel, DevicePersona, CommandJob, LogLevel, User, UserPreferences, ForensicSnapshot, ForensicProcess, AttackSession } from '../types';
+import { executeRemoteCommand, getAvailableCloudTraps, toggleTunnelMock, AVAILABLE_PERSONAS, generateRandomLog, performForensicScan, getAttackSessions } from '../services/mockService';
 import { analyzeLogsWithAi, generateDeceptionContent } from '../services/aiService';
 import { updateActorName, queueSystemCommand, getActorCommands, deleteActor, updateActorTunnels, updateActorPersona, resetActorStatus, resetActorToFactory, updateActorHoneyFiles, toggleActorSentinel } from '../services/dbService';
 import Terminal from './Terminal';
-import { Cpu, Wifi, Shield, Bot, ArrowLeft, BrainCircuit, Router, Network, FileCode, Check, Activity, X, Printer, Camera, Server, Edit2, Trash2, Loader, ShieldCheck, AlertOctagon, Skull, ArrowRight, Terminal as TerminalIcon, Globe, ScanSearch, Power, RefreshCw, History as HistoryIcon, Thermometer, RefreshCcw, Siren, Eye, Fingerprint, Info, Cable, Search, Lock, Zap, FileText, HardDrive, List } from 'lucide-react';
+import { Cpu, Wifi, Shield, Bot, ArrowLeft, BrainCircuit, Router, Network, FileCode, Check, Activity, X, Printer, Camera, Server, Edit2, Trash2, Loader, ShieldCheck, AlertOctagon, Skull, ArrowRight, Terminal as TerminalIcon, Globe, ScanSearch, Power, RefreshCw, History as HistoryIcon, Thermometer, RefreshCcw, Siren, Eye, Fingerprint, Info, Cable, Search, Lock, Zap, FileText, HardDrive, List, Play, Pause, FastForward, Rewind, Film } from 'lucide-react';
 
 interface ActorDetailProps {
   actor: Actor;
@@ -147,6 +149,16 @@ const ActorDetail: React.FC<ActorDetailProps> = ({ actor, gateway, logs: initial
   // FORENSICS STATE
   const [isGatheringForensics, setIsGatheringForensics] = useState(false);
   const [forensicData, setForensicData] = useState<ForensicSnapshot | null>(null);
+  const [forensicView, setForensicView] = useState<'SNAPSHOT' | 'SESSIONS'>('SNAPSHOT');
+  
+  // GHOST MODE / REPLAY STATE
+  const [recordedSessions, setRecordedSessions] = useState<AttackSession[]>([]);
+  const [activeSession, setActiveSession] = useState<AttackSession | null>(null);
+  const [replayTime, setReplayTime] = useState(0);
+  const [isPlaying, setIsPlaying] = useState(false);
+  const [replaySpeed, setReplaySpeed] = useState(1);
+  const [replayContent, setReplayContent] = useState('');
+  const replayTimerRef = useRef<number | null>(null);
 
   // --- PERSISTENCE FOR TOPOLOGY VIEW ---
   useEffect(() => {
@@ -226,6 +238,51 @@ const ActorDetail: React.FC<ActorDetailProps> = ({ actor, gateway, logs: initial
           setIsScanningPorts(false);
       }
   }, [commandHistory, isScanningPorts]);
+
+  // --- LOAD SESSIONS WHEN TAB CHANGES ---
+  useEffect(() => {
+      if (activeTab === 'FORENSICS' && forensicView === 'SESSIONS') {
+          // Load sessions
+          getAttackSessions(actor.id).then(setRecordedSessions);
+      }
+  }, [activeTab, forensicView, actor.id]);
+
+  // --- REPLAY LOGIC ---
+  useEffect(() => {
+      if (isPlaying && activeSession) {
+          replayTimerRef.current = window.setInterval(() => {
+              setReplayTime(prev => {
+                  const nextTime = prev + (50 * replaySpeed); // 50ms steps * speed
+                  if (nextTime >= (activeSession.durationSeconds * 1000)) {
+                      setIsPlaying(false);
+                      return activeSession.durationSeconds * 1000;
+                  }
+                  return nextTime;
+              });
+          }, 50);
+      } else {
+          if (replayTimerRef.current) clearInterval(replayTimerRef.current);
+      }
+      return () => { if (replayTimerRef.current) clearInterval(replayTimerRef.current); };
+  }, [isPlaying, replaySpeed, activeSession]);
+
+  useEffect(() => {
+      if (activeSession) {
+          // Reconstruct content based on time
+          let content = '';
+          const framesToRender = activeSession.frames.filter(f => f.time <= replayTime);
+          framesToRender.forEach(f => {
+              if (f.data === '\n') {
+                  content += '\n';
+              } else if (f.type === 'INPUT') {
+                  content += f.data;
+              } else {
+                  content += f.data;
+              }
+          });
+          setReplayContent(content);
+      }
+  }, [replayTime, activeSession]);
 
   const handleFetchIp = async () => {
       let hasPending = false;
@@ -500,7 +557,7 @@ const ActorDetail: React.FC<ActorDetailProps> = ({ actor, gateway, logs: initial
   // --- FORENSIC SCAN HANDLER ---
   const handleForensicScan = async () => {
       setIsGatheringForensics(true);
-      setActiveTab('FORENSICS'); // Switch to tab immediately
+      setForensicView('SNAPSHOT'); // Ensure we are on snapshot view
       setForensicData(null); // Reset previous data
 
       if (isProduction) {
@@ -861,125 +918,236 @@ const ActorDetail: React.FC<ActorDetailProps> = ({ actor, gateway, logs: initial
                             <p className="text-xs text-slate-500">Volatile Memory Analysis & Artifact Collection</p>
                         </div>
                     </div>
-                    <button 
-                        onClick={handleForensicScan}
-                        disabled={isGatheringForensics}
-                        className={`px-4 py-2 rounded font-bold text-sm flex items-center transition-all ${
-                            isGatheringForensics 
-                            ? 'bg-slate-700 text-slate-400 cursor-not-allowed'
-                            : 'bg-red-600 hover:bg-red-500 text-white shadow-lg shadow-red-600/20 hover:scale-105'
-                        }`}
-                    >
-                        {isGatheringForensics ? <Loader className="w-4 h-4 mr-2 animate-spin" /> : <Zap className="w-4 h-4 mr-2" />}
-                        {isGatheringForensics ? 'GATHERING EVIDENCE...' : '⚡ RUN FORENSIC SCAN'}
-                    </button>
+                    <div className="flex space-x-2">
+                        <button 
+                            onClick={() => setForensicView('SNAPSHOT')}
+                            className={`px-3 py-1.5 text-xs font-bold rounded flex items-center ${forensicView === 'SNAPSHOT' ? 'bg-slate-700 text-white' : 'text-slate-500 hover:text-white'}`}
+                        >
+                            <Camera className="w-3 h-3 mr-1" /> SNAPSHOT
+                        </button>
+                        <button 
+                            onClick={() => setForensicView('SESSIONS')}
+                            className={`px-3 py-1.5 text-xs font-bold rounded flex items-center ${forensicView === 'SESSIONS' ? 'bg-slate-700 text-white' : 'text-slate-500 hover:text-white'}`}
+                        >
+                            <Film className="w-3 h-3 mr-1" /> GHOST MODE (REPLAY)
+                        </button>
+                    </div>
                 </div>
 
                 {/* Content Area */}
                 <div className="p-6 flex-1 overflow-y-auto">
-                    {!forensicData && !isGatheringForensics && (
-                        <div className="flex flex-col items-center justify-center h-full text-slate-500 opacity-50 py-20">
-                            <Search className="w-16 h-16 mb-4" />
-                            <p className="text-lg">No forensic data available.</p>
-                            <p className="text-sm">Click "RUN FORENSIC SCAN" to gather current system state.</p>
-                        </div>
-                    )}
-
-                    {isGatheringForensics && (
-                        <div className="flex flex-col items-center justify-center h-full py-20">
-                            <Loader className="w-12 h-12 text-blue-500 animate-spin mb-4" />
-                            <div className="text-blue-400 font-mono text-sm animate-pulse">Establishing secure channel...</div>
-                            <div className="text-slate-500 text-xs mt-2">Dumping process table...</div>
-                            <div className="text-slate-500 text-xs">Tracing network sockets...</div>
-                        </div>
-                    )}
-
-                    {forensicData && !isGatheringForensics && (
-                        <div className="space-y-6 animate-fade-in">
-                            <div className="text-right text-xs text-slate-500 font-mono mb-2">Snapshot Timestamp: {new Date(forensicData.timestamp).toLocaleString()}</div>
-                            
-                            {/* 1. Process List */}
-                            <div className="border border-slate-700 rounded-lg overflow-hidden">
-                                <div className="bg-slate-900/50 p-3 border-b border-slate-700 flex items-center font-bold text-slate-300 text-sm">
-                                    <Activity className="w-4 h-4 mr-2 text-blue-400" /> Process Tree Analysis (Top CPU/Mem)
-                                </div>
-                                <table className="w-full text-left text-xs">
-                                    <thead className="bg-slate-900 text-slate-500">
-                                        <tr>
-                                            <th className="p-2">PID</th>
-                                            <th className="p-2">USER</th>
-                                            <th className="p-2">CPU%</th>
-                                            <th className="p-2">MEM%</th>
-                                            <th className="p-2">COMMAND</th>
-                                            <th className="p-2 text-right">RISK</th>
-                                        </tr>
-                                    </thead>
-                                    <tbody className="divide-y divide-slate-700 bg-slate-800">
-                                        {forensicData.processes.map((proc, i) => (
-                                            <tr key={i} className={`hover:bg-slate-700/50 ${proc.risk === 'HIGH' ? 'bg-red-900/10' : ''}`}>
-                                                <td className="p-2 font-mono text-slate-400">{proc.pid}</td>
-                                                <td className="p-2 text-white">{proc.user}</td>
-                                                <td className="p-2 text-slate-300">{proc.cpu}</td>
-                                                <td className="p-2 text-slate-300">{proc.mem}</td>
-                                                <td className="p-2 font-mono text-yellow-500 break-all">{proc.command}</td>
-                                                <td className="p-2 text-right">
-                                                    {proc.risk === 'HIGH' 
-                                                        ? <span className="bg-red-600 text-white px-1.5 py-0.5 rounded text-[10px] font-bold">HIGH</span>
-                                                        : <span className="text-slate-600 text-[10px]">LOW</span>
-                                                    }
-                                                </td>
-                                            </tr>
-                                        ))}
-                                    </tbody>
-                                </table>
+                    
+                    {/* --- SNAPSHOT VIEW --- */}
+                    {forensicView === 'SNAPSHOT' && (
+                        <>
+                            <div className="flex justify-end mb-4">
+                                <button 
+                                    onClick={handleForensicScan}
+                                    disabled={isGatheringForensics}
+                                    className={`px-4 py-2 rounded font-bold text-sm flex items-center transition-all ${
+                                        isGatheringForensics 
+                                        ? 'bg-slate-700 text-slate-400 cursor-not-allowed'
+                                        : 'bg-red-600 hover:bg-red-500 text-white shadow-lg shadow-red-600/20 hover:scale-105'
+                                    }`}
+                                >
+                                    {isGatheringForensics ? <Loader className="w-4 h-4 mr-2 animate-spin" /> : <Zap className="w-4 h-4 mr-2" />}
+                                    {isGatheringForensics ? 'GATHERING EVIDENCE...' : '⚡ RUN FORENSIC SCAN'}
+                                </button>
                             </div>
 
-                            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-                                {/* 2. Network Connections */}
-                                <div className="border border-slate-700 rounded-lg overflow-hidden flex flex-col">
-                                    <div className="bg-slate-900/50 p-3 border-b border-slate-700 flex items-center font-bold text-slate-300 text-sm">
-                                        <Network className="w-4 h-4 mr-2 text-emerald-400" /> Network Artifacts (Netstat/SS)
-                                    </div>
-                                    <div className="bg-black p-3 font-mono text-xs text-emerald-500 overflow-x-auto whitespace-pre h-64">
-                                        {forensicData.connections.length > 0 
-                                            ? forensicData.connections.join('\n') 
-                                            : <span className="text-slate-600 italic">No active connections found.</span>
-                                        }
-                                    </div>
-                                </div>
-
-                                {/* 3. Auth Logs */}
-                                <div className="border border-slate-700 rounded-lg overflow-hidden flex flex-col">
-                                    <div className="bg-slate-900/50 p-3 border-b border-slate-700 flex items-center font-bold text-slate-300 text-sm">
-                                        <FileText className="w-4 h-4 mr-2 text-yellow-400" /> Recent Auth Journal
-                                    </div>
-                                    <div className="bg-black p-3 font-mono text-xs text-slate-400 overflow-x-auto whitespace-pre h-64">
-                                        {forensicData.authLogs.length > 0 
-                                            ? forensicData.authLogs.map((l, i) => (
-                                                <div key={i} className="border-b border-slate-800 pb-1 mb-1 last:border-0">{l}</div>
-                                            ))
-                                            : <span className="text-slate-600 italic">No auth logs retrieved.</span>
-                                        }
-                                    </div>
-                                </div>
-                            </div>
-                            
-                            {/* 4. Open Files (Mock Only usually) */}
-                            {forensicData.openFiles.length > 0 && (
-                                <div className="border border-slate-700 rounded-lg overflow-hidden">
-                                     <div className="bg-slate-900/50 p-3 border-b border-slate-700 flex items-center font-bold text-slate-300 text-sm">
-                                        <HardDrive className="w-4 h-4 mr-2 text-purple-400" /> Suspicious Open File Handles
-                                    </div>
-                                    <div className="bg-slate-800 p-0">
-                                         {forensicData.openFiles.map((line, i) => (
-                                             <div key={i} className="p-2 border-b border-slate-700 text-xs font-mono text-purple-300 hover:bg-slate-700">{line}</div>
-                                         ))}
-                                    </div>
+                            {!forensicData && !isGatheringForensics && (
+                                <div className="flex flex-col items-center justify-center h-full text-slate-500 opacity-50 py-20">
+                                    <Search className="w-16 h-16 mb-4" />
+                                    <p className="text-lg">No forensic data available.</p>
+                                    <p className="text-sm">Click "RUN FORENSIC SCAN" to gather current system state.</p>
                                 </div>
                             )}
 
+                            {isGatheringForensics && (
+                                <div className="flex flex-col items-center justify-center h-full py-20">
+                                    <Loader className="w-12 h-12 text-blue-500 animate-spin mb-4" />
+                                    <div className="text-blue-400 font-mono text-sm animate-pulse">Establishing secure channel...</div>
+                                    <div className="text-slate-500 text-xs mt-2">Dumping process table...</div>
+                                    <div className="text-slate-500 text-xs">Tracing network sockets...</div>
+                                </div>
+                            )}
+
+                            {forensicData && !isGatheringForensics && (
+                                <div className="space-y-6 animate-fade-in">
+                                    <div className="text-right text-xs text-slate-500 font-mono mb-2">Snapshot Timestamp: {new Date(forensicData.timestamp).toLocaleString()}</div>
+                                    
+                                    {/* 1. Process List */}
+                                    <div className="border border-slate-700 rounded-lg overflow-hidden">
+                                        <div className="bg-slate-900/50 p-3 border-b border-slate-700 flex items-center font-bold text-slate-300 text-sm">
+                                            <Activity className="w-4 h-4 mr-2 text-blue-400" /> Process Tree Analysis (Top CPU/Mem)
+                                        </div>
+                                        <table className="w-full text-left text-xs">
+                                            <thead className="bg-slate-900 text-slate-500">
+                                                <tr>
+                                                    <th className="p-2">PID</th>
+                                                    <th className="p-2">USER</th>
+                                                    <th className="p-2">CPU%</th>
+                                                    <th className="p-2">MEM%</th>
+                                                    <th className="p-2">COMMAND</th>
+                                                    <th className="p-2 text-right">RISK</th>
+                                                </tr>
+                                            </thead>
+                                            <tbody className="divide-y divide-slate-700 bg-slate-800">
+                                                {forensicData.processes.map((proc, i) => (
+                                                    <tr key={i} className={`hover:bg-slate-700/50 ${proc.risk === 'HIGH' ? 'bg-red-900/10' : ''}`}>
+                                                        <td className="p-2 font-mono text-slate-400">{proc.pid}</td>
+                                                        <td className="p-2 text-white">{proc.user}</td>
+                                                        <td className="p-2 text-slate-300">{proc.cpu}</td>
+                                                        <td className="p-2 text-slate-300">{proc.mem}</td>
+                                                        <td className="p-2 font-mono text-yellow-500 break-all">{proc.command}</td>
+                                                        <td className="p-2 text-right">
+                                                            {proc.risk === 'HIGH' 
+                                                                ? <span className="bg-red-600 text-white px-1.5 py-0.5 rounded text-[10px] font-bold">HIGH</span>
+                                                                : <span className="text-slate-600 text-[10px]">LOW</span>
+                                                            }
+                                                        </td>
+                                                    </tr>
+                                                ))}
+                                            </tbody>
+                                        </table>
+                                    </div>
+
+                                    <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                                        {/* 2. Network Connections */}
+                                        <div className="border border-slate-700 rounded-lg overflow-hidden flex flex-col">
+                                            <div className="bg-slate-900/50 p-3 border-b border-slate-700 flex items-center font-bold text-slate-300 text-sm">
+                                                <Network className="w-4 h-4 mr-2 text-emerald-400" /> Network Artifacts (Netstat/SS)
+                                            </div>
+                                            <div className="bg-black p-3 font-mono text-xs text-emerald-500 overflow-x-auto whitespace-pre h-64">
+                                                {forensicData.connections.length > 0 
+                                                    ? forensicData.connections.join('\n') 
+                                                    : <span className="text-slate-600 italic">No active connections found.</span>
+                                                }
+                                            </div>
+                                        </div>
+
+                                        {/* 3. Auth Logs */}
+                                        <div className="border border-slate-700 rounded-lg overflow-hidden flex flex-col">
+                                            <div className="bg-slate-900/50 p-3 border-b border-slate-700 flex items-center font-bold text-slate-300 text-sm">
+                                                <FileText className="w-4 h-4 mr-2 text-yellow-400" /> Recent Auth Journal
+                                            </div>
+                                            <div className="bg-black p-3 font-mono text-xs text-slate-400 overflow-x-auto whitespace-pre h-64">
+                                                {forensicData.authLogs.length > 0 
+                                                    ? forensicData.authLogs.map((l, i) => (
+                                                        <div key={i} className="border-b border-slate-800 pb-1 mb-1 last:border-0">{l}</div>
+                                                    ))
+                                                    : <span className="text-slate-600 italic">No auth logs retrieved.</span>
+                                                }
+                                            </div>
+                                        </div>
+                                    </div>
+                                    
+                                    {/* 4. Open Files (Mock Only usually) */}
+                                    {forensicData.openFiles.length > 0 && (
+                                        <div className="border border-slate-700 rounded-lg overflow-hidden">
+                                            <div className="bg-slate-900/50 p-3 border-b border-slate-700 flex items-center font-bold text-slate-300 text-sm">
+                                                <HardDrive className="w-4 h-4 mr-2 text-purple-400" /> Suspicious Open File Handles
+                                            </div>
+                                            <div className="bg-slate-800 p-0">
+                                                {forensicData.openFiles.map((line, i) => (
+                                                    <div key={i} className="p-2 border-b border-slate-700 text-xs font-mono text-purple-300 hover:bg-slate-700">{line}</div>
+                                                ))}
+                                            </div>
+                                        </div>
+                                    )}
+
+                                </div>
+                            )}
+                        </>
+                    )}
+
+                    {/* --- GHOST MODE (SESSION REPLAY) VIEW --- */}
+                    {forensicView === 'SESSIONS' && (
+                        <div className="h-full flex flex-col lg:flex-row gap-6">
+                            {/* Session List */}
+                            <div className="w-full lg:w-1/3 bg-slate-900 rounded border border-slate-700 overflow-hidden flex flex-col">
+                                <div className="p-3 bg-slate-800 border-b border-slate-700 text-sm font-bold text-slate-300"> Recorded Sessions</div>
+                                <div className="flex-1 overflow-y-auto">
+                                    {recordedSessions.length === 0 ? (
+                                        <div className="p-4 text-center text-slate-500 text-xs italic">No recorded attack sessions found.</div>
+                                    ) : (
+                                        recordedSessions.map(session => (
+                                            <div 
+                                                key={session.id} 
+                                                onClick={() => { setActiveSession(session); setReplayTime(0); setIsPlaying(false); }}
+                                                className={`p-3 border-b border-slate-800 cursor-pointer hover:bg-slate-800 transition-colors ${activeSession?.id === session.id ? 'bg-blue-900/20 border-l-4 border-l-blue-500' : ''}`}
+                                            >
+                                                <div className="flex justify-between items-start mb-1">
+                                                    <span className="text-xs font-bold text-white">{new Date(session.startTime).toLocaleString()}</span>
+                                                    <span className="text-[10px] bg-red-900/50 text-red-300 px-1.5 rounded border border-red-800">{session.protocol}</span>
+                                                </div>
+                                                <div className="text-xs text-slate-400 font-mono mb-1">{session.attackerIp}</div>
+                                                <div className="text-[10px] text-slate-600">{session.durationSeconds}s Duration • {session.frames.length} Events</div>
+                                            </div>
+                                        ))
+                                    )}
+                                </div>
+                            </div>
+
+                            {/* Player */}
+                            <div className="flex-1 bg-black rounded border border-slate-700 flex flex-col overflow-hidden relative">
+                                {!activeSession ? (
+                                    <div className="flex items-center justify-center h-full text-slate-600 flex-col">
+                                        <Film className="w-12 h-12 mb-4 opacity-20" />
+                                        <p>Select a session to replay</p>
+                                    </div>
+                                ) : (
+                                    <>
+                                        {/* Terminal Screen */}
+                                        <div className="flex-1 p-4 font-mono text-xs md:text-sm overflow-y-auto whitespace-pre-wrap text-green-500 bg-black">
+                                            {replayContent}
+                                            <span className="animate-pulse inline-block w-2 h-4 bg-green-500 ml-1 align-middle"></span>
+                                        </div>
+
+                                        {/* Controls */}
+                                        <div className="bg-slate-800 p-3 border-t border-slate-700">
+                                            <div className="flex items-center justify-between mb-2 text-[10px] text-slate-400 font-mono">
+                                                <span>{(replayTime/1000).toFixed(1)}s</span>
+                                                <span>{activeSession.durationSeconds.toFixed(1)}s</span>
+                                            </div>
+                                            {/* Scrubber */}
+                                            <div className="relative h-2 bg-slate-700 rounded-full mb-4 cursor-pointer group" onClick={(e) => {
+                                                const rect = e.currentTarget.getBoundingClientRect();
+                                                const x = e.clientX - rect.left;
+                                                const pct = x / rect.width;
+                                                setReplayTime(pct * activeSession.durationSeconds * 1000);
+                                            }}>
+                                                <div 
+                                                    className="absolute top-0 left-0 h-full bg-blue-500 rounded-full pointer-events-none" 
+                                                    style={{ width: `${(replayTime / (activeSession.durationSeconds * 1000)) * 100}%` }}
+                                                ></div>
+                                                <div 
+                                                    className="absolute top-1/2 -mt-1.5 w-3 h-3 bg-white rounded-full shadow cursor-grab group-hover:scale-125 transition-transform"
+                                                    style={{ left: `calc(${(replayTime / (activeSession.durationSeconds * 1000)) * 100}% - 6px)` }}
+                                                ></div>
+                                            </div>
+
+                                            <div className="flex justify-center items-center space-x-6">
+                                                <button onClick={() => setReplaySpeed(s => s === 1 ? 2 : s === 2 ? 4 : 1)} className="text-xs font-bold text-slate-500 w-12 text-center hover:text-white">
+                                                    {replaySpeed}x
+                                                </button>
+                                                <button onClick={() => { setReplayTime(Math.max(0, replayTime - 5000)); }} className="text-slate-400 hover:text-white"><Rewind className="w-5 h-5" /></button>
+                                                <button 
+                                                    onClick={() => setIsPlaying(!isPlaying)} 
+                                                    className="bg-blue-600 hover:bg-blue-500 text-white p-3 rounded-full shadow-lg transition-transform hover:scale-105"
+                                                >
+                                                    {isPlaying ? <Pause className="w-6 h-6" /> : <Play className="w-6 h-6 ml-1" />}
+                                                </button>
+                                                <button onClick={() => { setReplayTime(Math.min(activeSession.durationSeconds * 1000, replayTime + 5000)); }} className="text-slate-400 hover:text-white"><FastForward className="w-5 h-5" /></button>
+                                                <div className="w-12"></div> {/* Spacer */}
+                                            </div>
+                                        </div>
+                                    </>
+                                )}
+                            </div>
                         </div>
                     )}
+
                 </div>
            </div>
       )}
