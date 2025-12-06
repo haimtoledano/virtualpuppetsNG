@@ -228,6 +228,7 @@ done
         COUNTER=\$((COUNTER+1))
         if [ \$COUNTER -gt 100 ]; then DEBUG_MODE=false; fi
 
+        # Use awk to reliably extract remote IP (col 5) from numeric output
         RAW_LINES=\$(ss -ntap | grep "socat")
 
         if [ ! -z "\$RAW_LINES" ]; then
@@ -237,14 +238,17 @@ done
              
              echo "\$RAW_LINES" | while read -r LINE; do
                  if [ -z "\$LINE" ]; then continue; fi
-                 STATE=\$(echo "\$LINE" | awk '{print \$1}')
-                 LOCAL=\$(echo "\$LINE" | awk '{print \$4}')
-                 PEER=\$(echo "\$LINE" | awk '{print \$5}')
                  
+                 # Extract Peer Address (Column 5) and Local Address (Column 4)
+                 PEER=\$(echo "\$LINE" | awk '{print \$5}')
+                 LOCAL=\$(echo "\$LINE" | awk '{print \$4}')
+                 
+                 # Clean brackets from IPv6 if present
                  PEER_IP=\${PEER%:*}
                  PEER_IP=\${PEER_IP#[}
                  PEER_IP=\${PEER_IP%]}
                  
+                 # Threat Logic: Alert if Peer IP is NOT a wildcard/local address
                  if [[ "\$PEER_IP" != "*" && "\$PEER_IP" != "0.0.0.0" && "\$PEER_IP" != "::" && "\$PEER_IP" != "127.0.0.1" && "\$PEER_IP" != "::1" && "\$PEER_IP" != "" ]]; then
                      
                      TIMESTAMP=\$(date '+%Y/%m/%d %H:%M:%S')
@@ -253,13 +257,19 @@ done
                      log "[!] \$MSG"
                      
                      if [ ! -z "\$ACTOR_ID" ]; then
+                         # Send Alert to C2
                          PAYLOAD=\$(jq -n -c \
                             --arg ip "\$PEER_IP" \
                             --arg msg "\$MSG" \
                             '{type: "TRAP_TRIGGERED", details: \$msg, sourceIp: \$ip}')
                          
                          CURL_OUT=\$(curl -s -X POST -H "Content-Type: application/json" -d "\$PAYLOAD" "\$SERVER/api/agent/alert?actorId=\$ACTOR_ID" 2>&1)
-                         sleep 2
+                         
+                         if [ "\$DEBUG_MODE" = true ]; then
+                             log "DEBUG: Alert sent. Server response: \$CURL_OUT"
+                         fi
+                         
+                         sleep 2 # Prevent alert flooding
                      fi
                  fi
              done
@@ -573,6 +583,7 @@ app.post('/api/reports/generate', async (req, res) => {
 });
 
 app.get('/api/reports', async (req, res) => { if (!dbPool) return res.json([]); try { const result = await dbPool.request().query("SELECT * FROM Reports ORDER BY CreatedAt DESC"); res.json(result.recordset.map(r => ({ id: r.ReportId, title: r.Title, generatedBy: r.GeneratedBy, type: r.Type, createdAt: r.CreatedAt, content: JSON.parse(r.ContentJson || '{}') }))); } catch(e) { res.json([]); } });
+app.delete('/api/reports/:id', async (req, res) => { if (!dbPool) return res.status(503).json({success: false, error: 'DB Disconnected'}); try { await dbPool.request().input('rid', sql.NVarChar, req.params.id).query("DELETE FROM Reports WHERE ReportId = @rid"); res.json({success: true}); } catch(e) { res.status(500).json({success: false, error: e.message}); } });
 app.get('/api/logs', async (req, res) => { if (!dbPool) return res.json([]); try { const result = await dbPool.request().query(`SELECT TOP 100 L.*, A.Name as ActorName FROM Logs L LEFT JOIN Actors A ON L.ActorId = A.ActorId ORDER BY L.Timestamp DESC`); res.json(result.recordset.map(r => ({ id: r.LogId, actorId: r.ActorId, level: r.Level, process: r.Process, message: r.Message, sourceIp: r.SourceIp, timestamp: r.Timestamp, actorName: r.ActorName || 'System' }))); } catch(e) { res.json([]); } });
 
 // ... (Rest of file unchanged) ...

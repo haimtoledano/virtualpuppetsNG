@@ -1,10 +1,12 @@
 
 
+
+
 import React, { useState, useEffect, useRef } from 'react';
 import { Report, SystemConfig, User, LogEntry, Actor } from '../types';
-import { getReports, generateReport, getSystemConfig } from '../services/dbService';
+import { getReports, generateReport, getSystemConfig, deleteReport } from '../services/dbService';
 import { generateCustomAiReport } from '../services/aiService';
-import { FileText, Download, Loader, Eye, X, Printer, ShieldCheck, Plus, AlertTriangle, PenTool, Search, Calendar, Server, Filter, Bot, BarChart2 } from 'lucide-react';
+import { FileText, Download, Loader, Eye, X, Printer, ShieldCheck, Plus, AlertTriangle, PenTool, Search, Calendar, Server, Filter, Bot, BarChart2, Trash2 } from 'lucide-react';
 import mermaid from 'mermaid';
 
 interface ReportsProps {
@@ -133,6 +135,14 @@ const Reports: React.FC<ReportsProps> = ({ currentUser, logs = [], actors = [] }
           alert("Failed to generate report");
       }
       setIsGenerating(false);
+  };
+
+  const handleDeleteReport = async (id: string, e: React.MouseEvent) => {
+      e.stopPropagation();
+      if (window.confirm("Are you sure you want to permanently delete this report?")) {
+          await deleteReport(id);
+          loadReports();
+      }
   };
 
   const ReportModal = ({ report, onClose }: { report: Report, onClose: () => void }) => {
@@ -491,7 +501,7 @@ const Reports: React.FC<ReportsProps> = ({ currentUser, logs = [], actors = [] }
                         </tr>
                     ) : (
                         reports.map(report => (
-                            <tr key={report.id} className="hover:bg-slate-700/30 transition-colors">
+                            <tr key={report.id} className="hover:bg-slate-700/30 transition-colors group">
                                 <td className="p-4 font-medium text-white flex items-center">
                                     <FileText className="w-4 h-4 mr-2 text-slate-400" />
                                     {report.title}
@@ -509,12 +519,22 @@ const Reports: React.FC<ReportsProps> = ({ currentUser, logs = [], actors = [] }
                                 <td className="p-4 text-slate-300">{report.generatedBy}</td>
                                 <td className="p-4 text-slate-500">{new Date(report.createdAt).toLocaleString()}</td>
                                 <td className="p-4 text-right">
-                                    <button 
-                                        onClick={() => setViewReport(report)}
-                                        className="text-blue-400 hover:text-white transition-colors flex items-center justify-end w-full"
-                                    >
-                                        <Eye className="w-4 h-4 mr-1" /> View
-                                    </button>
+                                    <div className="flex justify-end space-x-2">
+                                        <button 
+                                            onClick={() => setViewReport(report)}
+                                            className="text-blue-400 hover:text-white transition-colors flex items-center px-2 py-1 hover:bg-slate-700 rounded"
+                                            title="View"
+                                        >
+                                            <Eye className="w-4 h-4 mr-1" /> View
+                                        </button>
+                                        <button 
+                                            onClick={(e) => handleDeleteReport(report.id, e)}
+                                            className="text-slate-500 hover:text-red-400 transition-colors flex items-center px-2 py-1 hover:bg-slate-700 rounded"
+                                            title="Delete"
+                                        >
+                                            <Trash2 className="w-4 h-4" />
+                                        </button>
+                                    </div>
                                 </td>
                             </tr>
                         ))

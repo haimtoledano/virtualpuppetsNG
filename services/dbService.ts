@@ -1,4 +1,6 @@
 
+
+
 import { Actor, ProxyGateway, User, DbConfig, LogEntry, SystemConfig, Report, CommandJob, PendingActor, DevicePersona, WifiNetwork, BluetoothDevice } from '../types';
 
 const API_BASE = '/api';
@@ -239,6 +241,13 @@ export const generateReport = async (payload: any): Promise<boolean> => {
         return true;
     } catch { return false; }
 }
+
+export const deleteReport = async (id: string): Promise<boolean> => {
+    try {
+        await fetch(`${API_BASE}/reports/${id}`, { method: 'DELETE' });
+        return true;
+    } catch { return false; }
+};
 
 // --- Remote Commands ---
 
