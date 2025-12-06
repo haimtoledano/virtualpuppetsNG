@@ -1,5 +1,8 @@
 
 
+
+
+
 import React, { useState, useEffect, useMemo } from 'react';
 import { Actor, LogEntry, ActorStatus, AiAnalysis, ProxyGateway, HoneyFile, ActiveTunnel, DevicePersona, CommandJob, LogLevel, User, UserPreferences, ForensicSnapshot, ForensicProcess } from '../types';
 import { executeRemoteCommand, getAvailableCloudTraps, toggleTunnelMock, AVAILABLE_PERSONAS, generateRandomLog, performForensicScan } from '../services/mockService';
@@ -501,46 +504,68 @@ const ActorDetail: React.FC<ActorDetailProps> = ({ actor, gateway, logs: initial
       setForensicData(null); // Reset previous data
 
       if (isProduction) {
-          // Send a complex bash command to gather evidence
-          // Format output clearly with delimiters for simpler parsing (or just dump to terminal)
-          // For this one-click feature, we'd ideally want the agent to return structured JSON
-          // But simulating it via raw command for now:
-          const oneClickCmd = `echo "---PROCESSES---"; ps -aux --sort=-%cpu | head -15; echo "---NETWORK---"; ss -tupn; echo "---AUTH---"; tail -n 20 /var/log/auth.log; echo "---USERS---"; cat /etc/passwd`;
+          // Send the clean, native forensic command that was added to the agent script
+          const oneClickCmd = `vpp-agent --forensic`;
           await handleCommand(oneClickCmd);
           
-          // Poll for completion of this specific job to parse it
-          // Note: In a real app, we'd have a more robust way to capture this output specifically.
-          // For now, we rely on the terminal history update or a simple timeout to "fake" the parsing in production UI
-          setTimeout(async () => {
-               // Re-fetch commands to see output
+          // Use polling to actively wait for the result
+          const pollInterval = setInterval(async () => {
                const cmds = await getActorCommands(actor.id);
-               const job = cmds.find(c => c.command === oneClickCmd);
+               // Find the completed job
+               const job = cmds.find(c => c.command === oneClickCmd && c.status === 'COMPLETED');
+               
                if (job && job.output) {
-                   // Quick parsing logic for production text output
-                   // This is rough parsing for the UI demo
-                   const parts = job.output.split('---');
-                   const procRaw = parts.find(p => p.startsWith('PROCESSES'))?.replace('PROCESSES---\n', '') || '';
-                   const netRaw = parts.find(p => p.startsWith('NETWORK'))?.replace('NETWORK---\n', '') || '';
-                   const authRaw = parts.find(p => p.startsWith('AUTH'))?.replace('AUTH---\n', '') || '';
+                   clearInterval(pollInterval);
                    
-                   // Convert ps output to object
-                   const processes = procRaw.split('\n').slice(1).map(line => {
+                   // Robust Parsing Logic (Line-by-Line State Machine)
+                   const lines = job.output.split('\n');
+                   let currentSection = '';
+                   const extracted: any = {
+                       PROCESSES: [],
+                       NETWORK: [],
+                       AUTH: [],
+                       OPENFILES: []
+                   };
+
+                   lines.forEach(line => {
+                       const t = line.trim();
+                       if (t === '---PROCESSES---') { currentSection = 'PROCESSES'; return; }
+                       if (t === '---NETWORK---') { currentSection = 'NETWORK'; return; }
+                       if (t === '---AUTH---') { currentSection = 'AUTH'; return; }
+                       if (t === '---OPENFILES---') { currentSection = 'OPENFILES'; return; }
+                       
+                       if (currentSection) extracted[currentSection].push(line);
+                   });
+                   
+                   // Parse Process Table (Skip Header)
+                   const processes = extracted.PROCESSES.slice(1).map((line: string) => {
                        const cols = line.trim().split(/\s+/);
+                       // Basic validation to ensure line is a process record
+                       if(cols.length < 4) return null;
                        return {
                            user: cols[0], pid: cols[1], cpu: cols[2], mem: cols[3], command: cols.slice(10).join(' '), risk: 'LOW' as 'LOW'
                        };
-                   }).filter(p => p.pid);
+                   }).filter((p: any) => p && p.pid);
 
                    setForensicData({
                        timestamp: new Date(),
                        processes: processes,
-                       connections: netRaw.split('\n').filter(l=>l),
-                       authLogs: authRaw.split('\n').filter(l=>l),
-                       openFiles: []
+                       connections: extracted.NETWORK,
+                       authLogs: extracted.AUTH,
+                       openFiles: extracted.OPENFILES
                    });
                    setIsGatheringForensics(false);
                }
-          }, 4000);
+          }, 1000); // Check every second
+
+          // Safety Timeout
+          setTimeout(() => {
+              clearInterval(pollInterval);
+              if (isGatheringForensics) {
+                  setIsGatheringForensics(false);
+                  // Optional: Show error
+              }
+          }, 15000);
 
       } else {
           // MOCK MODE

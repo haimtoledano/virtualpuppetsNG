@@ -1,5 +1,7 @@
 
 
+
+
 import express from 'express';
 import path from 'path';
 import fs from 'fs';
@@ -113,6 +115,7 @@ if command -v apt-get &> /dev/null; then
     if ! command -v ss &> /dev/null; then apt-get install -y iproute2 -qq; fi
     if ! command -v awk &> /dev/null; then apt-get install -y gawk -qq; fi
     if ! command -v socat &> /dev/null; then apt-get install -y socat -qq; fi
+    if ! command -v lsof &> /dev/null; then apt-get install -y lsof -qq; fi
 fi
 
 HWID=$(cat /sys/class/net/eth0/address 2>/dev/null || cat /sys/class/net/wlan0/address 2>/dev/null || hostname)
@@ -167,6 +170,17 @@ elif [[ "\$1" == "--set-sentinel" ]]; then
             log "Sentinel Mode Disabled"
             echo "Sentinel Mode: OFF"
     fi
+elif [[ "\$1" == "--forensic" ]]; then
+    log "Running forensic snapshot..."
+    echo "---PROCESSES---"
+    ps -aux --sort=-%cpu | head -20
+    echo "---NETWORK---"
+    ss -tupn
+    echo "---AUTH---"
+    if [ -f /var/log/auth.log ]; then tail -n 20 /var/log/auth.log; fi
+    if [ -f /var/log/secure ]; then tail -n 20 /var/log/secure; fi
+    echo "---OPENFILES---"
+    lsof -i -P -n 2>/dev/null | head -50
 elif [[ "\$1" == "--factory-reset" ]]; then
     echo "Resetting agent configuration..."
     rm -f "\$AGENT_DIR/sentinel_active"
