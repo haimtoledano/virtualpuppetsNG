@@ -22,6 +22,54 @@ const DEFAULT_TRAP_PORTS: Record<string, number> = {
     'trap-elastic': 9200
 };
 
+// --- GAUGE COMPONENT ---
+const Gauge = ({ value, label, type, unit = '%', icon: Icon }: { value: number, label: string, type: 'CPU' | 'RAM' | 'TEMP', unit?: string, icon?: any }) => {
+    const radius = 24; 
+    const circumference = 2 * Math.PI * radius;
+    const progress = Math.min(Math.max(0, value), 100);
+    const strokeDashoffset = circumference - (progress / 100) * circumference;
+    
+    let color = '#3b82f6'; // Default Blue (RAM)
+    if (type === 'CPU' || type === 'TEMP') {
+        if (value < 60) color = '#10b981'; // Green
+        else if (value < 85) color = '#eab308'; // Yellow
+        else color = '#ef4444'; // Red
+    }
+    
+    return (
+        <div className="flex flex-col items-center justify-center w-full">
+            <div className="relative w-16 h-16 group">
+                 {/* Glow Effect for High values */}
+                 {(type !== 'RAM' && value > 80) && (
+                     <div className="absolute inset-0 bg-red-500/30 blur-xl rounded-full animate-pulse"></div>
+                 )}
+                 
+                 <svg className="w-full h-full transform -rotate-90 relative z-10">
+                    {/* Track */}
+                    <circle cx="32" cy="32" r={radius} stroke="#1e293b" strokeWidth="5" fill="transparent" />
+                    {/* Progress */}
+                    <circle 
+                        cx="32" cy="32" r={radius} 
+                        stroke={color} 
+                        strokeWidth="5" 
+                        fill="transparent" 
+                        strokeDasharray={circumference} 
+                        strokeDashoffset={strokeDashoffset} 
+                        strokeLinecap="round" 
+                        className="transition-all duration-1000 ease-out shadow-lg shadow-current"
+                    />
+                </svg>
+                <div className="absolute inset-0 flex flex-col items-center justify-center z-20">
+                    {Icon && <Icon className={`w-3 h-3 mb-0.5 ${type === 'CPU' ? 'text-blue-400' : type === 'TEMP' ? 'text-orange-400' : 'text-purple-400'}`} />}
+                    <span className="text-[10px] font-bold text-white font-mono leading-none drop-shadow-md">{Math.round(value)}{unit}</span>
+                </div>
+            </div>
+            <span className="text-[9px] font-bold text-slate-500 mt-1 uppercase tracking-wider group-hover:text-slate-300 transition-colors">{label}</span>
+        </div>
+    );
+};
+
+
 const ActorDetail: React.FC<ActorDetailProps> = ({ actor, gateway, logs: initialLogs, onBack, isProduction }) => {
   const [activeTab, setActiveTab] = useState<'OVERVIEW' | 'TERMINAL' | 'DECEPTION' | 'NETWORK'>('OVERVIEW');
   
@@ -449,9 +497,9 @@ const ActorDetail: React.FC<ActorDetailProps> = ({ actor, gateway, logs: initial
             </div>
 
             {/* Network Stats Bar */}
-            <div className="grid grid-cols-2 lg:grid-cols-5 gap-4 bg-slate-900/50 rounded-lg p-4 border border-slate-700/50">
+            <div className="grid grid-cols-2 lg:grid-cols-5 gap-4 bg-slate-900/50 rounded-lg p-4 border border-slate-700/50 items-center">
                  {/* External IP */}
-                <div>
+                <div className="h-full flex flex-col justify-center">
                     <div className="text-slate-500 text-[10px] font-bold uppercase tracking-wider mb-1 flex items-center">
                         <Globe className="w-3 h-3 mr-1" /> External IP (WAN)
                     </div>
@@ -462,7 +510,7 @@ const ActorDetail: React.FC<ActorDetailProps> = ({ actor, gateway, logs: initial
                 </div>
 
                 {/* Internal IP (Auto-Scanned) */}
-                <div>
+                <div className="h-full flex flex-col justify-center">
                      <div className="text-slate-500 text-[10px] font-bold uppercase tracking-wider mb-1 flex items-center">
                         <Wifi className="w-3 h-3 mr-1" /> Internal IP (LAN)
                     </div>
@@ -486,29 +534,14 @@ const ActorDetail: React.FC<ActorDetailProps> = ({ actor, gateway, logs: initial
                     </div>
                 </div>
 
-                <div>
-                    <div className="text-slate-500 text-[10px] font-bold uppercase tracking-wider mb-1">CPU Load</div>
-                    <div className="w-full bg-slate-700 h-1.5 rounded-full mt-2 overflow-hidden">
-                        <div className={`${getTempColor(actor.cpuLoad)} h-1.5 rounded-full transition-all duration-1000`} style={{ width: `${actor.cpuLoad || 0}%` }}></div>
-                    </div>
-                    <div className="text-right text-[10px] text-slate-400 mt-1">{(actor.cpuLoad || 0).toFixed(1)}%</div>
+                <div className="flex justify-center border-l border-slate-700/50">
+                    <Gauge value={actor.cpuLoad || 0} label="CPU Load" type="CPU" icon={Cpu} />
                 </div>
-                <div>
-                     <div className="text-slate-500 text-[10px] font-bold uppercase tracking-wider mb-1">RAM Usage</div>
-                    <div className="w-full bg-slate-700 h-1.5 rounded-full mt-2 overflow-hidden">
-                        <div className="bg-blue-500 h-1.5 rounded-full transition-all duration-1000" style={{ width: `${actor.memoryUsage || 0}%` }}></div>
-                    </div>
-                     <div className="text-right text-[10px] text-slate-400 mt-1">{(actor.memoryUsage || 0).toFixed(1)}%</div>
+                <div className="flex justify-center border-l border-slate-700/50">
+                     <Gauge value={actor.memoryUsage || 0} label="RAM Usage" type="RAM" icon={Activity} />
                 </div>
-                <div>
-                     <div className="text-slate-500 text-[10px] font-bold uppercase tracking-wider mb-1 flex items-center"><Thermometer className="w-3 h-3 mr-1" /> Temperature</div>
-                     <div className="flex items-center space-x-2 mt-1">
-                         <div className={`w-2 h-2 rounded-full ${getTempColor(actor.temperature)}`}></div>
-                         <div className="text-slate-200 font-mono text-sm">{actor.temperature ? `${actor.temperature.toFixed(1)}°C` : 'N/A'}</div>
-                     </div>
-                     <div className="w-full bg-slate-700 h-1.5 rounded-full mt-2 overflow-hidden">
-                         <div className={`${getTempColor(actor.temperature)} h-1.5 rounded-full transition-all duration-1000`} style={{ width: `${Math.min(100, (actor.temperature || 0))}%` }}></div>
-                     </div>
+                <div className="flex justify-center border-l border-slate-700/50">
+                     <Gauge value={actor.temperature || 0} label="Thermals" type="TEMP" unit="°C" icon={Thermometer} />
                 </div>
             </div>
         </div>
