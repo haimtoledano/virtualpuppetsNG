@@ -1,9 +1,11 @@
 
+
+
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { Actor, LogEntry, ActorStatus, AiAnalysis, ProxyGateway, HoneyFile, ActiveTunnel, DevicePersona, CommandJob, LogLevel, User, UserPreferences, ForensicSnapshot, ForensicProcess, AttackSession } from '../types';
-import { executeRemoteCommand, getAvailableCloudTraps, toggleTunnelMock, AVAILABLE_PERSONAS, generateRandomLog, performForensicScan, getAttackSessions } from '../services/mockService';
+import { executeRemoteCommand, getAvailableCloudTraps, toggleTunnelMock, AVAILABLE_PERSONAS, generateRandomLog, performForensicScan, getAttackSessions, deleteAttackSession } from '../services/mockService';
 import { analyzeLogsWithAi, generateDeceptionContent } from '../services/aiService';
-import { updateActorName, queueSystemCommand, getActorCommands, deleteActor, updateActorTunnels, updateActorPersona, resetActorStatus, resetActorToFactory, updateActorHoneyFiles, toggleActorSentinel, generateReport } from '../services/dbService';
+import { updateActorName, queueSystemCommand, getActorCommands, deleteActor, updateActorTunnels, updateActorPersona, resetActorStatus, resetActorToFactory, updateActorHoneyFiles, toggleActorSentinel, generateReport, deleteAttackSession as deleteAttackSessionProd } from '../services/dbService';
 import Terminal from './Terminal';
 import { Cpu, Wifi, Shield, Bot, ArrowLeft, BrainCircuit, Router, Network, FileCode, Check, Activity, X, Printer, Camera, Server, Edit2, Trash2, Loader, ShieldCheck, AlertOctagon, Skull, ArrowRight, Terminal as TerminalIcon, Globe, ScanSearch, Power, RefreshCw, History as HistoryIcon, Thermometer, RefreshCcw, Siren, Eye, Fingerprint, Info, Cable, Search, Lock, Zap, FileText, HardDrive, List, Play, Pause, FastForward, Rewind, Film, Database, Monitor, Save } from 'lucide-react';
 
@@ -155,6 +157,7 @@ const ActorDetail: React.FC<ActorDetailProps> = ({ actor, gateway, logs: initial
   const [isPlaying, setIsPlaying] = useState(false);
   const [replaySpeed, setReplaySpeed] = useState(1);
   const [replayContent, setReplayContent] = useState('');
+  const [isRefreshingSessions, setIsRefreshingSessions] = useState(false);
   const replayTimerRef = useRef<number | null>(null);
 
   // --- PERSISTENCE FOR TOPOLOGY VIEW ---
@@ -237,18 +240,24 @@ const ActorDetail: React.FC<ActorDetailProps> = ({ actor, gateway, logs: initial
   }, [commandHistory, isScanningPorts]);
 
   // --- LOAD SESSIONS WHEN TAB CHANGES ---
+  const handleLoadSessions = async () => {
+      setIsRefreshingSessions(true);
+      // Construct current state from hooks to ensure new tunnels are passed to mock
+      const currentActorState = { 
+          ...actor, 
+          activeTunnels: tunnels, 
+          persona: activePersona,
+          status: (tunnels.length > 0 || isSentinelEnabled) ? ActorStatus.COMPROMISED : actor.status 
+      };
+      
+      const sessions = await getAttackSessions(actor.id, currentActorState);
+      setRecordedSessions(sessions);
+      setIsRefreshingSessions(false);
+  };
+
   useEffect(() => {
       if (activeTab === 'FORENSICS' && forensicView === 'SESSIONS') {
-          // Construct current state from hooks to ensure new tunnels are passed to mock
-          const currentActorState = { 
-              ...actor, 
-              activeTunnels: tunnels, 
-              persona: activePersona,
-              status: (tunnels.length > 0 || isSentinelEnabled) ? ActorStatus.COMPROMISED : actor.status 
-          };
-          
-          // Load sessions
-          getAttackSessions(actor.id, currentActorState).then(setRecordedSessions);
+          handleLoadSessions();
       }
   }, [activeTab, forensicView, actor.id, actor, tunnels, activePersona, isSentinelEnabled]);
 
@@ -437,6 +446,22 @@ const ActorDetail: React.FC<ActorDetailProps> = ({ actor, gateway, logs: initial
              setIsDeleting(false);
           }
       }
+  };
+
+  const handleDeleteSession = async (e: React.MouseEvent, sessionId: string) => {
+    e.stopPropagation();
+    if (confirm("Permanently delete this recorded session?")) {
+        // Optimistically remove from UI
+        setRecordedSessions(prev => prev.filter(s => s.id !== sessionId));
+        if (activeSession?.id === sessionId) setActiveSession(null);
+        
+        // Call service
+        if (isProduction) {
+            await deleteAttackSessionProd(sessionId);
+        } else {
+            await deleteAttackSession(sessionId);
+        }
+    }
   };
 
   const handleAiAnalyze = async () => {
@@ -1113,23 +1138,45 @@ const ActorDetail: React.FC<ActorDetailProps> = ({ actor, gateway, logs: initial
                         <div className="h-full flex flex-col lg:flex-row gap-6">
                             {/* Session List */}
                             <div className="w-full lg:w-1/3 bg-slate-900 rounded border border-slate-700 overflow-hidden flex flex-col">
-                                <div className="p-3 bg-slate-800 border-b border-slate-700 text-sm font-bold text-slate-300"> Recorded Sessions</div>
+                                <div className="p-3 bg-slate-800 border-b border-slate-700 text-sm font-bold text-slate-300 flex justify-between items-center">
+                                     <span>Recorded Sessions</span>
+                                     <button 
+                                        onClick={handleLoadSessions} 
+                                        disabled={isRefreshingSessions} 
+                                        className="text-slate-500 hover:text-white p-1 rounded hover:bg-slate-700 transition-colors"
+                                        title="Refresh Session List"
+                                     >
+                                         <RefreshCw className={`w-3.5 h-3.5 ${isRefreshingSessions ? 'animate-spin' : ''}`} />
+                                     </button>
+                                </div>
                                 <div className="flex-1 overflow-y-auto">
                                     {recordedSessions.length === 0 ? (
-                                        <div className="p-4 text-center text-slate-500 text-xs italic">No recorded attack sessions found.</div>
+                                        <div className="p-8 text-center text-slate-500 text-xs italic flex flex-col items-center">
+                                            <Film className="w-8 h-8 mb-2 opacity-20" />
+                                            No recorded attack sessions found.
+                                            <br/>Enable a Trap to capture interactions.
+                                        </div>
                                     ) : (
                                         recordedSessions.map(session => (
                                             <div 
                                                 key={session.id} 
                                                 onClick={() => { setActiveSession(session); setReplayTime(0); setIsPlaying(false); }}
-                                                className={`p-3 border-b border-slate-800 cursor-pointer hover:bg-slate-800 transition-colors ${activeSession?.id === session.id ? 'bg-blue-900/20 border-l-4 border-l-blue-500' : ''}`}
+                                                className={`p-3 border-b border-slate-800 cursor-pointer hover:bg-slate-800 transition-colors group relative ${activeSession?.id === session.id ? 'bg-blue-900/20 border-l-4 border-l-blue-500' : ''}`}
                                             >
-                                                <div className="flex justify-between items-start mb-1">
+                                                <div className="flex justify-between items-start mb-1 pr-6">
                                                     <span className="text-xs font-bold text-white">{new Date(session.startTime).toLocaleString()}</span>
                                                     <span className="text-[10px] bg-red-900/50 text-red-300 px-1.5 rounded border border-red-800">{session.protocol}</span>
                                                 </div>
                                                 <div className="text-xs text-slate-400 font-mono mb-1">{session.attackerIp}</div>
                                                 <div className="text-[10px] text-slate-600">{session.durationSeconds}s Duration • {session.frames.length} Events</div>
+                                                
+                                                <button 
+                                                    onClick={(e) => handleDeleteSession(e, session.id)}
+                                                    className="absolute top-3 right-2 text-slate-600 hover:text-red-500 opacity-0 group-hover:opacity-100 transition-opacity p-1.5"
+                                                    title="Delete Recording"
+                                                >
+                                                    <Trash2 className="w-3.5 h-3.5" />
+                                                </button>
                                             </div>
                                         ))
                                     )}

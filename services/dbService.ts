@@ -6,6 +6,8 @@
 
 
 
+
+
 import { Actor, ProxyGateway, User, DbConfig, LogEntry, SystemConfig, Report, CommandJob, PendingActor, DevicePersona, WifiNetwork, BluetoothDevice } from '../types';
 
 const API_BASE = '/api';
@@ -299,6 +301,15 @@ export const deleteReport = async (id: string): Promise<boolean> => {
         return true;
     } catch { return false; }
 };
+
+// --- NEW: Delete Session ---
+export const deleteAttackSession = async (id: string): Promise<boolean> => {
+    try {
+        await fetch(`${API_BASE}/sessions/${id}`, { method: 'DELETE' });
+        return true;
+    } catch { return false; }
+};
+
 
 // --- Remote Commands ---
 

