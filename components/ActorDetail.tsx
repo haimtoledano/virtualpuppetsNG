@@ -239,10 +239,18 @@ const ActorDetail: React.FC<ActorDetailProps> = ({ actor, gateway, logs: initial
   // --- LOAD SESSIONS WHEN TAB CHANGES ---
   useEffect(() => {
       if (activeTab === 'FORENSICS' && forensicView === 'SESSIONS') {
+          // Construct current state from hooks to ensure new tunnels are passed to mock
+          const currentActorState = { 
+              ...actor, 
+              activeTunnels: tunnels, 
+              persona: activePersona,
+              status: (tunnels.length > 0 || isSentinelEnabled) ? ActorStatus.COMPROMISED : actor.status 
+          };
+          
           // Load sessions
-          getAttackSessions(actor.id, actor).then(setRecordedSessions);
+          getAttackSessions(actor.id, currentActorState).then(setRecordedSessions);
       }
-  }, [activeTab, forensicView, actor.id, actor]);
+  }, [activeTab, forensicView, actor.id, actor, tunnels, activePersona, isSentinelEnabled]);
 
   // --- REPLAY LOGIC ---
   useEffect(() => {

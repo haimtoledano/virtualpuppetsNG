@@ -700,18 +700,19 @@ export const getAttackSessions = async (actorId: string, actorContext?: Actor): 
                  ]
              });
 
-             // 2. Dynamic Traps
+             // 2. Dynamic Traps (Real-time generation from context)
              if (actorContext && actorContext.activeTunnels) {
                  actorContext.activeTunnels.forEach(t => {
                      const fakeIp = `${Math.floor(Math.random() * 255)}.${Math.floor(Math.random() * 255)}.${Math.floor(Math.random() * 255)}.${Math.floor(Math.random() * 255)}`;
 
-                     if (t.trap.serviceType === 'FTP') {
+                     // Check service type from trap definition or tunnel name
+                     if (t.trap.serviceType === 'FTP' || t.trap.name.includes('VSFTPD')) {
                          sessions.push({
-                            id: `sess-ftp-${t.id}`,
+                            id: `sess-ftp-${t.id}-${Date.now()}`,
                             actorId,
                             attackerIp: fakeIp,
                             protocol: 'FTP',
-                            startTime: new Date(Date.now() - 300000), // 5 min ago
+                            startTime: new Date(Date.now() - Math.random() * 100000), // Recent
                             durationSeconds: 5,
                             frames: [
                                 { time: 100, type: 'OUTPUT', data: '220 (vsFTPd 2.3.4)\r\n' },
@@ -725,11 +726,11 @@ export const getAttackSessions = async (actorId: string, actorContext?: Actor): 
                          });
                      } else if (t.trap.serviceType === 'Redis') {
                           sessions.push({
-                            id: `sess-redis-${t.id}`,
+                            id: `sess-redis-${t.id}-${Date.now()}`,
                             actorId,
                             attackerIp: fakeIp,
                             protocol: 'REDIS',
-                            startTime: new Date(Date.now() - 600000), // 10 min ago
+                            startTime: new Date(Date.now() - Math.random() * 100000), // Recent
                             durationSeconds: 4,
                             frames: [
                                 { time: 100, type: 'INPUT', data: 'CONFIG GET *\r\n' },
