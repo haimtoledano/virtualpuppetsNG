@@ -2,6 +2,8 @@
 
 
 
+
+
 import { Actor, ActorStatus, LogEntry, LogLevel, ProxyGateway, CloudTrap, ActiveTunnel, PendingActor, ProvisioningStatus, DevicePersona, WifiNetwork, BluetoothDevice } from '../types';
 
 const LOCATIONS = ['Tel Aviv HQ', 'New York Branch', 'London DC', 'Frankfurt AWS'];
@@ -180,6 +182,14 @@ export const executeRemoteCommand = async (actorId: string, command: string): Pr
         resolve(`[${actorId}] Process terminated.`);
       } else if (command.startsWith('vpp-agent --set-persona')) {
         resolve(`Updating system persona...\nPersona configuration applied successfully.`);
+      } else if (command.startsWith('vpp-agent --set-sentinel')) {
+          const mode = command.includes('on') ? 'ENABLED' : 'DISABLED';
+          resolve(`
+[VPP-AGENT] Updating Sentinel Configuration...
+[INFO] Applying iptables monitoring rules...
+[INFO] Threat Monitor Mode: ${mode}
+[OK] Sentinel configuration updated.
+          `);
       } else if (command.includes('vpp-agent --factory-reset')) {
         resolve(`
 [VPP-AGENT] Initiating Factory Reset...

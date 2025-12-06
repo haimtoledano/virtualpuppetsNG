@@ -3,6 +3,8 @@
 
 
 
+
+
 import React, { useState, useEffect, useMemo } from 'react';
 import { Actor, LogEntry, ActorStatus, AiAnalysis, ProxyGateway, HoneyFile, ActiveTunnel, DevicePersona, CommandJob, LogLevel } from '../types';
 import { executeRemoteCommand, getAvailableCloudTraps, toggleTunnelMock, AVAILABLE_PERSONAS, generateRandomLog } from '../services/mockService';
@@ -421,8 +423,8 @@ const ActorDetail: React.FC<ActorDetailProps> = ({ actor, gateway, logs: initial
           await toggleActorSentinel(actor.id, newState);
       }
       
-      // Optionally notify agent, though currently mostly handled on server/mock logic side
-      // await handleCommand(`vpp-agent --set-sentinel ${newState ? 'on' : 'off'}`);
+      // Send the visible command to the agent so it can activate its internal monitoring loop
+      await handleCommand(`vpp-agent --set-sentinel ${newState ? 'on' : 'off'}`);
   };
 
   const handleTestLog = () => {

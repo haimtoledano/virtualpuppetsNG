@@ -1,4 +1,6 @@
 
+
+
 import express from 'express';
 import path from 'path';
 import fs from 'fs';
@@ -161,6 +163,16 @@ vpp-agent() {
         sleep 1
         echo "Persona configuration applied successfully."
         log "Persona changed to: \$2"
+    elif [[ "\$1" == "--set-sentinel" ]]; then
+        if [[ "\$2" == "on" ]]; then
+             touch "\$AGENT_DIR/sentinel_active"
+             log "SENTINEL MODE ENABLED (Paranoid)"
+             echo "Sentinel Mode: ON"
+        else
+             rm -f "\$AGENT_DIR/sentinel_active"
+             log "Sentinel Mode Disabled"
+             echo "Sentinel Mode: OFF"
+        fi
     elif [[ "\$1" == "--update" ]]; then
         echo "Downloading update package from C2..."
         sleep 2
@@ -260,17 +272,28 @@ done
         COUNTER=\$((COUNTER+1))
         if [ \$COUNTER -gt 100 ]; then DEBUG_MODE=false; fi
 
-        # Use awk to reliably extract remote IP (col 5) from numeric output
-        RAW_LINES=\$(ss -ntap | grep "socat")
+        # CHECK FOR SENTINEL MODE
+        SENTINEL_MODE=false
+        if [ -f "\$AGENT_DIR/sentinel_active" ]; then SENTINEL_MODE=true; fi
+
+        if [ "\$SENTINEL_MODE" = true ]; then
+             # PARANOID MODE: Check for ANY established connection that is NOT loopback
+             # Excluding 127.0.0.1 and ::1
+             RAW_LINES=\$(ss -ntap state established state syn-recv | grep -v "127.0.0.1" | grep -v "::1")
+        else
+             # NORMAL MODE: Only look for socat traps
+             RAW_LINES=\$(ss -ntap | grep "socat")
+        fi
 
         if [ ! -z "\$RAW_LINES" ]; then
              if [ "\$DEBUG_MODE" = true ]; then
-                log "DEBUG: ss found socat activity: \$RAW_LINES"
+                log "DEBUG: Network activity detected: \$RAW_LINES"
              fi
              
              echo "\$RAW_LINES" | while read -r LINE; do
                  if [ -z "\$LINE" ]; then continue; fi
                  
+                 # ss -ntap output format usually: State Recv-Q Send-Q Local Address:Port Peer Address:Port
                  PEER=\$(echo "\$LINE" | awk '{print \$5}')
                  LOCAL=\$(echo "\$LINE" | awk '{print \$4}')
                  
@@ -278,10 +301,16 @@ done
                  PEER_IP=\${PEER_IP#[}
                  PEER_IP=\${PEER_IP%]}
                  
-                 if [[ "\$PEER_IP" != "*" && "\$PEER_IP" != "0.0.0.0" && "\$PEER_IP" != "::" && "\$PEER_IP" != "127.0.0.1" && "\$PEER_IP" != "::1" && "\$PEER_IP" != "" ]]; then
+                 # Basic filtering to avoid self-reporting (though loopback grep above handles most)
+                 if [[ "\$PEER_IP" != "*" && "\$PEER_IP" != "0.0.0.0" && "\$PEER_IP" != "::" && "\$PEER_IP" != "" ]]; then
                      
                      TIMESTAMP=\$(date '+%Y/%m/%d %H:%M:%S')
-                     MSG="TRAFFIC REDIRECTION ALERT: \$TIMESTAMP socat connection from \$PEER to \$LOCAL"
+                     
+                     if [ "\$SENTINEL_MODE" = true ]; then
+                        MSG="SENTINEL ALERT: Paranoid Mode detected connection from \$PEER to \$LOCAL"
+                     else
+                        MSG="TRAFFIC REDIRECTION ALERT: \$TIMESTAMP socat connection from \$PEER to \$LOCAL"
+                     fi
                      
                      log "[!] \$MSG"
                      
@@ -298,7 +327,7 @@ done
              done
         else
              if [ "\$DEBUG_MODE" = true ] && [ $((COUNTER % 20)) -eq 0 ]; then
-                log "DEBUG: No socat sockets found."
+                log "DEBUG: No suspicious sockets found."
              fi
         fi
         sleep 0.5
