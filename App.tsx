@@ -1,18 +1,27 @@
 
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, Suspense } from 'react';
 import { generateInitialActors, generateRandomLog, generateGateways } from './services/mockService';
 import { dbQuery, dbUpdate, getSystemConfig, getPendingActors, approvePendingActor, rejectPendingActor, getSystemLogs, sendAuditLog } from './services/dbService';
 import { Actor, LogEntry, ProxyGateway, PendingActor, ActorStatus, User, SystemConfig } from './types';
-import Dashboard from './components/Dashboard';
-import ActorDetail from './components/ActorDetail';
-import EnrollmentModal from './components/EnrollmentModal';
-import LoginScreen from './components/LoginScreen';
-import Settings from './components/Settings';
-import Reports from './components/Reports';
-import WarRoomMap from './components/WarRoomMap';
-import GatewayManager from './components/GatewayManager';
-import WirelessRecon from './components/WirelessRecon';
-import { LayoutDashboard, Settings as SettingsIcon, Network, Plus, LogOut, User as UserIcon, FileText, Globe, Router, Radio } from 'lucide-react';
+import { LayoutDashboard, Settings as SettingsIcon, Network, Plus, LogOut, User as UserIcon, FileText, Globe, Router, Radio, Loader } from 'lucide-react';
+
+// Lazy Load Components to split chunks
+const Dashboard = React.lazy(() => import('./components/Dashboard'));
+const ActorDetail = React.lazy(() => import('./components/ActorDetail'));
+const EnrollmentModal = React.lazy(() => import('./components/EnrollmentModal'));
+const LoginScreen = React.lazy(() => import('./components/LoginScreen'));
+const Settings = React.lazy(() => import('./components/Settings'));
+const Reports = React.lazy(() => import('./components/Reports'));
+const WarRoomMap = React.lazy(() => import('./components/WarRoomMap'));
+const GatewayManager = React.lazy(() => import('./components/GatewayManager'));
+const WirelessRecon = React.lazy(() => import('./components/WirelessRecon'));
+
+const PageLoader = () => (
+  <div className="flex flex-col items-center justify-center h-full w-full text-slate-500 min-h-[400px]">
+    <Loader className="w-8 h-8 text-blue-500 animate-spin mb-3" />
+    <span className="text-xs font-mono tracking-widest opacity-70">LOADING MODULE...</span>
+  </div>
+);
 
 const App: React.FC = () => {
   const [isProduction, setIsProduction] = useState(() => localStorage.getItem('vpp_mode') === 'PRODUCTION');
@@ -131,7 +140,7 @@ const App: React.FC = () => {
         }, 1500); // Polling every 1.5s
         return () => clearInterval(interval);
     }
-  }, [isProduction, currentUser]); // CRITICAL FIX: Removed 'actors' dependency to prevent polling reset loop
+  }, [isProduction, currentUser]);
 
   const handleAdoptDevice = async (pendingId: string, proxyId: string, name: string) => {
       if (!isProduction) {
@@ -174,54 +183,60 @@ const App: React.FC = () => {
       localStorage.removeItem('vpp_user');
   };
 
-  if (isProduction && !currentUser) return <LoginScreen onLoginSuccess={handleLoginSuccess} />;
+  if (isProduction && !currentUser) return (
+    <Suspense fallback={<div className="min-h-screen bg-cyber-900 flex items-center justify-center text-blue-500 font-mono text-sm tracking-wider">INITIALIZING SECURE ENVIRONMENT...</div>}>
+      <LoginScreen onLoginSuccess={handleLoginSuccess} />
+    </Suspense>
+  );
 
   const selectedActor = actors.find(a => a.id === selectedActorId);
   const selectedActorGateway = selectedActor ? gateways.find(g => g.id === selectedActor.proxyId) : undefined;
 
   const renderContent = () => {
-    if (selectedActor) {
-      return (
-        <ActorDetail 
-            actor={selectedActor} 
-            gateway={selectedActorGateway} 
-            logs={logs.filter(l => l.actorId === selectedActorId)} 
-            onBack={() => setSelectedActorId(null)} 
-            isProduction={isProduction}
-        />
-      );
-    }
-    switch (activeTab) {
-      case 'dashboard': return <Dashboard gateways={gateways} actors={actors} logs={logs} onActorSelect={setSelectedActorId} />;
-      case 'map': return <WarRoomMap gateways={gateways} actors={actors} />;
-      case 'reports': return <Reports currentUser={currentUser} logs={logs} actors={actors} />;
-      case 'gateways': return <GatewayManager gateways={gateways} onRefresh={loadProductionData} domain={systemConfig?.domain || 'vpp.io'} isProduction={isProduction} />;
-      case 'wireless': return <WirelessRecon isProduction={isProduction} actors={actors} />;
-      case 'actors': return (
-        <div className="space-y-6 animate-fade-in">
-             <div className="flex justify-between items-center mb-4">
-                <h2 className="text-2xl font-bold text-slate-200">Global Fleet</h2>
-                <button onClick={() => setIsEnrollmentOpen(true)} className="bg-blue-600 hover:bg-blue-500 text-white px-4 py-2 rounded-lg flex items-center font-bold text-sm shadow-lg"><Plus className="w-4 h-4 mr-2" />Enroll New Device</button>
-            </div>
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                {actors.map(actor => (
-                    <div key={actor.id} onClick={() => setSelectedActorId(actor.id)} className={`cursor-pointer bg-slate-800 p-6 rounded-xl border hover:border-blue-500 transition-all shadow-lg ${actor.status === 'COMPROMISED' ? 'border-red-500 shadow-red-500/20' : 'border-slate-700'}`}>
-                        <div className="flex justify-between items-start">
-                            <h3 className="text-lg font-bold text-slate-200">{actor.name}</h3>
+    return (
+        <Suspense fallback={<PageLoader />}>
+            {selectedActor ? (
+                <ActorDetail 
+                    actor={selectedActor} 
+                    gateway={selectedActorGateway} 
+                    logs={logs.filter(l => l.actorId === selectedActorId)} 
+                    onBack={() => setSelectedActorId(null)} 
+                    isProduction={isProduction}
+                />
+            ) : (
+                <>
+                    {activeTab === 'dashboard' && <Dashboard gateways={gateways} actors={actors} logs={logs} onActorSelect={setSelectedActorId} />}
+                    {activeTab === 'map' && <WarRoomMap gateways={gateways} actors={actors} />}
+                    {activeTab === 'reports' && <Reports currentUser={currentUser} logs={logs} actors={actors} />}
+                    {activeTab === 'gateways' && <GatewayManager gateways={gateways} onRefresh={loadProductionData} domain={systemConfig?.domain || 'vpp.io'} isProduction={isProduction} />}
+                    {activeTab === 'wireless' && <WirelessRecon isProduction={isProduction} actors={actors} />}
+                    {activeTab === 'settings' && <Settings isProduction={isProduction} onToggleProduction={toggleProductionMode} currentUser={currentUser} />}
+                    {activeTab === 'actors' && (
+                        <div className="space-y-6 animate-fade-in">
+                            <div className="flex justify-between items-center mb-4">
+                                <h2 className="text-2xl font-bold text-slate-200">Global Fleet</h2>
+                                <button onClick={() => setIsEnrollmentOpen(true)} className="bg-blue-600 hover:bg-blue-500 text-white px-4 py-2 rounded-lg flex items-center font-bold text-sm shadow-lg"><Plus className="w-4 h-4 mr-2" />Enroll New Device</button>
+                            </div>
+                            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                                {actors.map(actor => (
+                                    <div key={actor.id} onClick={() => setSelectedActorId(actor.id)} className={`cursor-pointer bg-slate-800 p-6 rounded-xl border hover:border-blue-500 transition-all shadow-lg ${actor.status === 'COMPROMISED' ? 'border-red-500 shadow-red-500/20' : 'border-slate-700'}`}>
+                                        <div className="flex justify-between items-start">
+                                            <h3 className="text-lg font-bold text-slate-200">{actor.name}</h3>
+                                        </div>
+                                        <p className="text-sm text-slate-500 font-mono">{actor.localIp}</p>
+                                        <div className="mt-4 flex justify-between text-xs text-slate-400">
+                                            <span>Status: <span className={actor.status === 'ONLINE' ? 'text-emerald-400' : actor.status === 'COMPROMISED' ? 'text-red-500 font-bold animate-pulse' : 'text-red-400'}>{actor.status}</span></span>
+                                            <span className="text-slate-500">{gateways.find(g => g.id === actor.proxyId)?.name || 'Direct'}</span>
+                                        </div>
+                                    </div>
+                                ))}
+                            </div>
                         </div>
-                        <p className="text-sm text-slate-500 font-mono">{actor.localIp}</p>
-                        <div className="mt-4 flex justify-between text-xs text-slate-400">
-                            <span>Status: <span className={actor.status === 'ONLINE' ? 'text-emerald-400' : actor.status === 'COMPROMISED' ? 'text-red-500 font-bold animate-pulse' : 'text-red-400'}>{actor.status}</span></span>
-                            <span className="text-slate-500">{gateways.find(g => g.id === actor.proxyId)?.name || 'Direct'}</span>
-                        </div>
-                    </div>
-                ))}
-            </div>
-        </div>
-      );
-      case 'settings': return <Settings isProduction={isProduction} onToggleProduction={toggleProductionMode} currentUser={currentUser} />;
-      default: return null;
-    }
+                    )}
+                </>
+            )}
+        </Suspense>
+    );
   };
 
   return (
@@ -254,7 +269,13 @@ const App: React.FC = () => {
         )}
       </aside>
       <main className="flex-1 overflow-y-auto h-full p-4 md:p-8 bg-gradient-to-br from-cyber-900 to-slate-900">{renderContent()}</main>
-      <EnrollmentModal isOpen={isEnrollmentOpen} onClose={() => setIsEnrollmentOpen(false)} gateways={gateways} pendingActors={pendingActors} setPendingActors={setPendingActors} onApprove={handleAdoptDevice} onReject={handleRejectDevice} domain={systemConfig?.domain || 'vpp.io'} isProduction={isProduction} onGatewayRegistered={loadProductionData} />
+      
+      {/* Conditionally render Modal to save resources if not open */}
+      {isEnrollmentOpen && (
+          <Suspense fallback={null}>
+            <EnrollmentModal isOpen={isEnrollmentOpen} onClose={() => setIsEnrollmentOpen(false)} gateways={gateways} pendingActors={pendingActors} setPendingActors={setPendingActors} onApprove={handleAdoptDevice} onReject={handleRejectDevice} domain={systemConfig?.domain || 'vpp.io'} isProduction={isProduction} onGatewayRegistered={loadProductionData} />
+          </Suspense>
+      )}
     </div>
   );
 };
