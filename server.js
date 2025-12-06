@@ -530,7 +530,12 @@ app.get('/api/enroll/pending', async (req, res) => {
 
 app.post('/api/enroll/approve', async (req, res) => {
     if (!dbPool) return res.json({success:false});
-    const { pendingId, proxyId, name } = req.body;
+    let { pendingId, proxyId, name } = req.body;
+
+    // Fallbacks
+    if (!proxyId) proxyId = 'DIRECT';
+    if (!name) name = 'Unknown-Actor';
+
     try {
         const p = await dbPool.request().input('pid', sql.NVarChar, pendingId).query("SELECT * FROM PendingActors WHERE Id = @pid");
         if (p.recordset.length === 0) return res.json({success:false, error: "Not found"});
@@ -548,7 +553,10 @@ app.post('/api/enroll/approve', async (req, res) => {
             
         await dbPool.request().input('pid', sql.NVarChar, pendingId).query("DELETE FROM PendingActors WHERE Id = @pid");
         res.json({success: true});
-    } catch(e) { res.status(500).json({success:false, error:e.message}); }
+    } catch(e) { 
+        console.error("Approve Error:", e);
+        res.status(500).json({success:false, error:e.message}); 
+    }
 });
 
 app.delete('/api/enroll/pending/:id', async (req, res) => {

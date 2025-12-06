@@ -15,15 +15,89 @@ interface EnrollmentModalProps {
   onReject?: (pendingId: string) => void;
   domain: string;
   isProduction?: boolean;
-  onGatewayRegistered?: () => void; // New prop for refreshing parent data
+  onGatewayRegistered?: () => void;
 }
+
+// Sub-component for isolated row state
+const PendingDeviceRow: React.FC<{
+    device: PendingActor;
+    gateways: ProxyGateway[];
+    onApprove: (id: string, proxyId: string, name: string) => void;
+    onReject?: (id: string) => void;
+}> = ({ device, gateways, onApprove, onReject }) => {
+    const [name, setName] = useState(`Linux-${device.id.split('_')[1] || 'Node'}`);
+    const [proxyId, setProxyId] = useState<string>(gateways.length > 0 ? gateways[0].id : 'DIRECT');
+
+    return (
+        <div className="p-4 flex flex-col md:flex-row md:items-center justify-between gap-4">
+            <div className="flex items-start">
+                <div className="bg-yellow-500/20 p-2 rounded mr-3">
+                    <Terminal className="w-5 h-5 text-yellow-500" />
+                </div>
+                <div>
+                    <div className="flex items-center">
+                        <span className="font-mono text-white font-bold mr-2">{device.hwid}</span>
+                        <span className="text-[10px] bg-slate-700 text-slate-300 px-1.5 rounded">NEW</span>
+                    </div>
+                    <div className="text-xs text-slate-500 font-mono mt-1">
+                        IP: {device.detectedIp} • Detected: {new Date(device.detectedAt).toLocaleTimeString()}
+                    </div>
+                    {device.osVersion && (
+                        <div className="text-[10px] text-emerald-400 font-bold mt-1 flex items-center">
+                            <Cpu className="w-3 h-3 mr-1" />
+                            {device.osVersion}
+                        </div>
+                    )}
+                </div>
+            </div>
+
+            <div className="flex items-center gap-2 bg-slate-900/50 p-2 rounded border border-slate-700/50">
+                <div className="flex flex-col gap-1">
+                    <input 
+                        type="text" 
+                        placeholder="Assign Name"
+                        className="bg-slate-800 border border-slate-600 rounded px-2 py-1 text-xs text-white outline-none w-32"
+                        value={name}
+                        onChange={(e) => setName(e.target.value)}
+                    />
+                    <select 
+                        className="bg-slate-800 border border-slate-600 rounded px-2 py-1 text-xs text-white outline-none w-32"
+                        value={proxyId}
+                        onChange={(e) => setProxyId(e.target.value)}
+                    >
+                        <option value="DIRECT">Direct (No Proxy)</option>
+                        {gateways.map(g => (
+                            <option key={g.id} value={g.id}>{g.name}</option>
+                        ))}
+                    </select>
+                </div>
+                <button 
+                    onClick={() => onApprove(device.id, proxyId, name)}
+                    className="bg-emerald-600 hover:bg-emerald-500 text-white p-2 rounded h-full flex items-center justify-center transition-colors"
+                    title="Adopt Device"
+                >
+                    <CheckCircle className="w-5 h-5" />
+                </button>
+                {onReject && (
+                    <button 
+                        onClick={() => onReject(device.id)}
+                        className="bg-red-900/50 hover:bg-red-600 text-red-200 hover:text-white p-2 rounded h-full flex items-center justify-center transition-colors border border-red-800"
+                        title="Reject/Delete Device"
+                    >
+                        <Trash2 className="w-5 h-5" />
+                    </button>
+                )}
+            </div>
+        </div>
+    );
+};
 
 const EnrollmentModal: React.FC<EnrollmentModalProps> = ({ 
     isOpen, onClose, gateways, pendingActors, setPendingActors, onApprove, onReject, domain, isProduction, onGatewayRegistered
 }) => {
   const [activeTab, setActiveTab] = useState<'ACTOR' | 'SITE'>('ACTOR');
   
-  // Actor State
+  // Actor Generation State
   const [token, setToken] = useState<string>('');
   const [selectedProxyId, setSelectedProxyId] = useState<string>(gateways[0]?.id || 'DIRECT');
   const [isCopied, setIsCopied] = useState(false);
@@ -31,19 +105,14 @@ const EnrollmentModal: React.FC<EnrollmentModalProps> = ({
   const [isGenerating, setIsGenerating] = useState(false);
   const [isRefreshing, setIsRefreshing] = useState(false);
   
-  // Approval Form
-  const [selectedApprovalProxy, setSelectedApprovalProxy] = useState<string>(gateways[0]?.id || '');
-  const [newName, setNewName] = useState('');
-
   // Site (Gateway) State
   const [newSiteName, setNewSiteName] = useState('');
   const [newSiteLocation, setNewSiteLocation] = useState('');
   const [siteToken, setSiteToken] = useState('');
 
-  // When proxy selection changes, we need a new token that points to it
+  // Update token when proxy selection changes
   useEffect(() => {
     if (isOpen) {
-        // Fallback to first gateway or direct if selected is invalid
         if (!gateways.find(g => g.id === selectedProxyId) && selectedProxyId !== 'DIRECT') {
              if (gateways.length > 0) setSelectedProxyId(gateways[0].id);
              else setSelectedProxyId('DIRECT');
@@ -55,7 +124,7 @@ const EnrollmentModal: React.FC<EnrollmentModalProps> = ({
             setToken(mockGenerateToken());
         }
     }
-  }, [isOpen, selectedProxyId, gateways.length]); // Added gateways.length dep
+  }, [isOpen, selectedProxyId, gateways.length]);
 
   const handleGenerateToken = async () => {
       setIsGenerating(true);
@@ -65,8 +134,6 @@ const EnrollmentModal: React.FC<EnrollmentModalProps> = ({
   };
 
   const handleCopy = () => {
-      // The proxy config is now baked into the token on the server side in production
-      // For mock, we keep the flag in the command just for visual
       const proxyFlag = (!isProduction && selectedProxyId !== 'DIRECT') ? ` --proxy ${selectedProxyId}` : '';
       const cmd = `curl -sL http://${domain}/setup | sudo bash -s ${token}${proxyFlag}`;
       
@@ -78,12 +145,10 @@ const EnrollmentModal: React.FC<EnrollmentModalProps> = ({
           alert("Clipboard access not available. Please copy the command manually.");
       }
 
-      // MOCK: Simulate a device connecting after user "runs" command
       if (!isProduction && !isSimulating) {
           setIsSimulating(true);
           simulateDeviceCallHome().then(newDevice => {
               setPendingActors(prev => [...prev, newDevice]);
-              setNewName(`Linux-New-${newDevice.id.split('_')[1]}`);
               setIsSimulating(false);
           });
       }
@@ -92,7 +157,6 @@ const EnrollmentModal: React.FC<EnrollmentModalProps> = ({
   const handleRefreshPending = async () => {
       if (onGatewayRegistered && isProduction) {
           setIsRefreshing(true);
-          // onGatewayRegistered triggers loadProductionData in App.tsx which now includes pending fetch
           await onGatewayRegistered(); 
           setTimeout(() => setIsRefreshing(false), 800);
       }
@@ -106,7 +170,7 @@ const EnrollmentModal: React.FC<EnrollmentModalProps> = ({
           id: newGwId,
           name: newSiteName,
           location: newSiteLocation,
-          status: 'OFFLINE', // Will come online when agent connects
+          status: 'OFFLINE',
           ip: '0.0.0.0',
           version: 'VPP-Proxy-Latest',
           connectedActors: 0
@@ -114,17 +178,13 @@ const EnrollmentModal: React.FC<EnrollmentModalProps> = ({
 
       if (isProduction) {
           await registerGateway(newGw);
-          // Refresh the main app list immediately
           if (onGatewayRegistered) {
               onGatewayRegistered();
           }
-          
-          // Generate installation token for this gateway
           const t = await generateEnrollmentToken('SITE', newGw.id);
           const cmd = `curl -sL http://${domain}/setup-proxy | sudo bash -s ${t}`;
           setSiteToken(cmd);
       } else {
-          // Mock behavior
           alert("Site created (Simulation). In production, this would register the gateway in DB.");
           setSiteToken(`curl -sL http://${domain}/setup-proxy | sudo bash -s ${newGw.id}`);
       }
@@ -252,65 +312,13 @@ const EnrollmentModal: React.FC<EnrollmentModalProps> = ({
                                     </div>
                                 ) : (
                                     pendingActors.map(device => (
-                                        <div key={device.id} className="p-4 flex flex-col md:flex-row md:items-center justify-between gap-4">
-                                            <div className="flex items-start">
-                                                <div className="bg-yellow-500/20 p-2 rounded mr-3">
-                                                    <Terminal className="w-5 h-5 text-yellow-500" />
-                                                </div>
-                                                <div>
-                                                    <div className="flex items-center">
-                                                        <span className="font-mono text-white font-bold mr-2">{device.hwid}</span>
-                                                        <span className="text-[10px] bg-slate-700 text-slate-300 px-1.5 rounded">NEW</span>
-                                                    </div>
-                                                    <div className="text-xs text-slate-500 font-mono mt-1">
-                                                        IP: {device.detectedIp} • Detected: {device.detectedAt.toLocaleTimeString()}
-                                                    </div>
-                                                    {device.osVersion && (
-                                                        <div className="text-[10px] text-emerald-400 font-bold mt-1 flex items-center">
-                                                            <Cpu className="w-3 h-3 mr-1" />
-                                                            {device.osVersion}
-                                                        </div>
-                                                    )}
-                                                </div>
-                                            </div>
-
-                                            <div className="flex items-center gap-2 bg-slate-900/50 p-2 rounded border border-slate-700/50">
-                                                <div className="flex flex-col gap-1">
-                                                    <input 
-                                                        type="text" 
-                                                        placeholder="Assign Name"
-                                                        className="bg-slate-800 border border-slate-600 rounded px-2 py-1 text-xs text-white outline-none w-32"
-                                                        defaultValue={`Linux-${device.id.split('_')[1]}`}
-                                                        onChange={(e) => setNewName(e.target.value)}
-                                                    />
-                                                    <select 
-                                                        className="bg-slate-800 border border-slate-600 rounded px-2 py-1 text-xs text-white outline-none w-32"
-                                                        value={selectedApprovalProxy}
-                                                        onChange={(e) => setSelectedApprovalProxy(e.target.value)}
-                                                    >
-                                                        {gateways.map(g => (
-                                                            <option key={g.id} value={g.id}>{g.name}</option>
-                                                        ))}
-                                                    </select>
-                                                </div>
-                                                <button 
-                                                    onClick={() => onApprove(device.id, selectedApprovalProxy, newName || `Linux-${device.id}`)}
-                                                    className="bg-emerald-600 hover:bg-emerald-500 text-white p-2 rounded h-full flex items-center justify-center transition-colors"
-                                                    title="Adopt Device"
-                                                >
-                                                    <CheckCircle className="w-5 h-5" />
-                                                </button>
-                                                {onReject && (
-                                                    <button 
-                                                        onClick={() => onReject(device.id)}
-                                                        className="bg-red-900/50 hover:bg-red-600 text-red-200 hover:text-white p-2 rounded h-full flex items-center justify-center transition-colors border border-red-800"
-                                                        title="Reject/Delete Device"
-                                                    >
-                                                        <Trash2 className="w-5 h-5" />
-                                                    </button>
-                                                )}
-                                            </div>
-                                        </div>
+                                        <PendingDeviceRow 
+                                            key={device.id} 
+                                            device={device} 
+                                            gateways={gateways} 
+                                            onApprove={onApprove} 
+                                            onReject={onReject}
+                                        />
                                     ))
                                 )}
                             </div>
