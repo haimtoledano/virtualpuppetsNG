@@ -1,5 +1,7 @@
 
 
+
+
 import { Actor, ActorStatus, LogEntry, LogLevel, ProxyGateway, CloudTrap, ActiveTunnel, PendingActor, ProvisioningStatus, DevicePersona, WifiNetwork, BluetoothDevice } from '../types';
 
 const LOCATIONS = ['Tel Aviv HQ', 'New York Branch', 'London DC', 'Frankfurt AWS'];
@@ -97,7 +99,8 @@ export const generateInitialActors = (gateways: ProxyGateway[]): Actor[] => {
         deployedHoneyFiles: [],
         persona: AVAILABLE_PERSONAS[0],
         hasWifi: Math.random() > 0.5,
-        hasBluetooth: Math.random() > 0.6
+        hasBluetooth: Math.random() > 0.6,
+        tcpSentinelEnabled: false
       });
     }
   });
@@ -114,7 +117,19 @@ export const generateRandomLog = (actors: Actor[]): LogEntry => {
   let message = "VPP Heartbeat ack";
   let sourceIp = undefined;
 
-  if (isAttack) {
+  // --- NEW: SENTINEL MODE LOGIC ---
+  if (actor.tcpSentinelEnabled && Math.random() > 0.5) {
+      // If Sentinel enabled, ANY random connection attempt is critical
+      level = LogLevel.CRITICAL;
+      process = 'kernel'; // or firewall
+      sourceIp = `${Math.floor(Math.random() * 255)}.${Math.floor(Math.random() * 255)}.${Math.floor(Math.random() * 255)}.${Math.floor(Math.random() * 255)}`;
+      const dstPort = Math.random() > 0.5 ? 22 : 443;
+      message = `[SENTINEL ALERT] Inbound TCP Connection detected from ${sourceIp}:${Math.floor(Math.random()*60000)} -> :${dstPort} [SYN]`;
+      
+      // Auto-compromise state in simulation for effect
+      if (actor.status === 'ONLINE') actor.status = ActorStatus.COMPROMISED;
+  }
+  else if (isAttack) {
     level = Math.random() > 0.5 ? LogLevel.WARNING : LogLevel.CRITICAL;
     process = 'sshd';
     const attackTypes = [

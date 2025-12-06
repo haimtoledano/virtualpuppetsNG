@@ -73,6 +73,8 @@ export interface Actor {
   // Wireless Capabilities
   hasWifi?: boolean;
   hasBluetooth?: boolean;
+  // Security Features
+  tcpSentinelEnabled?: boolean; // If true, alerts on ANY connection
 }
 
 export enum LogLevel {

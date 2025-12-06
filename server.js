@@ -221,14 +221,9 @@ done
         fi
 
         # TELEMETRY COLLECTION
-        # CPU: Approximate usage (100 - idle) from top batch mode
-        # Fixed regex backslashes for JS string interpolation
         CPU_USAGE=\$(top -bn1 | grep "Cpu(s)" | sed "s/.*, *\\([0-9.]*\\)%* id.*/\\1/" | awk '{print 100 - \$1}')
-        
-        # RAM: Percent Used
         RAM_USAGE=\$(free | grep Mem | awk '{print \$3/\$2 * 100.0}')
         
-        # TEMP: Try standard thermal zone
         if [ -f /sys/class/thermal/thermal_zone0/temp ]; then
              RAW_TEMP=\$(cat /sys/class/thermal/thermal_zone0/temp)
              TEMP=\$(awk "BEGIN {print \$RAW_TEMP/1000}")
@@ -236,7 +231,6 @@ done
              TEMP=0
         fi
 
-        # Defaults if calculation failed
         if [ -z "\$CPU_USAGE" ]; then CPU_USAGE=0; fi
         if [ -z "\$RAM_USAGE" ]; then RAM_USAGE=0; fi
 
@@ -249,7 +243,7 @@ done
             '{actorId: \$aid, wifi: \$wifi, bluetooth: [], cpu: \$cpu, ram: \$ram, temp: \$temp}')
         
         curl -s -X POST -H "Content-Type: application/json" -d "\$PAYLOAD" --max-time 15 "\$SERVER/api/agent/scan" > /dev/null
-        sleep 30 # Telemetry update every 30s
+        sleep 30
     done
 ) &
 
@@ -277,16 +271,13 @@ done
              echo "\$RAW_LINES" | while read -r LINE; do
                  if [ -z "\$LINE" ]; then continue; fi
                  
-                 # Extract Peer Address (Column 5) and Local Address (Column 4)
                  PEER=\$(echo "\$LINE" | awk '{print \$5}')
                  LOCAL=\$(echo "\$LINE" | awk '{print \$4}')
                  
-                 # Clean brackets from IPv6 if present
                  PEER_IP=\${PEER%:*}
                  PEER_IP=\${PEER_IP#[}
                  PEER_IP=\${PEER_IP%]}
                  
-                 # Threat Logic: Alert if Peer IP is NOT a wildcard/local address
                  if [[ "\$PEER_IP" != "*" && "\$PEER_IP" != "0.0.0.0" && "\$PEER_IP" != "::" && "\$PEER_IP" != "127.0.0.1" && "\$PEER_IP" != "::1" && "\$PEER_IP" != "" ]]; then
                      
                      TIMESTAMP=\$(date '+%Y/%m/%d %H:%M:%S')
@@ -295,19 +286,13 @@ done
                      log "[!] \$MSG"
                      
                      if [ ! -z "\$ACTOR_ID" ]; then
-                         # Send Alert to C2
                          PAYLOAD=\$(jq -n -c \
                             --arg ip "\$PEER_IP" \
                             --arg msg "\$MSG" \
                             '{type: "TRAP_TRIGGERED", details: \$msg, sourceIp: \$ip}')
                          
                          CURL_OUT=\$(curl -s -X POST -H "Content-Type: application/json" -d "\$PAYLOAD" --max-time 10 "\$SERVER/api/agent/alert?actorId=\$ACTOR_ID" 2>&1)
-                         
-                         if [ "\$DEBUG_MODE" = true ]; then
-                             log "DEBUG: Alert sent. Server response: \$CURL_OUT"
-                         fi
-                         
-                         sleep 2 # Prevent alert flooding
+                         sleep 2 
                      fi
                  fi
              done
@@ -320,7 +305,6 @@ done
     done
 ) &
 
-# MAIN COMMAND LOOP
 while true; do
     if [ -z "\$ACTOR_ID" ] && [ -f "\$AGENT_DIR/vpp-id" ]; then
          ACTOR_ID=\$(cat "\$AGENT_DIR/vpp-id")
@@ -338,18 +322,15 @@ while true; do
                 
                 curl -s -X POST -H "Content-Type: application/json" -d '{"jobId":"'"\$JOB_ID"'","status":"RUNNING","output":"Executing..."}' --max-time 10 "\$SERVER/api/agent/result" > /dev/null
                 
-                # Write to file to handle quotes/escaping safely
                 printf "%s\n" "\$CMD" > "\$AGENT_DIR/job.sh"
                 chmod +x "\$AGENT_DIR/job.sh"
 
-                # Execute with timeout to prevent infinite hang on background jobs like socat
-                # "timeout 10s bash -c" ensures we don't wait forever if stdout is kept open
                 OUTPUT=\$(timeout 10s "\$AGENT_DIR/job.sh" 2>&1); EXIT_CODE=\$?
                 rm -f "\$AGENT_DIR/job.sh"
                 
                 if [ \$EXIT_CODE -eq 124 ]; then 
                     STATUS="COMPLETED"
-                    OUTPUT="Command executed (Timeout enforced to prevent agent hang). Background process should be running."
+                    OUTPUT="Command executed (Timeout enforced). Background process should be running."
                 elif [ \$EXIT_CODE -ne 0 ]; then 
                     STATUS="FAILED"
                 else
@@ -429,7 +410,7 @@ const runSchemaMigrations = async (pool) => {
         'SystemConfig': `ConfigKey NVARCHAR(50) PRIMARY KEY, ConfigValue NVARCHAR(MAX)`,
         'Users': `UserId NVARCHAR(50) PRIMARY KEY, Username NVARCHAR(100), PasswordHash NVARCHAR(255), Role NVARCHAR(20), MfaEnabled BIT DEFAULT 0, MfaSecret NVARCHAR(100), LastLogin DATETIME`,
         'Gateways': `GatewayId NVARCHAR(50) PRIMARY KEY, Name NVARCHAR(100), Location NVARCHAR(100), Status NVARCHAR(20), IpAddress NVARCHAR(50), Lat FLOAT, Lng FLOAT`,
-        'Actors': `ActorId NVARCHAR(50) PRIMARY KEY, HwId NVARCHAR(100), GatewayId NVARCHAR(50), Name NVARCHAR(100), Status NVARCHAR(20), LocalIp NVARCHAR(50), LastSeen DATETIME, Config NVARCHAR(MAX), OsVersion NVARCHAR(100), TunnelsJson NVARCHAR(MAX), Persona NVARCHAR(MAX), HoneyFilesJson NVARCHAR(MAX), HasWifi BIT DEFAULT 0, HasBluetooth BIT DEFAULT 0, CpuLoad FLOAT DEFAULT 0, MemoryUsage FLOAT DEFAULT 0, Temperature FLOAT DEFAULT 0`,
+        'Actors': `ActorId NVARCHAR(50) PRIMARY KEY, HwId NVARCHAR(100), GatewayId NVARCHAR(50), Name NVARCHAR(100), Status NVARCHAR(20), LocalIp NVARCHAR(50), LastSeen DATETIME, Config NVARCHAR(MAX), OsVersion NVARCHAR(100), TunnelsJson NVARCHAR(MAX), Persona NVARCHAR(MAX), HoneyFilesJson NVARCHAR(MAX), HasWifi BIT DEFAULT 0, HasBluetooth BIT DEFAULT 0, CpuLoad FLOAT DEFAULT 0, MemoryUsage FLOAT DEFAULT 0, Temperature FLOAT DEFAULT 0, TcpSentinelEnabled BIT DEFAULT 0`,
         'Logs': `LogId NVARCHAR(50) PRIMARY KEY, ActorId NVARCHAR(50), Level NVARCHAR(20), Process NVARCHAR(50), Message NVARCHAR(MAX), SourceIp NVARCHAR(50), Timestamp DATETIME`,
         'PendingActors': `Id NVARCHAR(50) PRIMARY KEY, HwId NVARCHAR(100), DetectedIp NVARCHAR(50), TargetGatewayId NVARCHAR(50), DetectedAt DATETIME, OsVersion NVARCHAR(100)`,
         'CommandQueue': `JobId NVARCHAR(50) PRIMARY KEY, ActorId NVARCHAR(50), Command NVARCHAR(MAX), Status NVARCHAR(20), Output NVARCHAR(MAX), CreatedAt DATETIME, UpdatedAt DATETIME`,
@@ -450,6 +431,7 @@ const runSchemaMigrations = async (pool) => {
                 try { await req.query(`ALTER TABLE Actors ADD MemoryUsage FLOAT DEFAULT 0`); } catch(e){}
                 try { await req.query(`ALTER TABLE Actors ADD Temperature FLOAT DEFAULT 0`); } catch(e){}
                 try { await req.query(`ALTER TABLE Actors ADD HoneyFilesJson NVARCHAR(MAX)`); } catch(e){}
+                try { await req.query(`ALTER TABLE Actors ADD TcpSentinelEnabled BIT DEFAULT 0`); } catch(e){}
             }
         } catch (e) { }
     }
@@ -798,7 +780,7 @@ app.get('/api/commands/:actorId', async (req, res) => {
 
 // --- ACTOR MGMT ---
 
-app.get('/api/actors', async (req, res) => { if (!dbPool) return res.json([]); try { const result = await dbPool.request().query("SELECT * FROM Actors"); res.json(result.recordset.map(row => ({ id: row.ActorId, proxyId: row.GatewayId, name: row.Name, localIp: row.LocalIp, status: row.Status, lastSeen: row.LastSeen, osVersion: row.OsVersion, activeTunnels: row.TunnelsJson ? JSON.parse(row.TunnelsJson) : [], deployedHoneyFiles: row.HoneyFilesJson ? JSON.parse(row.HoneyFilesJson) : [], persona: row.Persona ? JSON.parse(row.Persona) : undefined, hasWifi: row.HasWifi, hasBluetooth: row.HasBluetooth, cpuLoad: row.CpuLoad, memoryUsage: row.MemoryUsage, temperature: row.Temperature }))); } catch (e) { res.status(500).json({error: e.message}); } });
+app.get('/api/actors', async (req, res) => { if (!dbPool) return res.json([]); try { const result = await dbPool.request().query("SELECT * FROM Actors"); res.json(result.recordset.map(row => ({ id: row.ActorId, proxyId: row.GatewayId, name: row.Name, localIp: row.LocalIp, status: row.Status, lastSeen: row.LastSeen, osVersion: row.OsVersion, activeTunnels: row.TunnelsJson ? JSON.parse(row.TunnelsJson) : [], deployedHoneyFiles: row.HoneyFilesJson ? JSON.parse(row.HoneyFilesJson) : [], persona: row.Persona ? JSON.parse(row.Persona) : undefined, hasWifi: row.HasWifi, hasBluetooth: row.HasBluetooth, cpuLoad: row.CpuLoad, memoryUsage: row.MemoryUsage, temperature: row.Temperature, tcpSentinelEnabled: row.TcpSentinelEnabled }))); } catch (e) { res.status(500).json({error: e.message}); } });
 
 app.put('/api/actors/:id', async (req, res) => {
     if (!dbPool) return res.json({success: false});
@@ -848,6 +830,18 @@ app.put('/api/actors/:id/honeyfiles', async (req, res) => {
     const files = req.body;
     try {
         await dbPool.request().input('id', sql.NVarChar, req.params.id).input('json', sql.NVarChar, JSON.stringify(files)).query("UPDATE Actors SET HoneyFilesJson = @json WHERE ActorId = @id");
+        res.json({success: true});
+    } catch(e) { res.status(500).json({error: e.message}); }
+});
+
+app.put('/api/actors/:id/sentinel', async (req, res) => {
+    if (!dbPool) return res.json({success: false});
+    const { enabled } = req.body;
+    try {
+        await dbPool.request()
+            .input('id', sql.NVarChar, req.params.id)
+            .input('en', sql.Bit, enabled ? 1 : 0)
+            .query("UPDATE Actors SET TcpSentinelEnabled = @en WHERE ActorId = @id");
         res.json({success: true});
     } catch(e) { res.status(500).json({error: e.message}); }
 });

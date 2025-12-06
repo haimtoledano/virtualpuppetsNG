@@ -1,13 +1,15 @@
 
 
 
+
+
 import React, { useState, useEffect, useMemo } from 'react';
 import { Actor, LogEntry, ActorStatus, AiAnalysis, ProxyGateway, HoneyFile, ActiveTunnel, DevicePersona, CommandJob, LogLevel } from '../types';
 import { executeRemoteCommand, getAvailableCloudTraps, toggleTunnelMock, AVAILABLE_PERSONAS, generateRandomLog } from '../services/mockService';
 import { analyzeLogsWithAi, generateDeceptionContent } from '../services/aiService';
-import { updateActorName, queueSystemCommand, getActorCommands, deleteActor, updateActorTunnels, updateActorPersona, resetActorStatus, resetActorToFactory, updateActorHoneyFiles } from '../services/dbService';
+import { updateActorName, queueSystemCommand, getActorCommands, deleteActor, updateActorTunnels, updateActorPersona, resetActorStatus, resetActorToFactory, updateActorHoneyFiles, toggleActorSentinel } from '../services/dbService';
 import Terminal from './Terminal';
-import { Cpu, Wifi, Shield, Bot, ArrowLeft, BrainCircuit, Router, Network, FileCode, Check, Activity, X, Printer, Camera, Server, Edit2, Trash2, Loader, ShieldCheck, AlertOctagon, Skull, ArrowRight, Terminal as TerminalIcon, Globe, ScanSearch, Power, RefreshCw, History as HistoryIcon, Thermometer, RefreshCcw } from 'lucide-react';
+import { Cpu, Wifi, Shield, Bot, ArrowLeft, BrainCircuit, Router, Network, FileCode, Check, Activity, X, Printer, Camera, Server, Edit2, Trash2, Loader, ShieldCheck, AlertOctagon, Skull, ArrowRight, Terminal as TerminalIcon, Globe, ScanSearch, Power, RefreshCw, History as HistoryIcon, Thermometer, RefreshCcw, Siren, Eye } from 'lucide-react';
 
 interface ActorDetailProps {
   actor: Actor;
@@ -124,18 +126,22 @@ const ActorDetail: React.FC<ActorDetailProps> = ({ actor, gateway, logs: initial
   const [activePersona, setActivePersona] = useState<DevicePersona>(actor.persona || AVAILABLE_PERSONAS[0]);
   const [isChangingPersona, setIsChangingPersona] = useState(false);
 
+  // Sentinel State
+  const [isSentinelEnabled, setIsSentinelEnabled] = useState(actor.tcpSentinelEnabled || false);
+
   // --- MOCK SIMULATION FOR LIVE TELEMETRY ---
   useEffect(() => {
       if (isProduction) return;
       // In mock mode, generate specific logs for THIS actor occasionally so the Live Telemetry isn't empty
+      // Pass the CURRENT actor state (including sentinel flag)
       const interval = setInterval(() => {
           if (Math.random() > 0.6) { // 40% chance every 3s
-              const mockLog = generateRandomLog([actor]);
+              const mockLog = generateRandomLog([{...actor, tcpSentinelEnabled: isSentinelEnabled}]);
               setLocalLogs(prev => [mockLog, ...prev].slice(0, 50));
           }
       }, 3000);
       return () => clearInterval(interval);
-  }, [isProduction, actor]);
+  }, [isProduction, actor, isSentinelEnabled]);
 
   // --- AUTO SCAN INTERNAL IP ---
   useEffect(() => {
@@ -290,6 +296,7 @@ const ActorDetail: React.FC<ActorDetailProps> = ({ actor, gateway, logs: initial
       setTunnels([]);
       setHoneyFiles([]);
       actor.status = ActorStatus.ONLINE;
+      setIsSentinelEnabled(false);
       
       setTimeout(() => setIsResetting(false), 2000);
   };
@@ -406,8 +413,20 @@ const ActorDetail: React.FC<ActorDetailProps> = ({ actor, gateway, logs: initial
       }, 2000);
   };
 
+  const handleToggleSentinel = async () => {
+      const newState = !isSentinelEnabled;
+      setIsSentinelEnabled(newState);
+      
+      if (isProduction) {
+          await toggleActorSentinel(actor.id, newState);
+      }
+      
+      // Optionally notify agent, though currently mostly handled on server/mock logic side
+      // await handleCommand(`vpp-agent --set-sentinel ${newState ? 'on' : 'off'}`);
+  };
+
   const handleTestLog = () => {
-      const mockLog = generateRandomLog([actor]);
+      const mockLog = generateRandomLog([{...actor, tcpSentinelEnabled: isSentinelEnabled}]);
       mockLog.message = "[TEST EVENT] Manual verification trigger initiated by admin.";
       mockLog.level = LogLevel.INFO;
       setLocalLogs(prev => [mockLog, ...prev]);
@@ -508,6 +527,12 @@ const ActorDetail: React.FC<ActorDetailProps> = ({ actor, gateway, logs: initial
                                 {actor.status === 'COMPROMISED' && <AlertOctagon className="w-3 h-3 mr-1" />}
                                 {actor.status}
                             </div>
+                            {isSentinelEnabled && (
+                                <div className="px-3 py-1 rounded-full text-xs font-bold flex items-center border bg-red-600 text-white border-red-500 shadow-lg shadow-red-500/20 animate-pulse">
+                                    <Eye className="w-3 h-3 mr-1" />
+                                    SENTINEL ACTIVE
+                                </div>
+                            )}
                         </div>
                         <div className="flex flex-wrap gap-4 mt-2 text-sm text-slate-400 font-mono">
                             <span className="flex items-center"><TerminalIcon className="w-3 h-3 mr-1" /> {actor.id}</span>
@@ -920,6 +945,28 @@ const ActorDetail: React.FC<ActorDetailProps> = ({ actor, gateway, logs: initial
 
       {activeTab === 'NETWORK' && (
           <div className="space-y-6">
+              
+              {/* Sentinel Card */}
+              <div className={`rounded-xl border p-6 shadow-lg transition-all ${isSentinelEnabled ? 'bg-red-900/10 border-red-500/50 shadow-red-900/20' : 'bg-slate-800 border-slate-700'}`}>
+                  <div className="flex justify-between items-start">
+                      <div className="flex items-start">
+                          <div className={`p-3 rounded-full mr-4 ${isSentinelEnabled ? 'bg-red-600 text-white animate-pulse' : 'bg-slate-700 text-slate-400'}`}>
+                              <Siren className="w-6 h-6" />
+                          </div>
+                          <div>
+                              <h3 className={`text-lg font-bold ${isSentinelEnabled ? 'text-red-400' : 'text-white'}`}>TCP Sentinel (Paranoid Mode)</h3>
+                              <p className="text-slate-400 text-sm mt-1 max-w-md">
+                                  When enabled, <span className="font-bold text-white">ANY</span> inbound connection attempt (SYN packet) to this actor will trigger a <span className="font-bold text-red-400">CRITICAL</span> alert, regardless of signature matching. Use during active lockdowns.
+                              </p>
+                          </div>
+                      </div>
+                      <label className="relative inline-flex items-center cursor-pointer mt-1">
+                          <input type="checkbox" checked={isSentinelEnabled} onChange={handleToggleSentinel} className="sr-only peer" />
+                          <div className="w-11 h-6 bg-slate-700 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-red-800 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-red-600"></div>
+                      </label>
+                  </div>
+              </div>
+
               <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                   {/* Active Tunnels */}
                   <div className="bg-slate-800 rounded-xl border border-slate-700 p-6 shadow-lg">

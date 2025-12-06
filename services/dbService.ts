@@ -3,6 +3,7 @@
 
 
 
+
 import { Actor, ProxyGateway, User, DbConfig, LogEntry, SystemConfig, Report, CommandJob, PendingActor, DevicePersona, WifiNetwork, BluetoothDevice } from '../types';
 
 const API_BASE = '/api';
@@ -111,7 +112,8 @@ export const resetActorToFactory = async (id: string) => {
     await queueSystemCommand(id, 'vpp-agent --factory-reset');
     
     // Note: Persona is NOT reset automatically to keep the "mask" consistent, 
-    // unless explicitly desired. If needed: await updateActorPersona(id, DEFAULT_PERSONA);
+    // but Sentinel Mode should likely be disabled to avoid immediate re-alerting
+    await toggleActorSentinel(id, false);
 };
 
 // --- NEW: Fleet Update ---
@@ -150,6 +152,15 @@ export const updateActorPersona = async (actorId: string, persona: DevicePersona
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(persona)
+    });
+};
+
+// --- NEW: Toggle TCP Sentinel (Paranoid Mode) ---
+export const toggleActorSentinel = async (actorId: string, enabled: boolean) => {
+    await fetch(`${API_BASE}/actors/${actorId}/sentinel`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ enabled })
     });
 };
 
