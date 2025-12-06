@@ -601,10 +601,28 @@ const ActorDetail: React.FC<ActorDetailProps> = ({ actor, gateway, logs: initial
           let attackerIp = log.sourceIp;
           let destPort = undefined;
 
-          // Attempt to extract destination port from message "to IP:PORT"
-          const portMatch = log.message.match(/to\s+(?:[0-9.]+|\[.*?\]):(\d+)/);
-          if (portMatch) {
-              destPort = portMatch[1];
+          // EXTENDED PARSING
+          // Matches: "from IP:PORT to IP:PORT" OR "from IP:PORT -> :PORT"
+          // Capture 1: Source Port
+          // Capture 2: Dest Port
+          // Logic: Extract both ports. Heuristic: If Dest is Ephemeral (>30000) and Source is Service (<30000), swap them.
+          const complexMatch = log.message.match(/from\s+(?:[0-9a-f.:]+|\[.*?\]):(\d+)\s+(?:to|->)\s+(?:[0-9a-f.:]+|\[.*?\])?:(\d+)/i);
+          
+          if (complexMatch) {
+              const p1 = parseInt(complexMatch[1]);
+              const p2 = parseInt(complexMatch[2]);
+              
+              // Heuristic: If P2 (Dest) is ephemeral (>30000) and P1 (Source) is service (<30000), use P1 as display port
+              // This handles outgoing connections where 'from' (Peer) is actually the service (e.g. 80) and 'to' (Local) is ephemeral
+              if (p2 > 30000 && p1 < 30000) {
+                  destPort = p1.toString();
+              } else {
+                  destPort = p2.toString();
+              }
+          } else {
+              // Fallback to simple 'to' match if full pattern fails
+              const portMatch = log.message.match(/to\s+(?:[0-9.]+|\[.*?\]):(\d+)/);
+              if (portMatch) destPort = portMatch[1];
           }
 
           // If no structured SourceIP, try to extract from message (common in raw syslog/socat)
@@ -945,7 +963,7 @@ const ActorDetail: React.FC<ActorDetailProps> = ({ actor, gateway, logs: initial
                                         <span className="bg-slate-900 px-2 text-[10px] text-red-300 font-mono border border-red-900 rounded z-10">
                                             {threat.protocol.toUpperCase()}
                                         </span>
-                                        {threat.port && <span className="text-[9px] text-red-400 font-bold bg-slate-900/80 px-1 rounded -mt-px z-10">:{threat.port}</span>}
+                                        {threat.port && <div className="text-[9px] text-red-400 font-bold bg-slate-900/80 px-1 rounded z-10 -mt-px pt-0.5">:{threat.port}</div>}
                                     </div>
                                     {/* Arrow Head */}
                                     <ArrowRight className="absolute right-0 text-slate-700 w-4 h-4" />
