@@ -7,6 +7,8 @@
 
 
 
+
+
 import React, { useState, useEffect, useMemo } from 'react';
 import { Actor, LogEntry, ActorStatus, AiAnalysis, ProxyGateway, HoneyFile, ActiveTunnel, DevicePersona, CommandJob, LogLevel } from '../types';
 import { executeRemoteCommand, getAvailableCloudTraps, toggleTunnelMock, AVAILABLE_PERSONAS, generateRandomLog } from '../services/mockService';
@@ -132,6 +134,9 @@ const ActorDetail: React.FC<ActorDetailProps> = ({ actor, gateway, logs: initial
 
   // Sentinel State
   const [isSentinelEnabled, setIsSentinelEnabled] = useState(actor.tcpSentinelEnabled || false);
+
+  // Topology Reset State
+  const [topologyDismissedTime, setTopologyDismissedTime] = useState<number>(0);
 
   // --- MOCK SIMULATION FOR LIVE TELEMETRY ---
   useEffect(() => {
@@ -301,6 +306,7 @@ const ActorDetail: React.FC<ActorDetailProps> = ({ actor, gateway, logs: initial
       setHoneyFiles([]);
       actor.status = ActorStatus.ONLINE;
       setIsSentinelEnabled(false);
+      setTopologyDismissedTime(Date.now()); // Also reset topology view
       
       setTimeout(() => setIsResetting(false), 2000);
   };
@@ -450,6 +456,9 @@ const ActorDetail: React.FC<ActorDetailProps> = ({ actor, gateway, logs: initial
       const ipRegex = /(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})/;
 
       displayLogs.forEach(log => {
+          // FILTER: Ignore logs older than dismissal time
+          if (new Date(log.timestamp).getTime() <= topologyDismissedTime) return;
+
           let attackerIp = log.sourceIp;
 
           // If no structured SourceIP, try to extract from message (common in raw syslog/socat)
@@ -481,7 +490,7 @@ const ActorDetail: React.FC<ActorDetailProps> = ({ actor, gateway, logs: initial
           attackers: Array.from(threats.values()),
           payloads: intercepted.slice(0, 5) // Show top 5
       };
-  }, [displayLogs, actor.localIp, displayedLocalIp]);
+  }, [displayLogs, actor.localIp, displayedLocalIp, topologyDismissedTime]);
 
   const activeThreats = threatTopology.attackers;
 
@@ -655,7 +664,17 @@ const ActorDetail: React.FC<ActorDetailProps> = ({ actor, gateway, logs: initial
                   <h3 className="text-red-400 font-bold flex items-center text-sm tracking-wider">
                       <Activity className="w-4 h-4 mr-2" /> LIVE THREAT TOPOLOGY
                   </h3>
-                  <span className="text-[10px] text-red-300 font-mono uppercase animate-pulse">Attack in Progress</span>
+                  <div className="flex items-center space-x-3">
+                      <span className="text-[10px] text-red-300 font-mono uppercase animate-pulse">Attack in Progress</span>
+                      <button 
+                        onClick={() => setTopologyDismissedTime(Date.now())}
+                        className="flex items-center space-x-1 bg-red-950 hover:bg-red-900 text-red-300 px-2 py-1 rounded text-[10px] font-bold border border-red-800 transition-colors"
+                        title="Clear visualization until new attack events detected"
+                      >
+                        <X className="w-3 h-3" />
+                        <span>CLEAR VIEW</span>
+                      </button>
+                  </div>
               </div>
               
               <div className="p-6 grid grid-cols-1 lg:grid-cols-3 gap-8">
