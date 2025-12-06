@@ -1,4 +1,5 @@
 
+
 // ... existing imports ...
 import express from 'express';
 import path from 'path';
@@ -557,10 +558,18 @@ app.post('/api/reports/generate', async (req, res) => {
         }
         
         const rid = `rep-${Math.random().toString(36).substr(2,6)}`;
-        await dbPool.request().input('rid', sql.NVarChar, rid).input('json', sql.NVarChar, JSON.stringify(content)).query(`INSERT INTO Reports (ReportId, Title, GeneratedBy, Type, CreatedAt, ContentJson) VALUES ('${title}', '${title}', '${generatedBy}', '${type}', GETDATE(), @json)`);
+        
+        // --- SECURE PARAMETERIZED INSERT ---
+        await dbPool.request()
+            .input('rid', sql.NVarChar, rid)
+            .input('title', sql.NVarChar, title)
+            .input('by', sql.NVarChar, generatedBy)
+            .input('type', sql.NVarChar, type)
+            .input('json', sql.NVarChar, JSON.stringify(content))
+            .query(`INSERT INTO Reports (ReportId, Title, GeneratedBy, Type, CreatedAt, ContentJson) VALUES (@rid, @title, @by, @type, GETDATE(), @json)`);
         
         res.json({success: true});
-    } catch(e) { res.status(500).json({error: e.message}); }
+    } catch(e) { console.error("Report Generation Error", e); res.status(500).json({error: e.message}); }
 });
 
 app.get('/api/reports', async (req, res) => { if (!dbPool) return res.json([]); try { const result = await dbPool.request().query("SELECT * FROM Reports ORDER BY CreatedAt DESC"); res.json(result.recordset.map(r => ({ id: r.ReportId, title: r.Title, generatedBy: r.GeneratedBy, type: r.Type, createdAt: r.CreatedAt, content: JSON.parse(r.ContentJson || '{}') }))); } catch(e) { res.json([]); } });

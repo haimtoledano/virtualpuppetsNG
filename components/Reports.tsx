@@ -1,9 +1,11 @@
 
-import React, { useState, useEffect } from 'react';
+
+import React, { useState, useEffect, useRef } from 'react';
 import { Report, SystemConfig, User, LogEntry, Actor } from '../types';
 import { getReports, generateReport, getSystemConfig } from '../services/dbService';
 import { generateCustomAiReport } from '../services/aiService';
-import { FileText, Download, Loader, Eye, X, Printer, ShieldCheck, Plus, AlertTriangle, PenTool, Search, Calendar, Server, Filter, Bot } from 'lucide-react';
+import { FileText, Download, Loader, Eye, X, Printer, ShieldCheck, Plus, AlertTriangle, PenTool, Search, Calendar, Server, Filter, Bot, BarChart2 } from 'lucide-react';
+import mermaid from 'mermaid';
 
 interface ReportsProps {
     currentUser?: User | null;
@@ -42,6 +44,8 @@ const Reports: React.FC<ReportsProps> = ({ currentUser, logs = [], actors = [] }
       loadReports();
       loadConfig();
       populateFilters();
+      // Initialize mermaid
+      mermaid.initialize({ startOnLoad: false, theme: 'neutral' });
   }, [logs]);
 
   const loadReports = async () => {
@@ -132,7 +136,42 @@ const Reports: React.FC<ReportsProps> = ({ currentUser, logs = [], actors = [] }
   };
 
   const ReportModal = ({ report, onClose }: { report: Report, onClose: () => void }) => {
+      // Mermaid Rendering Hook
+      useEffect(() => {
+          if (report.type === 'AI_INSIGHT' || report.content?.customBody) {
+              const renderMermaid = async () => {
+                   try {
+                       await mermaid.run({
+                           querySelector: '.mermaid'
+                       });
+                   } catch (e) { console.error("Mermaid Render Error", e); }
+              };
+              // Delay slightly to ensure DOM is ready
+              setTimeout(renderMermaid, 500);
+          }
+      }, [report]);
+
       if (!report.content) return null;
+
+      // Helper to process markdown and extract mermaid blocks
+      const renderBodyWithMermaid = (text: string) => {
+          const parts = text.split(/(```mermaid[\s\S]*?```)/g);
+          return parts.map((part, index) => {
+              if (part.startsWith('```mermaid')) {
+                  const code = part.replace('```mermaid', '').replace('```', '').trim();
+                  return (
+                      <div key={index} className="my-6 flex justify-center bg-slate-100 p-4 rounded border border-slate-200">
+                          <pre className="mermaid">
+                              {code}
+                          </pre>
+                      </div>
+                  );
+              }
+              // Basic newline to break conversion for text
+              return <div key={index} className="whitespace-pre-wrap">{part}</div>;
+          });
+      };
+
       return (
           <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
               <div className="bg-white text-slate-900 w-full max-w-4xl h-[85vh] rounded-lg shadow-2xl flex flex-col overflow-hidden">
@@ -225,13 +264,13 @@ const Reports: React.FC<ReportsProps> = ({ currentUser, logs = [], actors = [] }
                                </div>
                           )}
 
-                          {/* 3. BODY TEXT (Summary or Custom/AI) */}
+                          {/* 3. BODY TEXT (Summary or Custom/AI with Mermaid) */}
                           <div className="mb-8">
-                              <h3 className="text-sm font-bold uppercase border-b border-slate-300 mb-2 pb-1">
-                                  {report.type === 'CUSTOM' ? 'Analyst Notes' : report.type === 'AI_INSIGHT' ? 'AI Assessment' : 'Executive Summary'}
+                              <h3 className="text-sm font-bold uppercase border-b border-slate-300 mb-4 pb-1">
+                                  {report.type === 'CUSTOM' ? 'Analyst Notes' : report.type === 'AI_INSIGHT' ? 'AI Assessment & Visualization' : 'Executive Summary'}
                               </h3>
-                              <div className="text-sm leading-relaxed text-slate-700 text-justify whitespace-pre-wrap font-serif">
-                                  {report.content.customBody || report.content.summaryText}
+                              <div className="text-sm leading-relaxed text-slate-700 text-justify font-serif">
+                                  {renderBodyWithMermaid(report.content.customBody || report.content.summaryText || '')}
                               </div>
                           </div>
 
@@ -395,7 +434,15 @@ const Reports: React.FC<ReportsProps> = ({ currentUser, logs = [], actors = [] }
                                             <h4 className="text-purple-400 font-bold text-sm">{aiResult.title}</h4>
                                             <button onClick={() => setAiResult(null)} className="text-xs text-slate-500 hover:text-white">Reset</button>
                                          </div>
-                                         <p className="text-slate-300 text-xs whitespace-pre-wrap">{aiResult.body}</p>
+                                         <div className="text-slate-300 text-xs whitespace-pre-wrap">
+                                            {/* Preview text only, hide mermaid code blocks in simple preview */}
+                                            {aiResult.body.replace(/```mermaid[\s\S]*?```/g, '[Infographic Generated]')}
+                                         </div>
+                                         {aiResult.body.includes('```mermaid') && (
+                                              <div className="mt-2 text-xs text-emerald-400 flex items-center">
+                                                  <BarChart2 className="w-3 h-3 mr-1" /> Infographic Ready
+                                              </div>
+                                         )}
                                      </div>
                                  )}
                              </div>

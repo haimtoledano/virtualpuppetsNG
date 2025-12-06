@@ -1,4 +1,5 @@
 
+
 import { GoogleGenAI, Type } from "@google/genai";
 import { LogEntry, AiAnalysis, HoneyFile, AiConfig, AiProvider } from '../types';
 
@@ -213,10 +214,19 @@ export const generateCustomAiReport = async (userPrompt: string, logs: LogEntry[
         INSTRUCTIONS:
         1. Analyze the logs based specifically on the User Request.
         2. Generate a professional report title.
-        3. Generate a detailed report body (using Markdown formatting if necessary, but returning as a plain string inside JSON).
+        3. Generate a detailed report body.
         4. Cite specific log entries if relevant.
-        5. If the logs do not contain data relevant to the request, state that clearly in the report body.
-
+        5. INFOGRAPHICS REQUEST: Please include a MERMAID.JS diagram syntax code block in the 'reportBody' to visualize the data.
+           - If it is a timeline, use a sequence diagram.
+           - If it is stats, use a pie chart.
+           - Example:
+             \`\`\`mermaid
+             pie title Attack Source Distribution
+             "China" : 40
+             "Russia" : 20
+             "US" : 40
+             \`\`\`
+        
         Return JSON format.
     `;
 
