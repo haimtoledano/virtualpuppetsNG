@@ -98,7 +98,7 @@ LOG_FILE="/var/log/vpp-agent.log"
 if [ "$EUID" -ne 0 ]; then echo "Please run as root"; exit 1; fi
 
 echo "--------------------------------------------------"
-echo "   Virtual Puppets Agent Bootstrap v6.2"
+echo "   Virtual Puppets Agent Bootstrap v6.3"
 echo "--------------------------------------------------"
 
 echo "[*] Checking dependencies..."
@@ -297,9 +297,14 @@ while true; do
                 
                 curl -s -X POST -H "Content-Type: application/json" -d '{"jobId":"'"\$JOB_ID"'","status":"RUNNING","output":"Executing..."}' --max-time 10 "\$SERVER/api/agent/result" > /dev/null
                 
+                # Write to file to handle quotes/escaping safely
+                printf "%s\n" "\$CMD" > "\$AGENT_DIR/job.sh"
+                chmod +x "\$AGENT_DIR/job.sh"
+
                 # Execute with timeout to prevent infinite hang on background jobs like socat
                 # "timeout 10s bash -c" ensures we don't wait forever if stdout is kept open
-                OUTPUT=\$(timeout 10s bash -c "\$CMD" 2>&1); EXIT_CODE=\$?
+                OUTPUT=\$(timeout 10s "\$AGENT_DIR/job.sh" 2>&1); EXIT_CODE=\$?
+                rm -f "\$AGENT_DIR/job.sh"
                 
                 if [ \$EXIT_CODE -eq 124 ]; then 
                     STATUS="COMPLETED"
@@ -549,6 +554,7 @@ app.post('/api/enroll/approve', async (req, res) => {
             .input('name', sql.NVarChar, name)
             .input('ip', sql.NVarChar, pending.DetectedIp)
             .input('os', sql.NVarChar, pending.OsVersion)
+            // FIXED: Corrected parameter order to match schema: Status='ONLINE', LocalIp=@ip, LastSeen=GETDATE()
             .query("INSERT INTO Actors (ActorId, HwId, GatewayId, Name, Status, LocalIp, LastSeen, OsVersion) VALUES (@aid, @hwid, @gw, @name, 'ONLINE', @ip, GETDATE(), @os)");
             
         await dbPool.request().input('pid', sql.NVarChar, pendingId).query("DELETE FROM PendingActors WHERE Id = @pid");
@@ -874,5 +880,21 @@ app.post('/api/users', async (req, res) => { if (!dbPool) return res.json({succe
 app.put('/api/users/:id', async (req, res) => { if (!dbPool) return res.json({success:false}); const u = req.body; try { await dbPool.request().input('id', sql.NVarChar, req.params.id).input('role', sql.NVarChar, u.role).query("UPDATE Users SET Role = @role WHERE UserId = @id"); if(u.passwordHash) await dbPool.request().input('id', sql.NVarChar, req.params.id).input('hash', sql.NVarChar, u.passwordHash).query("UPDATE Users SET PasswordHash = @hash WHERE UserId = @id"); res.json({success:true}); } catch(e) { res.json({success:false}); } });
 app.delete('/api/users/:id', async (req, res) => { if (!dbPool) return res.json({success:false}); try { await dbPool.request().input('id', sql.NVarChar, req.params.id).query("DELETE FROM Users WHERE UserId = @id"); res.json({success:true}); } catch(e) { res.json({success:false}); } });
 app.post('/api/users/:id/reset-mfa', async (req, res) => { if (!dbPool) return res.json({success:false}); try { await dbPool.request().input('id', sql.NVarChar, req.params.id).query("UPDATE Users SET MfaEnabled = 0, MfaSecret = NULL WHERE UserId = @id"); res.json({success:true}); } catch(e) { res.json({success:false}); } });
+
+// --- SPA Fallback ---
+app.get('*', (req, res) => {
+    // If request accepts html, allow client-side routing.
+    // Otherwise 404.
+    if (req.accepts('html')) {
+        const indexPath = path.join(distPath, 'index.html');
+        if (fs.existsSync(indexPath)) {
+            res.sendFile(indexPath);
+        } else {
+            res.status(404).send('App not built');
+        }
+    } else {
+        res.status(404).json({ error: 'Not found' });
+    }
+});
 
 app.listen(port, '0.0.0.0', () => { console.log(`Server listening on port ${port}`); });

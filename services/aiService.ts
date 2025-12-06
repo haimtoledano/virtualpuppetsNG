@@ -1,20 +1,9 @@
-
-
 import { GoogleGenAI, Type } from "@google/genai";
 import { LogEntry, AiAnalysis, HoneyFile, AiConfig, AiProvider } from '../types';
 
 // Default configuration if nothing is set
 const DEFAULT_GEMINI_MODEL = 'gemini-2.5-flash';
 const DEFAULT_LOCAL_ENDPOINT = 'http://localhost:11434/v1/chat/completions';
-
-// Safely access process.env to avoid ReferenceError in pure browser environments
-const getEnvApiKey = () => {
-    try {
-        return process.env.API_KEY;
-    } catch (e) {
-        return undefined;
-    }
-};
 
 const getAiConfig = async (): Promise<AiConfig> => {
     // In a real app, pass this config from the component or fetch from state manager.
@@ -35,15 +24,9 @@ const getAiConfig = async (): Promise<AiConfig> => {
 // --- GEMINI IMPLEMENTATION ---
 
 const callGemini = async (config: AiConfig, prompt: string, responseSchema?: any): Promise<any> => {
-    // PRIORITY: Use Config Key first (Manual Override), then Environment Variable
-    // This allows users to input their own key in Settings to override the server env var
-    const apiKey = config.apiKey || getEnvApiKey();
-    
-    if (!apiKey) {
-        console.error("Gemini API Key missing in Settings OR environment variables (process.env.API_KEY)");
-        return null;
-    }
-    const ai = new GoogleGenAI({ apiKey });
+    // Coding Guidelines: The API key must be obtained exclusively from the environment variable process.env.API_KEY.
+    // Assume process.env.API_KEY is available and valid.
+    const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
     
     try {
         const geminiConfig: any = { responseMimeType: "application/json" };
