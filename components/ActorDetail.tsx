@@ -29,11 +29,17 @@ const Gauge = ({ value, label, type, unit = '%', icon: Icon }: { value: number, 
     const progress = Math.min(Math.max(0, value), 100);
     const strokeDashoffset = circumference - (progress / 100) * circumference;
     
-    let color = '#3b82f6'; // Default Blue (RAM)
-    if (type === 'CPU' || type === 'TEMP') {
-        if (value < 60) color = '#10b981'; // Green
-        else if (value < 85) color = '#eab308'; // Yellow
-        else color = '#ef4444'; // Red
+    const gradientId = `grad-${type}`;
+    let colors = ['#3b82f6', '#60a5fa']; // Default Blue (RAM)
+    
+    if (type === 'CPU') {
+         if (value < 50) colors = ['#10b981', '#34d399']; // Green
+         else if (value < 80) colors = ['#f59e0b', '#fbbf24']; // Yellow
+         else colors = ['#ef4444', '#f87171']; // Red
+    } else if (type === 'TEMP') {
+         if (value < 60) colors = ['#10b981', '#34d399']; // Green
+         else if (value < 80) colors = ['#f97316', '#fb923c']; // Orange
+         else colors = ['#ef4444', '#b91c1c']; // Red
     }
     
     return (
@@ -41,30 +47,36 @@ const Gauge = ({ value, label, type, unit = '%', icon: Icon }: { value: number, 
             <div className="relative w-16 h-16 group">
                  {/* Glow Effect for High values */}
                  {(type !== 'RAM' && value > 80) && (
-                     <div className="absolute inset-0 bg-red-500/30 blur-xl rounded-full animate-pulse"></div>
+                     <div className="absolute inset-0 bg-red-500/20 blur-xl rounded-full animate-pulse"></div>
                  )}
                  
                  <svg className="w-full h-full transform -rotate-90 relative z-10">
+                    <defs>
+                        <linearGradient id={gradientId} x1="0%" y1="0%" x2="100%" y2="100%">
+                            <stop offset="0%" stopColor={colors[0]} />
+                            <stop offset="100%" stopColor={colors[1]} />
+                        </linearGradient>
+                    </defs>
                     {/* Track */}
-                    <circle cx="32" cy="32" r={radius} stroke="#1e293b" strokeWidth="5" fill="transparent" />
+                    <circle cx="32" cy="32" r={radius} stroke="#1e293b" strokeWidth="6" fill="transparent" />
                     {/* Progress */}
                     <circle 
                         cx="32" cy="32" r={radius} 
-                        stroke={color} 
-                        strokeWidth="5" 
+                        stroke={`url(#${gradientId})`} 
+                        strokeWidth="6" 
                         fill="transparent" 
                         strokeDasharray={circumference} 
                         strokeDashoffset={strokeDashoffset} 
                         strokeLinecap="round" 
-                        className="transition-all duration-1000 ease-out shadow-lg shadow-current"
+                        className="transition-all duration-1000 ease-out shadow-lg"
                     />
                 </svg>
                 <div className="absolute inset-0 flex flex-col items-center justify-center z-20">
-                    {Icon && <Icon className={`w-3 h-3 mb-0.5 ${type === 'CPU' ? 'text-blue-400' : type === 'TEMP' ? 'text-orange-400' : 'text-purple-400'}`} />}
-                    <span className="text-[10px] font-bold text-white font-mono leading-none drop-shadow-md">{Math.round(value)}{unit}</span>
+                    {Icon && <Icon className="w-3.5 h-3.5 mb-0.5" style={{ color: colors[0] }} />}
+                    <span className="text-[10px] font-bold text-slate-200 font-mono leading-none drop-shadow-md">{Math.round(value)}{unit}</span>
                 </div>
             </div>
-            <span className="text-[9px] font-bold text-slate-500 mt-1 uppercase tracking-wider group-hover:text-slate-300 transition-colors">{label}</span>
+            <span className="text-[9px] font-bold text-slate-500 mt-2 uppercase tracking-wider group-hover:text-slate-300 transition-colors">{label}</span>
         </div>
     );
 };
@@ -223,6 +235,20 @@ const ActorDetail: React.FC<ActorDetailProps> = ({ actor, gateway, logs: initial
       if (confirm(`Are you sure you want to decommission ${actor.name}? This will attempt to uninstall the agent from the device and then remove the record.`)) {
           setIsDeleting(true);
           try {
+             // 1. Send Self-Destruct Command if online to ensure service is removed
+             if (actor.status === 'ONLINE' || actor.status === 'COMPROMISED') {
+                 // Command sequence: Wait 5s (to allow ack), stop service, disable service, remove files, reload daemon
+                 const uninstallCmd = `nohup bash -c "sleep 5; systemctl stop vpp-agent; systemctl disable vpp-agent; rm -f /etc/systemd/system/vpp-agent.service; systemctl daemon-reload; rm -rf /opt/vpp-agent" >/dev/null 2>&1 &`;
+                 
+                 if (isProduction) {
+                     await queueSystemCommand(actor.id, uninstallCmd);
+                     // Wait for command to be fetched (Agent polls every 3s)
+                     await new Promise(resolve => setTimeout(resolve, 4000));
+                 } else {
+                     console.log("Mock Decommission:", uninstallCmd);
+                 }
+             }
+
              await deleteActor(actor.id);
              onBack();
           } catch (e) {
