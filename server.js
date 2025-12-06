@@ -93,6 +93,7 @@ TOKEN=$1
 SERVER_URL="${serverUrl}"
 AGENT_DIR="/opt/vpp-agent"
 LOG_FILE="/var/log/vpp-agent.log"
+CURRENT_VERSION="v2.2.0"
 
 if [ "$EUID" -ne 0 ]; then echo "Please run as root"; exit 1; fi
 
@@ -126,6 +127,11 @@ echo "[*] Connecting to C2: $SERVER_URL | HWID: $HWID"
 if [ -z "$TOKEN" ]; then echo "[!] Error: No token provided."; exit 1; fi
 
 mkdir -p $AGENT_DIR
+
+# --- PERSISTENCE FOR UPDATES ---
+echo "$SERVER_URL" > $AGENT_DIR/.server
+echo "$TOKEN" > $AGENT_DIR/.token
+
 HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" \
     -H "X-VPP-HWID: $HWID" -H "X-VPP-OS: $OS_NAME" \
     -H "X-VPP-WIFI: $HAS_WIFI" -H "X-VPP-BT: $HAS_BT" \
@@ -164,8 +170,17 @@ elif [[ "\$1" == "--factory-reset" ]]; then
     rm -f "\$AGENT_DIR/sentinel_active"
     log "Factory Reset Triggered"
 elif [[ "\$1" == "--update" ]]; then
-    log "Agent update triggered"
-    echo "Agent updated."
+    if [ -f "\$AGENT_DIR/.server" ] && [ -f "\$AGENT_DIR/.token" ]; then
+        SERVER=\$(cat "\$AGENT_DIR/.server")
+        TOKEN=\$(cat "\$AGENT_DIR/.token")
+        log "Initiating Self-Update from \$SERVER..."
+        echo "Fetching latest agent from \$SERVER..."
+        curl -sL "\$SERVER/setup" | sudo bash -s "\$TOKEN"
+        exit 0
+    else
+        echo "Error: Update credentials not found. Re-run setup manually."
+        exit 1
+    fi
 else
     echo "VPP Agent v2.2.0 - Status OK"
     if [ -f "\$AGENT_DIR/sentinel_active" ]; then echo "Sentinel Mode: ACTIVE"; fi
@@ -185,6 +200,7 @@ LOGF="$LOG_FILE"
 HAS_WIFI=$HAS_WIFI
 HAS_BT=$HAS_BT
 AGENT_DIR="$AGENT_DIR"
+VERSION="$CURRENT_VERSION"
 EOF
 
 cat <<'EndAgent' >> $AGENT_DIR/agent.sh
@@ -252,7 +268,8 @@ done
             --arg cpu "\$CPU_USAGE" \
             --arg ram "\$RAM_USAGE" \
             --arg temp "\$TEMP" \
-            '{actorId: \$aid, wifi: \$wifi, bluetooth: [], cpu: \$cpu, ram: \$ram, temp: \$temp}')
+            --arg ver "\$VERSION" \
+            '{actorId: \$aid, wifi: \$wifi, bluetooth: [], cpu: \$cpu, ram: \$ram, temp: \$temp, version: \$ver}')
         
         curl -s -X POST -H "Content-Type: application/json" -d "\$PAYLOAD" --max-time 15 "\$SERVER/api/agent/scan" > /dev/null
         sleep 30
@@ -466,7 +483,7 @@ const runSchemaMigrations = async (pool) => {
         'SystemConfig': `ConfigKey NVARCHAR(50) PRIMARY KEY, ConfigValue NVARCHAR(MAX)`,
         'Users': `UserId NVARCHAR(50) PRIMARY KEY, Username NVARCHAR(100), PasswordHash NVARCHAR(255), Role NVARCHAR(20), MfaEnabled BIT DEFAULT 0, MfaSecret NVARCHAR(100), LastLogin DATETIME, Preferences NVARCHAR(MAX)`,
         'Gateways': `GatewayId NVARCHAR(50) PRIMARY KEY, Name NVARCHAR(100), Location NVARCHAR(100), Status NVARCHAR(20), IpAddress NVARCHAR(50), Lat FLOAT, Lng FLOAT`,
-        'Actors': `ActorId NVARCHAR(50) PRIMARY KEY, HwId NVARCHAR(100), GatewayId NVARCHAR(50), Name NVARCHAR(100), Status NVARCHAR(20), LocalIp NVARCHAR(50), LastSeen DATETIME, Config NVARCHAR(MAX), OsVersion NVARCHAR(100), TunnelsJson NVARCHAR(MAX), Persona NVARCHAR(MAX), HoneyFilesJson NVARCHAR(MAX), HasWifi BIT DEFAULT 0, HasBluetooth BIT DEFAULT 0, CpuLoad FLOAT DEFAULT 0, MemoryUsage FLOAT DEFAULT 0, Temperature FLOAT DEFAULT 0, TcpSentinelEnabled BIT DEFAULT 0`,
+        'Actors': `ActorId NVARCHAR(50) PRIMARY KEY, HwId NVARCHAR(100), GatewayId NVARCHAR(50), Name NVARCHAR(100), Status NVARCHAR(20), LocalIp NVARCHAR(50), LastSeen DATETIME, Config NVARCHAR(MAX), OsVersion NVARCHAR(100), TunnelsJson NVARCHAR(MAX), Persona NVARCHAR(MAX), HoneyFilesJson NVARCHAR(MAX), HasWifi BIT DEFAULT 0, HasBluetooth BIT DEFAULT 0, CpuLoad FLOAT DEFAULT 0, MemoryUsage FLOAT DEFAULT 0, Temperature FLOAT DEFAULT 0, TcpSentinelEnabled BIT DEFAULT 0, AgentVersion NVARCHAR(50)`,
         'Logs': `LogId NVARCHAR(50) PRIMARY KEY, ActorId NVARCHAR(50), Level NVARCHAR(20), Process NVARCHAR(50), Message NVARCHAR(MAX), SourceIp NVARCHAR(50), Timestamp DATETIME`,
         'PendingActors': `Id NVARCHAR(50) PRIMARY KEY, HwId NVARCHAR(100), DetectedIp NVARCHAR(50), TargetGatewayId NVARCHAR(50), DetectedAt DATETIME, OsVersion NVARCHAR(100)`,
         'CommandQueue': `JobId NVARCHAR(50) PRIMARY KEY, ActorId NVARCHAR(50), Command NVARCHAR(MAX), Status NVARCHAR(20), Output NVARCHAR(MAX), CreatedAt DATETIME, UpdatedAt DATETIME`,
@@ -489,6 +506,7 @@ const runSchemaMigrations = async (pool) => {
                     try { await req.query(`ALTER TABLE Actors ADD Temperature FLOAT DEFAULT 0`); } catch(e){}
                     try { await req.query(`ALTER TABLE Actors ADD HoneyFilesJson NVARCHAR(MAX)`); } catch(e){}
                     try { await req.query(`ALTER TABLE Actors ADD TcpSentinelEnabled BIT DEFAULT 0`); } catch(e){}
+                    try { await req.query(`ALTER TABLE Actors ADD AgentVersion NVARCHAR(50)`); } catch(e){}
                 }
                 if (name === 'Users') {
                     try { await req.query(`ALTER TABLE Users ADD Preferences NVARCHAR(MAX)`); } catch(e){}
@@ -677,7 +695,7 @@ app.post('/api/enroll/approve', async (req, res) => {
             .input('ip', sql.NVarChar, pending.DetectedIp)
             .input('os', sql.NVarChar, pending.OsVersion)
             // FIXED: Corrected parameter order to match schema: Status='ONLINE', LocalIp=@ip, LastSeen=GETDATE()
-            .query("INSERT INTO Actors (ActorId, HwId, GatewayId, Name, Status, LocalIp, LastSeen, OsVersion) VALUES (@aid, @hwid, @gw, @name, 'ONLINE', @ip, GETDATE(), @os)");
+            .query("INSERT INTO Actors (ActorId, HwId, GatewayId, Name, Status, LocalIp, LastSeen, OsVersion, AgentVersion) VALUES (@aid, @hwid, @gw, @name, 'ONLINE', @ip, GETDATE(), @os, 'v1.0')");
             
         await dbPool.request().input('pid', sql.NVarChar, pendingId).query("DELETE FROM PendingActors WHERE Id = @pid");
         res.json({success: true});
@@ -817,7 +835,7 @@ app.post('/api/agent/result', async (req, res) => {
 
 app.post('/api/agent/scan', async (req, res) => {
     if (!dbPool) return res.json({});
-    const { actorId, cpu, ram, temp } = req.body;
+    const { actorId, cpu, ram, temp, version } = req.body;
     try {
         if (actorId) {
             await dbPool.request()
@@ -825,7 +843,8 @@ app.post('/api/agent/scan', async (req, res) => {
                 .input('c', sql.Float, parseFloat(cpu) || 0)
                 .input('r', sql.Float, parseFloat(ram) || 0)
                 .input('t', sql.Float, parseFloat(temp) || 0)
-                .query("UPDATE Actors SET CpuLoad = @c, MemoryUsage = @r, Temperature = @t, LastSeen = GETDATE() WHERE ActorId = @aid");
+                .input('v', sql.NVarChar, version || 'v1.0')
+                .query("UPDATE Actors SET CpuLoad = @c, MemoryUsage = @r, Temperature = @t, AgentVersion = @v, LastSeen = GETDATE() WHERE ActorId = @aid");
         }
         res.json({success:true});
     } catch(e) { console.error("Telemetry update failed", e); res.status(500).json({error:e.message}); }
@@ -873,7 +892,7 @@ app.get('/api/commands/:actorId', async (req, res) => {
 
 // --- ACTOR MGMT ---
 
-app.get('/api/actors', async (req, res) => { if (!dbPool) return res.json([]); try { const result = await dbPool.request().query("SELECT * FROM Actors"); res.json(result.recordset.map(row => ({ id: row.ActorId, proxyId: row.GatewayId, name: row.Name, localIp: row.LocalIp, status: row.Status, lastSeen: row.LastSeen, osVersion: row.OsVersion, activeTunnels: row.TunnelsJson ? JSON.parse(row.TunnelsJson) : [], deployedHoneyFiles: row.HoneyFilesJson ? JSON.parse(row.HoneyFilesJson) : [], persona: row.Persona ? JSON.parse(row.Persona) : undefined, hasWifi: row.HasWifi, hasBluetooth: row.HasBluetooth, cpuLoad: row.CpuLoad, memoryUsage: row.MemoryUsage, temperature: row.Temperature, tcpSentinelEnabled: row.TcpSentinelEnabled }))); } catch (e) { res.status(500).json({error: e.message}); } });
+app.get('/api/actors', async (req, res) => { if (!dbPool) return res.json([]); try { const result = await dbPool.request().query("SELECT * FROM Actors"); res.json(result.recordset.map(row => ({ id: row.ActorId, proxyId: row.GatewayId, name: row.Name, localIp: row.LocalIp, status: row.Status, lastSeen: row.LastSeen, osVersion: row.OsVersion, activeTunnels: row.TunnelsJson ? JSON.parse(row.TunnelsJson) : [], deployedHoneyFiles: row.HoneyFilesJson ? JSON.parse(row.HoneyFilesJson) : [], persona: row.Persona ? JSON.parse(row.Persona) : undefined, hasWifi: row.HasWifi, hasBluetooth: row.HasBluetooth, cpuLoad: row.CpuLoad, memoryUsage: row.MemoryUsage, temperature: row.Temperature, tcpSentinelEnabled: row.TcpSentinelEnabled, protocolVersion: row.AgentVersion || 'v1.0' }))); } catch (e) { res.status(500).json({error: e.message}); } });
 
 app.put('/api/actors/:id', async (req, res) => {
     if (!dbPool) return res.json({success: false});
