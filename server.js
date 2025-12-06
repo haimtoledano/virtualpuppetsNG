@@ -42,7 +42,6 @@ app.use((err, req, res, next) => {
     next();
 });
 
-// ... (Keep existing Helper functions: getClientIp, refreshSyslogConfig, sendToSyslog, setup endpoint script) ...
 // --- HELPER: GET REAL IP ---
 const getClientIp = (req) => {
     const forwarded = req.headers['x-forwarded-for'];
@@ -399,7 +398,79 @@ init();
 app.get('/api/health', (req, res) => { res.json({ status: 'active', mode: getDbConfig()?.isConnected ? 'PRODUCTION' : 'MOCK_OR_SETUP', dbConnected: !!dbPool }); });
 app.post('/api/setup/db', async (req, res) => { try { await connectToDb(req.body); fs.writeFileSync(CONFIG_FILE, JSON.stringify({...req.body, isConnected: true}, null, 2)); await runSchemaMigrations(dbPool); await refreshSyslogConfig(dbPool); res.json({ success: true }); } catch (err) { res.status(500).json({ success: false, error: err.message }); } });
 app.post('/api/login', async (req, res) => { if (!dbPool) return res.json({success: false, error: "DB not connected"}); const { username, password } = req.body; const hash = `btoa_hash_${password}`; try { const result = await dbPool.request().input('u', sql.NVarChar, username).query("SELECT * FROM Users WHERE Username = @u"); if (result.recordset.length > 0) { const user = result.recordset[0]; if (user.PasswordHash === hash) { return res.json({ success: true, user: { id: user.UserId, username: user.Username, role: user.Role, mfaEnabled: user.MfaEnabled } }); } } res.json({ success: false, error: "Invalid credentials" }); } catch (e) { res.json({ success: false, error: e.message }); } });
-app.post('/api/config/system', async (req, res) => { if (!dbPool) return res.status(503).json({ error: "DB not connected" }); /* ...existing logic... */ res.json({success:true}); }); 
+
+// --- UPDATED SYSTEM CONFIG ENDPOINTS ---
+app.get('/api/config/system', async (req, res) => {
+    if (!dbPool) return res.status(503).json({ error: "DB not connected" });
+    try {
+        const result = await dbPool.request().query("SELECT ConfigKey, ConfigValue FROM SystemConfig");
+        const map = {};
+        result.recordset.forEach(row => map[row.ConfigKey] = row.ConfigValue);
+
+        const config = {
+            companyName: map['CompanyName'] || '',
+            domain: map['Domain'] || '',
+            logoUrl: map['LogoUrl'] || '',
+            setupCompletedAt: map['SetupCompletedAt'] || '',
+            aiConfig: {
+                provider: map['AiProvider'] || 'GEMINI',
+                modelName: map['AiModel'] || 'gemini-2.5-flash',
+                apiKey: map['AiApiKey'] || '',
+                endpoint: map['AiEndpoint'] || '',
+                authToken: map['AiAuthToken'] || ''
+            },
+            syslogConfig: {
+                host: map['SyslogHost'] || '',
+                port: parseInt(map['SyslogPort']) || 514,
+                enabled: map['SyslogEnabled'] === 'true'
+            }
+        };
+        res.json(config);
+    } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.post('/api/config/system', async (req, res) => {
+    if (!dbPool) return res.status(503).json({ error: "DB not connected" });
+    const { companyName, domain, logoUrl, setupCompletedAt, aiConfig, syslogConfig } = req.body;
+    
+    try {
+        const upsert = async (key, val) => {
+            const valStr = val === undefined || val === null ? '' : String(val);
+            await dbPool.request()
+                .input('k', sql.NVarChar, key)
+                .input('v', sql.NVarChar, valStr)
+                .query(`
+                    IF EXISTS (SELECT 1 FROM SystemConfig WHERE ConfigKey = @k)
+                        UPDATE SystemConfig SET ConfigValue = @v WHERE ConfigKey = @k
+                    ELSE
+                        INSERT INTO SystemConfig (ConfigKey, ConfigValue) VALUES (@k, @v)
+                `);
+        };
+
+        if (companyName !== undefined) await upsert('CompanyName', companyName);
+        if (domain !== undefined) await upsert('Domain', domain);
+        if (logoUrl !== undefined) await upsert('LogoUrl', logoUrl);
+        if (setupCompletedAt !== undefined) await upsert('SetupCompletedAt', setupCompletedAt);
+        
+        if (aiConfig) {
+            await upsert('AiProvider', aiConfig.provider);
+            await upsert('AiModel', aiConfig.modelName);
+            await upsert('AiApiKey', aiConfig.apiKey);
+            await upsert('AiEndpoint', aiConfig.endpoint);
+            await upsert('AiAuthToken', aiConfig.authToken);
+        }
+
+        if (syslogConfig) {
+            await upsert('SyslogHost', syslogConfig.host);
+            await upsert('SyslogPort', syslogConfig.port);
+            await upsert('SyslogEnabled', syslogConfig.enabled);
+            // Refresh server-side syslog immediately
+            await refreshSyslogConfig(dbPool);
+        }
+
+        res.json({ success: true });
+    } catch (e) { res.status(500).json({ error: e.message }); }
+});
 
 // MFA
 app.post('/api/mfa/setup', async (req, res) => { const secret = authenticator.generateSecret(); const otpauth = authenticator.keyuri(req.body.userId === 'temp-setup' ? 'SuperAdmin' : req.body.userId, 'VirtualPuppets', secret); const qr = await QRCode.toDataURL(otpauth); res.json({ secret, qrCode: qr }); });
