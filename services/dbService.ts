@@ -1,14 +1,4 @@
 
-
-
-
-
-
-
-
-
-
-
 import { Actor, ProxyGateway, User, DbConfig, LogEntry, SystemConfig, Report, CommandJob, PendingActor, DevicePersona, WifiNetwork, BluetoothDevice, AttackSession } from '../types';
 
 const API_BASE = '/api';
@@ -166,6 +156,15 @@ export const toggleActorSentinel = async (actorId: string, enabled: boolean) => 
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ enabled })
+    });
+};
+
+// --- NEW: Toggle Wireless Scanning ---
+export const toggleActorScanning = async (actorId: string, type: 'WIFI' | 'BLUETOOTH', enabled: boolean) => {
+    await fetch(`${API_BASE}/actors/${actorId}/scanning`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ type, enabled })
     });
 };
 

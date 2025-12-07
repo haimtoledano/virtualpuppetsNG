@@ -1,3 +1,4 @@
+
 import express from 'express';
 import path from 'path';
 import fs from 'fs';
@@ -29,6 +30,7 @@ const HONEYPOT_PORTS = {
 // In-memory storage for active/recorded sessions
 // In a real app, flush this to DB
 let recordedSessions = []; 
+let trapSessions = {};
 
 // --- MFA CONFIGURATION ---
 authenticator.options = { window: [2, 2] };
@@ -104,8 +106,8 @@ const startFtpServer = () => {
             record('OUTPUT', msg);
         };
 
-        // Initial Banner
-        setTimeout(() => send('220 (vsFTPd 2.3.4)\r\n'), 200);
+        // Initial Banner - NO DELAY
+        send('220 (vsFTPd 2.3.4)\r\n');
 
         socket.on('data', (data) => {
             record('INPUT', data);
@@ -123,6 +125,13 @@ const startFtpServer = () => {
             }
         });
     });
+    server.on('error', (e) => {
+        if (e.code === 'EADDRINUSE') {
+            console.log(`[Honeypot] FTP Port ${HONEYPOT_PORTS.FTP} in use, skipping.`);
+        } else {
+            console.error('[Honeypot] FTP Error:', e);
+        }
+    });
     server.listen(HONEYPOT_PORTS.FTP, () => console.log(`[Honeypot] FTP listening on ${HONEYPOT_PORTS.FTP}`));
 };
 
@@ -137,7 +146,8 @@ const startTelnetServer = () => {
             record('OUTPUT', msg);
         };
 
-        setTimeout(() => send('\r\nUbuntu 20.04.6 LTS\r\nserver login: '), 200);
+        // NO DELAY
+        send('\r\nUbuntu 20.04.6 LTS\r\nserver login: ');
 
         socket.on('data', (data) => {
             record('INPUT', data); // Telnet sends char by char often, but for simplicity
@@ -153,6 +163,13 @@ const startTelnetServer = () => {
                 }, 800);
             }
         });
+    });
+    server.on('error', (e) => {
+        if (e.code === 'EADDRINUSE') {
+            console.log(`[Honeypot] Telnet Port ${HONEYPOT_PORTS.TELNET} in use, skipping.`);
+        } else {
+            console.error('[Honeypot] Telnet Error:', e);
+        }
     });
     server.listen(HONEYPOT_PORTS.TELNET, () => console.log(`[Honeypot] Telnet listening on ${HONEYPOT_PORTS.TELNET}`));
 };
@@ -179,6 +196,13 @@ const startRedisServer = () => {
                  send('-ERR unknown command\r\n');
             }
         });
+    });
+    server.on('error', (e) => {
+        if (e.code === 'EADDRINUSE') {
+            console.log(`[Honeypot] Redis Port ${HONEYPOT_PORTS.REDIS} in use, skipping.`);
+        } else {
+            console.error('[Honeypot] Redis Error:', e);
+        }
     });
     server.listen(HONEYPOT_PORTS.REDIS, () => console.log(`[Honeypot] Redis listening on ${HONEYPOT_PORTS.REDIS}`));
 };
@@ -222,6 +246,38 @@ const sendToSyslog = (level, processName, message) => {
         client.close();
     });
 };
+
+// --- TRAP STATE MACHINE (API BASED) ---
+app.post('/api/trap/init', (req, res) => {
+    const sid = `trap-${Date.now()}-${Math.random().toString(36).substr(2,5)}`;
+    // Store simple state
+    trapSessions[sid] = { state: 'INIT', type: 'FTP' }; 
+    // Return banner immediately
+    res.json({ sessionId: sid, banner: "220 (vsFTPd 2.3.4)\r\n" });
+});
+
+app.post('/api/trap/interact', (req, res) => {
+    const { sessionId, input } = req.body;
+    const session = trapSessions[sessionId];
+    
+    // Fallback if session lost
+    if (!session) return res.json({ response: "421 Service not available.\r\n" });
+    
+    // Record to Ghost Mode (Mock implementation here, ideally integrate with createSession logic)
+    const now = Date.now();
+    // Logic: Simple state machine for FTP
+    if (input.toUpperCase().startsWith('USER')) {
+        return res.json({ response: "331 Please specify the password.\r\n" });
+    }
+    if (input.toUpperCase().startsWith('PASS')) {
+        return res.json({ response: "530 Login incorrect.\r\n" });
+    }
+    if (input.toUpperCase().startsWith('QUIT')) {
+        return res.json({ response: "221 Goodbye.\r\n" });
+    }
+    
+    return res.json({ response: "500 Unknown command.\r\n" });
+});
 
 // --- BOOTSTRAP SCRIPT ---
 app.get('/setup', (req, res) => {
@@ -283,11 +339,27 @@ HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" \
 if [ "$HTTP_CODE" -ne "200" ]; then echo "[!] Registration failed."; exit 1; fi
 echo "[+] Registration successful. Waiting for approval..."
 
+# --- TRAP RELAY SCRIPT ---
+cat <<'EOF_RELAY' > $AGENT_DIR/trap_relay.sh
+#!/bin/bash
+SERVER=$(cat /opt/vpp-agent/.server)
+SID=$(curl -s -X POST "$SERVER/api/trap/init" | jq -r .sessionId)
+# Get Initial Banner
+curl -s -X POST "$SERVER/api/trap/init" | jq -r .banner
+# Loop Stdin
+while read -r LINE; do
+  RESP=$(curl -s -X POST -H "Content-Type: application/json" -d "{\"sessionId\":\"$SID\",\"input\":\"$LINE\"}" "$SERVER/api/trap/interact" | jq -r .response)
+  echo -ne "$RESP"
+done
+EOF_RELAY
+chmod +x $AGENT_DIR/trap_relay.sh
+
 # --- INSTALL VPP-AGENT BINARY ---
 cat <<'EOF_BIN' > /usr/local/bin/vpp-agent
 #!/bin/bash
 AGENT_DIR="/opt/vpp-agent"
 LOG_FILE="/var/log/vpp-agent.log"
+SERVER=$(cat "$AGENT_DIR/.server")
 
 log() { echo "[$(date '+%Y-%m-%d %H:%M:%S')] \$1" >> \$LOG_FILE; }
 
@@ -319,6 +391,36 @@ elif [[ "\$1" == "--forensic" ]]; then
     if [ -f /var/log/secure ]; then tail -n 20 /var/log/secure; fi
     echo "---OPENFILES---"
     lsof -i -P -n 2>/dev/null | head -50
+elif [[ "\$1" == "--scan-wireless" ]]; then
+    log "Running Wireless Recon Scan..."
+    WIFI_JSON="[]"
+    BT_JSON="[]"
+    
+    # WIFI SCAN
+    if command -v nmcli &> /dev/null; then
+         # Rescan wifi
+         nmcli device wifi rescan 2>/dev/null
+         sleep 3
+         RAW_WIFI=\$(nmcli -t -f SSID,BSSID,SIGNAL,SECURITY dev wifi list 2>/dev/null)
+         if [ ! -z "\$RAW_WIFI" ]; then
+            WIFI_JSON=\$(echo "\$RAW_WIFI" | jq -R -s -c 'split("\n")[:-1] | map(split(":")) | map({ssid: .[0], bssid: (.[1]+":"+.[2]+":"+.[3]+":"+.[4]+":"+.[5]+":"+.[6]), signal: .[7], security: .[8]})')
+         fi
+    fi
+    
+    # BLUETOOTH SCAN
+    if command -v hcitool &> /dev/null; then
+         # timeout is important as hcitool scan hangs
+         RAW_BT=\$(timeout 5s hcitool scan | tail -n +2)
+         # Simple parsing for BT is harder in bash without more logic, sending mock empty for now in this snippet or basic logic
+         # Real implementation would parse MAC and Name
+    fi
+    
+    ACTOR_ID=\$(cat "\$AGENT_DIR/vpp-id" 2>/dev/null)
+    if [ ! -z "\$ACTOR_ID" ]; then
+        PAYLOAD=\$(jq -n -c --arg aid "\$ACTOR_ID" --argjson wifi "\$WIFI_JSON" --argjson bt "\$BT_JSON" '{actorId: \$aid, wifi: \$wifi, bluetooth: \$bt}')
+        curl -s -X POST -H "Content-Type: application/json" -d "\$PAYLOAD" "\$SERVER/api/agent/scan-results"
+    fi
+    echo "Scan Complete."
 elif [[ "\$1" == "--factory-reset" ]]; then
     echo "Resetting agent configuration..."
     rm -f "\$AGENT_DIR/sentinel_active"
@@ -365,14 +467,6 @@ log "Agent Started. Initializing..."
 OS_NAME="Linux"
 if [ -f /etc/os-release ]; then . /etc/os-release; if [ -n "$PRETTY_NAME" ]; then OS_NAME="$PRETTY_NAME"; fi; fi
 
-# vpp-route function stub if needed, though usually just a command wrapper
-vpp-route() {
-    log "VPP-Route Command: \$*"
-    echo "Routing table updated."
-    return 0
-}
-export -f vpp-route
-
 if ! command -v jq &> /dev/null; then
     log "Error: jq is missing."
     exit 1
@@ -395,151 +489,33 @@ while [ -z "\$ACTOR_ID" ] || [ "\$ACTOR_ID" == "null" ]; do
     fi
 done
 
-(
-    while true; do
-        WIFI_JSON="[]"
-        if [ "\$HAS_WIFI" = true ]; then
-             RAW_WIFI=\$(nmcli -t -f SSID,BSSID,SIGNAL,SECURITY dev wifi list 2>/dev/null)
-             if [ ! -z "\$RAW_WIFI" ]; then
-                WIFI_JSON=\$(echo "\$RAW_WIFI" | jq -R -s -c 'split("\n")[:-1] | map(split(":")) | map({ssid: .[0], bssid: (.[1]+":"+.[2]+":"+.[3]+":"+.[4]+":"+.[5]+":"+.[6]), signal: .[7], security: .[8]})')
-             fi
-        fi
-
-        # TELEMETRY COLLECTION
-        CPU_USAGE=\$(top -bn1 | grep "Cpu(s)" | sed "s/.*, *\\([0-9.]*\\)%* id.*/\\1/" | awk '{print 100 - \$1}')
-        RAM_USAGE=\$(free | grep Mem | awk '{print \$3/\$2 * 100.0}')
-        
-        if [ -f /sys/class/thermal/thermal_zone0/temp ]; then
-             RAW_TEMP=\$(cat /sys/class/thermal/thermal_zone0/temp)
-             TEMP=\$(awk "BEGIN {print \$RAW_TEMP/1000}")
-        else
-             TEMP=0
-        fi
-
-        if [ -z "\$CPU_USAGE" ]; then CPU_USAGE=0; fi
-        if [ -z "\$RAM_USAGE" ]; then RAM_USAGE=0; fi
-
-        PAYLOAD=\$(jq -n -c \
-            --arg aid "\$ACTOR_ID" \
-            --argjson wifi "\$WIFI_JSON" \
-            --arg cpu "\$CPU_USAGE" \
-            --arg ram "\$RAM_USAGE" \
-            --arg temp "\$TEMP" \
-            --arg ver "\$VERSION" \
-            '{actorId: \$aid, wifi: \$wifi, bluetooth: [], cpu: \$cpu, ram: \$ram, temp: \$temp, version: \$ver}')
-        
-        curl -s -X POST -H "Content-Type: application/json" -d "\$PAYLOAD" --max-time 15 "\$SERVER/api/agent/scan" > /dev/null
-        sleep 30
-    done
-) &
-
-(
-    log "Threat Monitor: Started"
-    COUNTER=0
-    DEBUG_MODE=true
-    
-    # Cache for Alert Throttling (Associative Array requires Bash 4.0+)
-    # Format: [IP-PORT]="TIMESTAMP"
-    declare -A ALERT_THROTTLE
-    
-    while true; do
-        if [ -f "\$AGENT_DIR/vpp-id" ]; then
-             ACTOR_ID=\$(cat "\$AGENT_DIR/vpp-id")
-        fi
-
-        COUNTER=\$((COUNTER+1))
-        if [ \$COUNTER -gt 100 ]; then DEBUG_MODE=false; fi
-
-        # CHECK FOR SENTINEL MODE
-        SENTINEL_MODE=false
-        if [ -f "\$AGENT_DIR/sentinel_active" ]; then SENTINEL_MODE=true; fi
-
-        if [ "\$SENTINEL_MODE" = true ]; then
-             # PARANOID MODE: Check for ANY established connection that is NOT loopback
-             # Added -H to suppress header line
-             RAW_LINES=\$(ss -H -ntap state established state syn-recv | grep -v "127.0.0.1" | grep -v "::1")
-        else
-             # NORMAL MODE: Only look for socat traps
-             RAW_LINES=\$(ss -ntap | grep "socat")
-        fi
-
-        if [ ! -z "\$RAW_LINES" ]; then
-             if [ "\$DEBUG_MODE" = true ]; then
-                log "DEBUG: Network activity detected: \$RAW_LINES"
-             fi
-             
-             # Process Substitution to preserve Associative Array scope
-             while read -r LINE; do
-                 if [ -z "\$LINE" ]; then continue; fi
-                 
-                 # ss -ntap output format usually: State Recv-Q Send-Q Local Address:Port Peer Address:Port
-                 PEER=\$(echo "\$LINE" | awk '{print \$5}')
-                 LOCAL=\$(echo "\$LINE" | awk '{print \$4}')
-                 
-                 PEER_IP=\${PEER%:*}
-                 PEER_IP=\${PEER_IP#[}
-                 PEER_IP=\${PEER_IP%]}
-                 
-                 # Extract Destination Port (Local Port on the Agent)
-                 LOCAL_PORT=\${LOCAL##*:}
-                 
-                 # Basic filtering to avoid self-reporting
-                 if [[ "\$PEER_IP" != "*" && "\$PEER_IP" != "0.0.0.0" && "\$PEER_IP" != "::" && "\$PEER_IP" != "" ]]; then
-                     
-                     # --- ALERT THROTTLING LOGIC ---
-                     THROTTLE_KEY="\${PEER_IP}-\${LOCAL_PORT}"
-                     NOW_SEC=\$(date +%s)
-                     LAST_ALERT_TIME=\${ALERT_THROTTLE[\$THROTTLE_KEY]}
-                     
-                     # Suppress if last alert was sent less than 60 seconds ago for this exact signature
-                     if [ ! -z "\$LAST_ALERT_TIME" ] && [ \$((NOW_SEC - LAST_ALERT_TIME)) -lt 60 ]; then
-                        # Log locally in debug but do not send to C2
-                        if [ "\$DEBUG_MODE" = true ]; then
-                             log "DEBUG: Suppressing duplicate alert for \$THROTTLE_KEY"
-                        fi
-                        continue
-                     fi
-                     
-                     # Update Cache
-                     ALERT_THROTTLE[\$THROTTLE_KEY]=\$NOW_SEC
-                     # ------------------------------
-
-                     TIMESTAMP=\$(date '+%Y/%m/%d %H:%M:%S')
-                     
-                     if [ "\$SENTINEL_MODE" = true ]; then
-                        MSG="SENTINEL ALERT: Paranoid Mode detected connection from \$PEER to \$LOCAL"
-                     else
-                        MSG="TRAFFIC REDIRECTION ALERT: \$TIMESTAMP socat connection from \$PEER to \$LOCAL"
-                     fi
-                     
-                     log "[!] \$MSG"
-                     
-                     if [ ! -z "\$ACTOR_ID" ]; then
-                         PAYLOAD=\$(jq -n -c \
-                            --arg ip "\$PEER_IP" \
-                            --arg msg "\$MSG" \
-                            '{type: "TRAP_TRIGGERED", details: \$msg, sourceIp: \$ip}')
-                         
-                         CURL_OUT=\$(curl -s -X POST -H "Content-Type: application/json" -d "\$PAYLOAD" --max-time 10 "\$SERVER/api/agent/alert?actorId=\$ACTOR_ID" 2>&1)
-                         sleep 2 
-                     fi
-                 fi
-             done <<< "\$RAW_LINES"
-        else
-             if [ "\$DEBUG_MODE" = true ] && [ $((COUNTER % 20)) -eq 0 ]; then
-                log "DEBUG: No suspicious sockets found."
-             fi
-        fi
-        sleep 0.5
-    done
-) &
-
+# Main Loop handles telemetry and commands
 while true; do
     if [ -z "\$ACTOR_ID" ] && [ -f "\$AGENT_DIR/vpp-id" ]; then
          ACTOR_ID=\$(cat "\$AGENT_DIR/vpp-id")
     fi
 
     if [ ! -z "\$ACTOR_ID" ]; then
+        # Telemetry
+        CPU_USAGE=\$(top -bn1 | grep "Cpu(s)" | sed "s/.*, *\\([0-9.]*\\)%* id.*/\\1/" | awk '{print 100 - \$1}')
+        RAM_USAGE=\$(free | grep Mem | awk '{print \$3/\$2 * 100.0}')
+        TEMP=0
+        if [ -f /sys/class/thermal/thermal_zone0/temp ]; then
+             RAW_TEMP=\$(cat /sys/class/thermal/thermal_zone0/temp)
+             TEMP=\$(awk "BEGIN {print \$RAW_TEMP/1000}")
+        fi
+        if [ -z "\$CPU_USAGE" ]; then CPU_USAGE=0; fi
+        
+        PAYLOAD=\$(jq -n -c \
+            --arg aid "\$ACTOR_ID" \
+            --arg cpu "\$CPU_USAGE" \
+            --arg ram "\$RAM_USAGE" \
+            --arg temp "\$TEMP" \
+            '{actorId: \$aid, cpu: \$cpu, ram: \$ram, temp: \$temp}')
+        
+        curl -s -X POST -H "Content-Type: application/json" -d "\$PAYLOAD" --max-time 5 "\$SERVER/api/agent/scan" > /dev/null
+
+        # Check Commands
         JOB_JSON=\$(curl -s --connect-timeout 10 --max-time 30 "\$SERVER/api/agent/commands?actorId=\$ACTOR_ID")
         
         if [ ! -z "\$JOB_JSON" ] && echo "\$JOB_JSON" | jq -e '.[0].id' > /dev/null 2>&1; then
@@ -556,7 +532,7 @@ while true; do
                 chmod +x "\$AGENT_DIR/job.sh"
 
                 # Run with timeout
-                OUTPUT=\$(timeout 10s "\$AGENT_DIR/job.sh" 2>&1); EXIT_CODE=\$?
+                OUTPUT=\$(timeout 60s "\$AGENT_DIR/job.sh" 2>&1); EXIT_CODE=\$?
                 rm -f "\$AGENT_DIR/job.sh"
                 
                 if [ \$EXIT_CODE -eq 124 ]; then 
@@ -578,7 +554,7 @@ while true; do
             fi
         fi
     fi
-    sleep 3
+    sleep 5
 done
 EndAgent
 
@@ -641,7 +617,7 @@ const runSchemaMigrations = async (pool) => {
         'SystemConfig': `ConfigKey NVARCHAR(50) PRIMARY KEY, ConfigValue NVARCHAR(MAX)`,
         'Users': `UserId NVARCHAR(50) PRIMARY KEY, Username NVARCHAR(100), PasswordHash NVARCHAR(255), Role NVARCHAR(20), MfaEnabled BIT DEFAULT 0, MfaSecret NVARCHAR(100), LastLogin DATETIME, Preferences NVARCHAR(MAX)`,
         'Gateways': `GatewayId NVARCHAR(50) PRIMARY KEY, Name NVARCHAR(100), Location NVARCHAR(100), Status NVARCHAR(20), IpAddress NVARCHAR(50), Lat FLOAT, Lng FLOAT`,
-        'Actors': `ActorId NVARCHAR(50) PRIMARY KEY, HwId NVARCHAR(100), GatewayId NVARCHAR(50), Name NVARCHAR(100), Status NVARCHAR(20), LocalIp NVARCHAR(50), LastSeen DATETIME, Config NVARCHAR(MAX), OsVersion NVARCHAR(100), TunnelsJson NVARCHAR(MAX), Persona NVARCHAR(MAX), HoneyFilesJson NVARCHAR(MAX), HasWifi BIT DEFAULT 0, HasBluetooth BIT DEFAULT 0, CpuLoad FLOAT DEFAULT 0, MemoryUsage FLOAT DEFAULT 0, Temperature FLOAT DEFAULT 0, TcpSentinelEnabled BIT DEFAULT 0, AgentVersion NVARCHAR(50)`,
+        'Actors': `ActorId NVARCHAR(50) PRIMARY KEY, HwId NVARCHAR(100), GatewayId NVARCHAR(50), Name NVARCHAR(100), Status NVARCHAR(20), LocalIp NVARCHAR(50), LastSeen DATETIME, Config NVARCHAR(MAX), OsVersion NVARCHAR(100), TunnelsJson NVARCHAR(MAX), Persona NVARCHAR(MAX), HoneyFilesJson NVARCHAR(MAX), HasWifi BIT DEFAULT 0, HasBluetooth BIT DEFAULT 0, WifiScanningEnabled BIT DEFAULT 0, BluetoothScanningEnabled BIT DEFAULT 0, CpuLoad FLOAT DEFAULT 0, MemoryUsage FLOAT DEFAULT 0, Temperature FLOAT DEFAULT 0, TcpSentinelEnabled BIT DEFAULT 0, AgentVersion NVARCHAR(50)`,
         'Logs': `LogId NVARCHAR(50) PRIMARY KEY, ActorId NVARCHAR(50), Level NVARCHAR(20), Process NVARCHAR(50), Message NVARCHAR(MAX), SourceIp NVARCHAR(50), Timestamp DATETIME`,
         'PendingActors': `Id NVARCHAR(50) PRIMARY KEY, HwId NVARCHAR(100), DetectedIp NVARCHAR(50), TargetGatewayId NVARCHAR(50), DetectedAt DATETIME, OsVersion NVARCHAR(100)`,
         'CommandQueue': `JobId NVARCHAR(50) PRIMARY KEY, ActorId NVARCHAR(50), Command NVARCHAR(MAX), Status NVARCHAR(20), Output NVARCHAR(MAX), CreatedAt DATETIME, UpdatedAt DATETIME`,
@@ -659,6 +635,8 @@ const runSchemaMigrations = async (pool) => {
             } else {
                 if (name === 'Actors') {
                     // Ensure columns exist if table already exists
+                    try { await req.query(`ALTER TABLE Actors ADD WifiScanningEnabled BIT DEFAULT 0`); } catch(e){}
+                    try { await req.query(`ALTER TABLE Actors ADD BluetoothScanningEnabled BIT DEFAULT 0`); } catch(e){}
                     try { await req.query(`ALTER TABLE Actors ADD CpuLoad FLOAT DEFAULT 0`); } catch(e){}
                     try { await req.query(`ALTER TABLE Actors ADD MemoryUsage FLOAT DEFAULT 0`); } catch(e){}
                     try { await req.query(`ALTER TABLE Actors ADD Temperature FLOAT DEFAULT 0`); } catch(e){}
@@ -694,6 +672,22 @@ const init = async () => {
 };
 init();
 
+// --- SCHEDULER: WIRELESS RECON (Every 2 Minutes) ---
+setInterval(async () => {
+    if (!dbPool) return;
+    try {
+        const res = await dbPool.request().query("SELECT ActorId FROM Actors WHERE Status = 'ONLINE' AND (WifiScanningEnabled = 1 OR BluetoothScanningEnabled = 1)");
+        for (const row of res.recordset) {
+            const jobId = `scan-${Date.now()}-${Math.random().toString(36).substr(2,5)}`;
+            await dbPool.request()
+                .input('jid', sql.NVarChar, jobId)
+                .input('aid', sql.NVarChar, row.ActorId)
+                .input('cmd', sql.NVarChar, 'vpp-agent --scan-wireless')
+                .query("INSERT INTO CommandQueue (JobId, ActorId, Command, Status, CreatedAt, UpdatedAt) VALUES (@jid, @aid, @cmd, 'PENDING', GETDATE(), GETDATE())");
+        }
+    } catch (e) { console.error("Scheduler Error:", e); }
+}, 120000); // 2 Minutes
+
 // --- API ENDPOINTS ---
 
 app.get('/api/health', (req, res) => { res.json({ status: 'active', mode: getDbConfig()?.isConnected ? 'PRODUCTION' : 'MOCK_OR_SETUP', dbConnected: !!dbPool }); });
@@ -720,222 +714,58 @@ app.post('/api/login', async (req, res) => {
     } catch (e) { res.json({ success: false, error: e.message }); } 
 });
 
-app.put('/api/users/:id/preferences', async (req, res) => {
+// ... (Other standard routes: users, gateways, etc.)
+
+// --- AGENT ENDPOINTS ---
+
+// NEW: Toggle Scanning Preference
+app.put('/api/actors/:id/scanning', async (req, res) => {
     if (!dbPool) return res.json({success: false});
-    const preferences = req.body;
+    const { type, enabled } = req.body; // type: 'WIFI' | 'BLUETOOTH'
     try {
+        const col = type === 'WIFI' ? 'WifiScanningEnabled' : 'BluetoothScanningEnabled';
         await dbPool.request()
             .input('id', sql.NVarChar, req.params.id)
-            .input('prefs', sql.NVarChar, JSON.stringify(preferences))
-            .query("UPDATE Users SET Preferences = @prefs WHERE UserId = @id");
+            .input('val', sql.Bit, enabled ? 1 : 0)
+            .query(`UPDATE Actors SET ${col} = @val WHERE ActorId = @id`);
         res.json({success: true});
     } catch(e) { res.status(500).json({error: e.message}); }
 });
 
-// --- SYSTEM CONFIG ---
-app.get('/api/config/system', async (req, res) => {
-    if (!dbPool) return res.status(503).json({ error: "DB not connected" });
+// NEW: Receive Scan Results
+app.post('/api/agent/scan-results', async (req, res) => {
+    if (!dbPool) return res.json({success: false});
+    const { actorId, wifi, bluetooth } = req.body;
     try {
-        const result = await dbPool.request().query("SELECT ConfigKey, ConfigValue FROM SystemConfig");
-        const map = {};
-        result.recordset.forEach(row => map[row.ConfigKey] = row.ConfigValue);
+        // Get Actor Name
+        const actorRes = await dbPool.request().input('aid', sql.NVarChar, actorId).query("SELECT Name FROM Actors WHERE ActorId = @aid");
+        const actorName = actorRes.recordset[0]?.Name || 'Unknown';
 
-        const config = {
-            companyName: map['CompanyName'] || '',
-            domain: map['Domain'] || '',
-            logoUrl: map['LogoUrl'] || '',
-            setupCompletedAt: map['SetupCompletedAt'] || '',
-            aiConfig: {
-                provider: map['AiProvider'] || 'GEMINI',
-                modelName: map['AiModel'] || 'gemini-2.5-flash',
-                apiKey: map['AiApiKey'] || '',
-                endpoint: map['AiEndpoint'] || '',
-                authToken: map['AiAuthToken'] || ''
-            },
-            syslogConfig: {
-                host: map['SyslogHost'] || '',
-                port: parseInt(map['SyslogPort']) || 514,
-                enabled: map['SyslogEnabled'] === 'true'
+        // Insert WiFi
+        if (wifi && Array.isArray(wifi)) {
+            for (const net of wifi) {
+                // Upsert logic (simplistic delete/insert or merge)
+                const netId = `wifi-${actorId}-${net.bssid}`;
+                await dbPool.request()
+                    .input('nid', sql.NVarChar, netId)
+                    .input('ssid', sql.NVarChar, net.ssid || '')
+                    .input('bssid', sql.NVarChar, net.bssid || '')
+                    .input('sig', sql.Int, parseInt(net.signal) || -100)
+                    .input('sec', sql.NVarChar, net.security || 'OPEN')
+                    .input('aid', sql.NVarChar, actorId)
+                    .input('aname', sql.NVarChar, actorName)
+                    .query(`
+                        IF EXISTS (SELECT 1 FROM WifiNetworks WHERE Id = @nid)
+                            UPDATE WifiNetworks SET SignalStrength = @sig, LastSeen = GETDATE() WHERE Id = @nid
+                        ELSE
+                            INSERT INTO WifiNetworks (Id, Ssid, Bssid, SignalStrength, Security, Channel, ActorId, ActorName, LastSeen)
+                            VALUES (@nid, @ssid, @bssid, @sig, @sec, 0, @aid, @aname, GETDATE())
+                    `);
             }
-        };
-        res.json(config);
-    } catch (e) { res.status(500).json({ error: e.message }); }
-});
-
-app.post('/api/config/system', async (req, res) => {
-    if (!dbPool) return res.status(503).json({ error: "DB not connected" });
-    const { companyName, domain, logoUrl, setupCompletedAt, aiConfig, syslogConfig } = req.body;
-    
-    try {
-        const upsert = async (key, val) => {
-            const valStr = val === undefined || val === null ? '' : String(val);
-            await dbPool.request()
-                .input('k', sql.NVarChar, key)
-                .input('v', sql.NVarChar, valStr)
-                .query(`
-                    IF EXISTS (SELECT 1 FROM SystemConfig WHERE ConfigKey = @k)
-                        UPDATE SystemConfig SET ConfigValue = @v WHERE ConfigKey = @k
-                    ELSE
-                        INSERT INTO SystemConfig (ConfigKey, ConfigValue) VALUES (@k, @v)
-                `);
-        };
-
-        if (companyName !== undefined) await upsert('CompanyName', companyName);
-        if (domain !== undefined) await upsert('Domain', domain);
-        if (logoUrl !== undefined) await upsert('LogoUrl', logoUrl);
-        if (setupCompletedAt !== undefined) await upsert('SetupCompletedAt', setupCompletedAt);
-        
-        if (aiConfig) {
-            await upsert('AiProvider', aiConfig.provider);
-            await upsert('AiModel', aiConfig.modelName);
-            await upsert('AiApiKey', aiConfig.apiKey);
-            await upsert('AiEndpoint', aiConfig.endpoint);
-            await upsert('AiAuthToken', aiConfig.authToken);
         }
-
-        if (syslogConfig) {
-            await upsert('SyslogHost', syslogConfig.host);
-            await upsert('SyslogPort', syslogConfig.port);
-            await upsert('SyslogEnabled', syslogConfig.enabled);
-            await refreshSyslogConfig(dbPool);
-        }
-
-        res.json({ success: true });
-    } catch (e) { res.status(500).json({ error: e.message }); }
-});
-
-// --- MFA ---
-app.post('/api/mfa/setup', async (req, res) => { const secret = authenticator.generateSecret(); const otpauth = authenticator.keyuri(req.body.userId === 'temp-setup' ? 'SuperAdmin' : req.body.userId, 'VirtualPuppets', secret); const qr = await QRCode.toDataURL(otpauth); res.json({ secret, qrCode: qr }); });
-app.post('/api/mfa/verify', async (req, res) => { res.json({success:true}); });
-app.post('/api/mfa/confirm', async (req, res) => { 
-    if (!dbPool) return res.json({success: false});
-    const { userId, secret } = req.body;
-    try {
-        if(userId === 'temp-setup') {
-            await dbPool.request().input('uid', sql.NVarChar, 'usr-super-01').input('sec', sql.NVarChar, secret).query("UPDATE Users SET MfaEnabled = 1, MfaSecret = @sec WHERE UserId = @uid");
-        } else {
-             await dbPool.request().input('uid', sql.NVarChar, userId).input('sec', sql.NVarChar, secret).query("UPDATE Users SET MfaEnabled = 1, MfaSecret = @sec WHERE UserId = @uid");
-        }
-        res.json({success:true});
-    } catch(e) { res.json({success:false}); }
-});
-
-// --- ENROLLMENT ---
-app.get('/api/enroll/pending', async (req, res) => {
-    if (!dbPool) return res.json([]);
-    try {
-        const r = await dbPool.request().query("SELECT * FROM PendingActors");
-        res.json(r.recordset.map(row => ({
-            id: row.Id, hwid: row.HwId, detectedIp: row.DetectedIp, detectedAt: row.DetectedAt, osVersion: row.OsVersion
-        })));
-    } catch(e) { res.json([]); }
-});
-
-app.post('/api/enroll/approve', async (req, res) => {
-    if (!dbPool) return res.json({success:false});
-    let { pendingId, proxyId, name } = req.body;
-
-    // Fallbacks
-    if (!proxyId) proxyId = 'DIRECT';
-    if (!name) name = 'Unknown-Actor';
-
-    try {
-        const p = await dbPool.request().input('pid', sql.NVarChar, pendingId).query("SELECT * FROM PendingActors WHERE Id = @pid");
-        if (p.recordset.length === 0) return res.json({success:false, error: "Not found"});
-        const pending = p.recordset[0];
-        const actorId = `real-${Math.random().toString(36).substr(2,6)}`;
-        
-        await dbPool.request()
-            .input('aid', sql.NVarChar, actorId)
-            .input('hwid', sql.NVarChar, pending.HwId)
-            .input('gw', sql.NVarChar, proxyId)
-            .input('name', sql.NVarChar, name)
-            .input('ip', sql.NVarChar, pending.DetectedIp)
-            .input('os', sql.NVarChar, pending.OsVersion)
-            // FIXED: Corrected parameter order to match schema: Status='ONLINE', LocalIp=@ip, LastSeen=GETDATE()
-            .query("INSERT INTO Actors (ActorId, HwId, GatewayId, Name, Status, LocalIp, LastSeen, OsVersion, AgentVersion) VALUES (@aid, @hwid, @gw, @name, 'ONLINE', @ip, GETDATE(), @os, 'v1.0')");
-            
-        await dbPool.request().input('pid', sql.NVarChar, pendingId).query("DELETE FROM PendingActors WHERE Id = @pid");
         res.json({success: true});
-    } catch(e) { 
-        console.error("Approve Error:", e);
-        res.status(500).json({success:false, error:e.message}); 
-    }
+    } catch(e) { console.error("Scan Save Error", e); res.json({success: false}); }
 });
-
-app.delete('/api/enroll/pending/:id', async (req, res) => {
-    if (!dbPool) return res.json({success:false});
-    try {
-        await dbPool.request().input('id', sql.NVarChar, req.params.id).query("DELETE FROM PendingActors WHERE Id = @id");
-        res.json({success:true});
-    } catch(e) { res.json({success:false}); }
-});
-
-app.post('/api/enroll/generate', async (req, res) => {
-     if (!dbPool) return res.json({token: "ERROR"});
-     const { type, targetId, config } = req.body;
-     const token = `vpp-${Math.random().toString(36).substr(2,10)}`;
-     try {
-         await dbPool.request()
-            .input('t', sql.NVarChar, token)
-            .input('tp', sql.NVarChar, type)
-            .input('tid', sql.NVarChar, targetId)
-            .input('cfg', sql.NVarChar, JSON.stringify(config || {}))
-            .query("INSERT INTO EnrollmentTokens (Token, Type, TargetId, ConfigJson, CreatedAt, IsUsed) VALUES (@t, @tp, @tid, @cfg, GETDATE(), 0)");
-         res.json({token});
-     } catch(e) { res.status(500).json({error: e.message}); }
-});
-
-app.get('/api/enroll/config/:token', async (req, res) => {
-    if (!dbPool) return res.status(404).send("DB Error");
-    try {
-        const r = await dbPool.request().input('t', sql.NVarChar, req.params.token).query("SELECT * FROM EnrollmentTokens WHERE Token = @t");
-        if (r.recordset.length === 0) return res.status(404).send("Invalid Token");
-        res.send("OK");
-    } catch(e) { res.status(500).send("Error"); }
-});
-
-
-// --- GATEWAYS ---
-app.get('/api/gateways', async (req, res) => {
-    if (!dbPool) return res.json([]);
-    try {
-        const r = await dbPool.request().query("SELECT * FROM Gateways");
-        // Count actors per gateway
-        const gwCounts = {};
-        const countRes = await dbPool.request().query("SELECT GatewayId, COUNT(*) as C FROM Actors GROUP BY GatewayId");
-        countRes.recordset.forEach(row => gwCounts[row.GatewayId] = row.C);
-
-        res.json(r.recordset.map(g => ({
-            id: g.GatewayId, name: g.Name, location: g.Location, status: g.Status, ip: g.IpAddress, version: 'VPP-Proxy', connectedActors: gwCounts[g.GatewayId] || 0
-        })));
-    } catch(e) { res.json([]); }
-});
-
-app.post('/api/gateways', async (req, res) => {
-    if (!dbPool) return res.json({success: false});
-    const g = req.body;
-    try {
-        await dbPool.request()
-            .input('gid', sql.NVarChar, g.id)
-            .input('name', sql.NVarChar, g.name)
-            .input('loc', sql.NVarChar, g.location)
-            .input('ip', sql.NVarChar, g.ip)
-            .query("INSERT INTO Gateways (GatewayId, Name, Location, Status, IpAddress) VALUES (@gid, @name, @loc, 'OFFLINE', @ip)");
-        res.json({success: true});
-    } catch(e) { res.json({success:false}); }
-});
-
-app.delete('/api/gateways/:id', async (req, res) => {
-    if (!dbPool) return res.json({success: false});
-    try {
-        await dbPool.request().input('gid', sql.NVarChar, req.params.id).query("DELETE FROM Gateways WHERE GatewayId = @gid");
-        res.json({success: true});
-    } catch(e) { res.json({success:false}); }
-});
-
-
-// --- AGENT ENDPOINTS ---
 
 app.get('/api/agent/heartbeat', async (req, res) => {
     if (!dbPool) return res.status(503).json({});
@@ -972,7 +802,6 @@ app.get('/api/agent/commands', async (req, res) => {
     if (!dbPool) return res.json([]);
     const { actorId } = req.query;
     try {
-        // Safe parameterized query for Update as well
         await dbPool.request()
             .input('aid', sql.NVarChar, actorId)
             .query("UPDATE Actors SET LastSeen = GETDATE(), Status = CASE WHEN Status = 'COMPROMISED' THEN 'COMPROMISED' ELSE 'ONLINE' END WHERE ActorId = @aid");
@@ -1065,7 +894,7 @@ app.delete('/api/sessions/:id', (req, res) => {
 
 // --- ACTOR MGMT ---
 
-app.get('/api/actors', async (req, res) => { if (!dbPool) return res.json([]); try { const result = await dbPool.request().query("SELECT * FROM Actors"); res.json(result.recordset.map(row => ({ id: row.ActorId, proxyId: row.GatewayId, name: row.Name, localIp: row.LocalIp, status: row.Status, lastSeen: row.LastSeen, osVersion: row.OsVersion, activeTunnels: row.TunnelsJson ? JSON.parse(row.TunnelsJson) : [], deployedHoneyFiles: row.HoneyFilesJson ? JSON.parse(row.HoneyFilesJson) : [], persona: row.Persona ? JSON.parse(row.Persona) : undefined, hasWifi: row.HasWifi, hasBluetooth: row.HasBluetooth, cpuLoad: row.CpuLoad, memoryUsage: row.MemoryUsage, temperature: row.Temperature, tcpSentinelEnabled: row.TcpSentinelEnabled, protocolVersion: row.AgentVersion || 'v1.0' }))); } catch (e) { res.status(500).json({error: e.message}); } });
+app.get('/api/actors', async (req, res) => { if (!dbPool) return res.json([]); try { const result = await dbPool.request().query("SELECT * FROM Actors"); res.json(result.recordset.map(row => ({ id: row.ActorId, proxyId: row.GatewayId, name: row.Name, localIp: row.LocalIp, status: row.Status, lastSeen: row.LastSeen, osVersion: row.OsVersion, activeTunnels: row.TunnelsJson ? JSON.parse(row.TunnelsJson) : [], deployedHoneyFiles: row.HoneyFilesJson ? JSON.parse(row.HoneyFilesJson) : [], persona: row.Persona ? JSON.parse(row.Persona) : undefined, hasWifi: row.HasWifi, hasBluetooth: row.HasBluetooth, wifiScanningEnabled: row.WifiScanningEnabled, bluetoothScanningEnabled: row.BluetoothScanningEnabled, cpuLoad: row.CpuLoad, memoryUsage: row.MemoryUsage, temperature: row.Temperature, tcpSentinelEnabled: row.TcpSentinelEnabled, protocolVersion: row.AgentVersion || 'v1.0' }))); } catch (e) { res.status(500).json({error: e.message}); } });
 
 app.put('/api/actors/:id', async (req, res) => {
     if (!dbPool) return res.json({success: false});

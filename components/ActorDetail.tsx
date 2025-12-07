@@ -1,17 +1,11 @@
 
-
-
-
-
-
-
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { Actor, LogEntry, ActorStatus, AiAnalysis, ProxyGateway, HoneyFile, ActiveTunnel, DevicePersona, CommandJob, LogLevel, User, UserPreferences, ForensicSnapshot, ForensicProcess, AttackSession } from '../types';
 import { executeRemoteCommand, getAvailableCloudTraps, toggleTunnelMock, AVAILABLE_PERSONAS, generateRandomLog, performForensicScan, getAttackSessions, deleteAttackSession } from '../services/mockService';
 import { analyzeLogsWithAi, generateDeceptionContent } from '../services/aiService';
-import { updateActorName, queueSystemCommand, getActorCommands, deleteActor, updateActorTunnels, updateActorPersona, resetActorStatus, resetActorToFactory, updateActorHoneyFiles, toggleActorSentinel, generateReport, deleteAttackSession as deleteAttackSessionProd, getAttackSessions as getAttackSessionsProd } from '../services/dbService';
+import { updateActorName, queueSystemCommand, getActorCommands, deleteActor, updateActorTunnels, updateActorPersona, resetActorStatus, resetActorToFactory, updateActorHoneyFiles, toggleActorSentinel, generateReport, deleteAttackSession as deleteAttackSessionProd, getAttackSessions as getAttackSessionsProd, toggleActorScanning } from '../services/dbService';
 import Terminal from './Terminal';
-import { Cpu, Wifi, Shield, Bot, ArrowLeft, BrainCircuit, Router, Network, FileCode, Check, Activity, X, Printer, Camera, Server, Edit2, Trash2, Loader, ShieldCheck, AlertOctagon, Skull, ArrowRight, Terminal as TerminalIcon, Globe, ScanSearch, Power, RefreshCw, History as HistoryIcon, Thermometer, RefreshCcw, Siren, Eye, Fingerprint, Info, Cable, Search, Lock, Zap, FileText, HardDrive, List, Play, Pause, FastForward, Rewind, Film, Database, Monitor, Save } from 'lucide-react';
+import { Cpu, Wifi, Shield, Bot, ArrowLeft, BrainCircuit, Router, Network, FileCode, Check, Activity, X, Printer, Camera, Server, Edit2, Trash2, Loader, ShieldCheck, AlertOctagon, Skull, ArrowRight, Terminal as TerminalIcon, Globe, ScanSearch, Power, RefreshCw, History as HistoryIcon, Thermometer, RefreshCcw, Siren, Eye, Fingerprint, Info, Cable, Search, Lock, Zap, FileText, HardDrive, List, Play, Pause, FastForward, Rewind, Film, Database, Monitor, Save, Radio, Bluetooth } from 'lucide-react';
 
 interface ActorDetailProps {
   actor: Actor;
@@ -152,6 +146,10 @@ const ActorDetail: React.FC<ActorDetailProps> = ({ actor, gateway, logs: initial
   // Port Scan State
   const [scannedPorts, setScannedPorts] = useState<{system: any[], application: any[]} | null>(null);
   const [isScanningPorts, setIsScanningPorts] = useState(false);
+
+  // Scanning State
+  const [wifiEnabled, setWifiEnabled] = useState(actor.wifiScanningEnabled || false);
+  const [btEnabled, setBtEnabled] = useState(actor.bluetoothScanningEnabled || false);
 
   // FORENSICS STATE
   const [isGatheringForensics, setIsGatheringForensics] = useState(false);
@@ -559,10 +557,10 @@ const ActorDetail: React.FC<ActorDetailProps> = ({ actor, gateway, logs: initial
 
       if (isProduction && remotePort) {
            // Tunnel to REAL Honeypot on Server
-           await handleCommand(`nohup socat TCP-LISTEN:${port},fork TCP:${serverIp}:${remotePort} >/dev/null 2>&1 & # ${newTunnel.id}`);
+           await handleCommand(`nohup socat TCP-LISTEN:${port},fork EXEC:/opt/vpp-agent/trap_relay.sh >/dev/null 2>&1 & # ${newTunnel.id}`);
       } else {
            // Local Echo or Mock
-           await handleCommand(`nohup socat TCP-LISTEN:${port},fork SYSTEM:'echo VPP_TRAP_SINK; cat' >/dev/null 2>&1 & # ${newTunnel.id}`);
+           await handleCommand(`nohup socat TCP-LISTEN:${port},fork EXEC:/opt/vpp-agent/trap_relay.sh >/dev/null 2>&1 & # ${newTunnel.id}`);
       }
       
       setPendingTunnel(null);
@@ -613,6 +611,25 @@ const ActorDetail: React.FC<ActorDetailProps> = ({ actor, gateway, logs: initial
       await handleCommand(`vpp-agent --set-sentinel ${newState ? 'on' : 'off'}`);
       if (isProduction) {
           setTimeout(() => { getActorCommands(actor.id).then(setCommandHistory); }, 1500);
+      }
+  };
+
+  // --- WIRELESS TOGGLE HANDLERS ---
+  const handleToggleWifi = async () => {
+      if (!actor.hasWifi) return;
+      const newVal = !wifiEnabled;
+      setWifiEnabled(newVal);
+      if (isProduction) {
+          await toggleActorScanning(actor.id, 'WIFI', newVal);
+      }
+  };
+
+  const handleToggleBluetooth = async () => {
+      if (!actor.hasBluetooth) return;
+      const newVal = !btEnabled;
+      setBtEnabled(newVal);
+      if (isProduction) {
+          await toggleActorScanning(actor.id, 'BLUETOOTH', newVal);
       }
   };
 
@@ -980,9 +997,36 @@ const ActorDetail: React.FC<ActorDetailProps> = ({ actor, gateway, logs: initial
                            </div>
                        </div>
                    </div>
+                   
+                   {/* Wireless Automation Card */}
+                   <div className="bg-slate-800 rounded-xl border border-slate-700 p-6 shadow-lg">
+                       <h3 className="text-lg font-bold text-white mb-4 flex items-center"><Radio className="w-5 h-5 mr-2 text-cyan-400" /> Wireless Automation</h3>
+                       <div className="grid grid-cols-2 gap-4">
+                           <div className={`p-4 rounded border flex flex-col items-center justify-center transition-all ${actor.hasWifi ? 'bg-slate-900 border-slate-600' : 'bg-slate-900/50 border-slate-800 opacity-50'}`}>
+                               <Wifi className={`w-6 h-6 mb-2 ${wifiEnabled ? 'text-emerald-400 animate-pulse' : 'text-slate-500'}`} />
+                               <span className="text-xs font-bold text-slate-300 mb-2">Auto WiFi Scan</span>
+                               <label className="relative inline-flex items-center cursor-pointer">
+                                  <input type="checkbox" checked={wifiEnabled} onChange={handleToggleWifi} disabled={!actor.hasWifi} className="sr-only peer" />
+                                  <div className="w-9 h-5 bg-slate-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-emerald-600"></div>
+                               </label>
+                               {!actor.hasWifi && <span className="text-[9px] text-red-400 mt-1">Hardware Missing</span>}
+                           </div>
+                           <div className={`p-4 rounded border flex flex-col items-center justify-center transition-all ${actor.hasBluetooth ? 'bg-slate-900 border-slate-600' : 'bg-slate-900/50 border-slate-800 opacity-50'}`}>
+                               <Bluetooth className={`w-6 h-6 mb-2 ${btEnabled ? 'text-blue-400 animate-pulse' : 'text-slate-500'}`} />
+                               <span className="text-xs font-bold text-slate-300 mb-2">Auto Bluetooth</span>
+                               <label className="relative inline-flex items-center cursor-pointer">
+                                  <input type="checkbox" checked={btEnabled} onChange={handleToggleBluetooth} disabled={!actor.hasBluetooth} className="sr-only peer" />
+                                  <div className="w-9 h-5 bg-slate-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-blue-600"></div>
+                               </label>
+                               {!actor.hasBluetooth && <span className="text-[9px] text-red-400 mt-1">Hardware Missing</span>}
+                           </div>
+                       </div>
+                       <p className="text-[10px] text-slate-500 mt-3 text-center">When enabled, scans run automatically every 2 minutes.</p>
+                   </div>
+
                    <div className="bg-slate-800 rounded-xl border border-slate-700 p-6 shadow-lg flex-1 flex flex-col">
                        <h3 className="text-lg font-bold text-white mb-4 flex items-center"><Activity className="w-5 h-5 mr-2 text-blue-400" /> Recent Activity</h3>
-                       <div className="flex-1 overflow-y-auto max-h-[300px] space-y-2 pr-2 scrollbar-thin scrollbar-thumb-slate-700">
+                       <div className="flex-1 overflow-y-auto max-h-[200px] space-y-2 pr-2 scrollbar-thin scrollbar-thumb-slate-700">
                            {displayLogs.slice(0, 20).map(log => (
                                <div key={log.id} className="text-xs border-b border-slate-700/50 pb-2 mb-2 last:border-0">
                                    <div className="flex justify-between text-slate-500 mb-1"><span>{new Date(log.timestamp).toLocaleTimeString()}</span><span className={log.level === 'CRITICAL' ? 'text-red-500 font-bold' : log.level === 'WARNING' ? 'text-yellow-500' : 'text-blue-400'}>{log.level}</span></div>
