@@ -1,3 +1,4 @@
+
 import express from 'express';
 import { authenticator } from 'otplib';
 import QRCode from 'qrcode';
@@ -372,7 +373,8 @@ router.get('/setup', (req, res) => {
     // The simplified version:
     const script = generateAgentScript(serverUrl, '$1');
     res.setHeader('Content-Type', 'text/plain');
-    res.send(script.trim());
+    // Force LF line endings for bash compatibility
+    res.send(script.replace(/\r\n/g, '\n').trim());
 });
 
 export default router;
