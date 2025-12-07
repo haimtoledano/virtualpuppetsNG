@@ -3,6 +3,8 @@
 
 
 
+
+
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { Actor, LogEntry, ActorStatus, AiAnalysis, ProxyGateway, HoneyFile, ActiveTunnel, DevicePersona, CommandJob, LogLevel, User, UserPreferences, ForensicSnapshot, ForensicProcess, AttackSession } from '../types';
 import { executeRemoteCommand, getAvailableCloudTraps, toggleTunnelMock, AVAILABLE_PERSONAS, generateRandomLog, performForensicScan, getAttackSessions, deleteAttackSession } from '../services/mockService';
@@ -845,7 +847,7 @@ const ActorDetail: React.FC<ActorDetailProps> = ({ actor, gateway, logs: initial
                         <div className="flex flex-wrap gap-4 mt-2 text-sm text-slate-400 font-mono">
                             <span className="flex items-center"><TerminalIcon className="w-3 h-3 mr-1" /> {actor.id}</span>
                             <span className="flex items-center"><Router className="w-3 h-3 mr-1" /> {gateway?.name || 'Direct Uplink'}</span>
-                            <span className="flex items-center"><Cpu className="w-3 h-3 mr-1" /> {actor.osVersion}</span>
+                            <span className="flex items-center"><Cpu className="w-3 h-3 mr-1" /> {actor.osVersion || "Unknown OS"}</span>
                         </div>
                     </div>
                 </div>

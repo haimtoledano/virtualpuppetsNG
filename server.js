@@ -362,6 +362,9 @@ log() { echo "[$(date '+%Y-%m-%d %H:%M:%S')] \$1" >> \$LOGF; }
 
 log "Agent Started. Initializing..."
 
+OS_NAME="Linux"
+if [ -f /etc/os-release ]; then . /etc/os-release; if [ -n "$PRETTY_NAME" ]; then OS_NAME="$PRETTY_NAME"; fi; fi
+
 # vpp-route function stub if needed, though usually just a command wrapper
 vpp-route() {
     log "VPP-Route Command: \$*"
@@ -376,7 +379,7 @@ if ! command -v jq &> /dev/null; then
 fi
 
 while [ -z "\$ACTOR_ID" ] || [ "\$ACTOR_ID" == "null" ]; do
-    RESPONSE=\$(curl -s --connect-timeout 10 "\$SERVER/api/agent/heartbeat?hwid=\$MY_HWID")
+    RESPONSE=\$(curl -s -G --connect-timeout 10 --data-urlencode "hwid=\$MY_HWID" --data-urlencode "os=\$OS_NAME" "\$SERVER/api/agent/heartbeat")
     if echo "\$RESPONSE" | jq empty > /dev/null 2>&1; then
         STATUS=\$(echo "\$RESPONSE" | jq -r '.status')
         if [ "\$STATUS" == "APPROVED" ]; then
@@ -936,14 +939,17 @@ app.delete('/api/gateways/:id', async (req, res) => {
 
 app.get('/api/agent/heartbeat', async (req, res) => {
     if (!dbPool) return res.status(503).json({});
-    const { hwid } = req.query;
+    const { hwid, os } = req.query;
     if (!hwid) return res.status(400).json({});
     
     try {
         const actor = await dbPool.request().input('h', sql.NVarChar, hwid).query("SELECT ActorId, Status FROM Actors WHERE HwId = @h");
         if (actor.recordset.length > 0) {
             const a = actor.recordset[0];
-            await dbPool.request().input('aid', sql.NVarChar, a.ActorId).query("UPDATE Actors SET LastSeen = GETDATE() WHERE ActorId = @aid");
+            await dbPool.request()
+                .input('aid', sql.NVarChar, a.ActorId)
+                .input('os', sql.NVarChar, os || 'Unknown')
+                .query("UPDATE Actors SET LastSeen = GETDATE(), OsVersion = CASE WHEN @os <> 'Unknown' THEN @os ELSE OsVersion END WHERE ActorId = @aid");
             return res.json({ status: 'APPROVED', actorId: a.ActorId });
         }
         
@@ -955,7 +961,8 @@ app.get('/api/agent/heartbeat', async (req, res) => {
                 .input('pid', sql.NVarChar, pid)
                 .input('h', sql.NVarChar, hwid)
                 .input('ip', sql.NVarChar, ip)
-                .query("INSERT INTO PendingActors (Id, HwId, DetectedIp, DetectedAt) VALUES (@pid, @h, @ip, GETDATE())");
+                .input('os', sql.NVarChar, os || 'Unknown')
+                .query("INSERT INTO PendingActors (Id, HwId, DetectedIp, DetectedAt, OsVersion) VALUES (@pid, @h, @ip, GETDATE(), @os)");
         }
         res.json({ status: 'PENDING' });
     } catch(e) { res.status(500).json({}); }
@@ -1117,9 +1124,7 @@ app.put('/api/actors/:id/sentinel', async (req, res) => {
     const { enabled } = req.body;
     try {
         await dbPool.request()
-            .input('id', sql.NVarChar, req.params.id)
-            .input('en', sql.Bit, enabled ? 1 : 0)
-            .query("UPDATE Actors SET TcpSentinelEnabled = @en WHERE ActorId = @id");
+            .input('id', sql.NVarChar, req.params.id).input('en', sql.Bit, enabled ? 1 : 0).query("UPDATE Actors SET TcpSentinelEnabled = @en WHERE ActorId = @id");
         res.json({success: true});
     } catch(e) { res.status(500).json({error: e.message}); }
 });
