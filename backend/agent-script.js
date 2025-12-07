@@ -1,8 +1,11 @@
+export const CURRENT_AGENT_VERSION = "2.3.0";
+
 export const generateAgentScript = (serverUrl, token) => {
   return `#!/bin/bash
 TOKEN="${token}"
 SERVER_URL="${serverUrl}"
 AGENT_DIR="/opt/vpp-agent"
+VERSION="${CURRENT_AGENT_VERSION}"
 
 # Root Check
 if [ "$EUID" -ne 0 ]; then 
@@ -14,7 +17,6 @@ fi
 echo "Checking dependencies..."
 if command -v apt-get &> /dev/null; then 
   export DEBIAN_FRONTEND=noninteractive
-  # Always try to update and install to ensure versions are correct
   if ! command -v jq &> /dev/null || ! command -v socat &> /dev/null; then
       echo "Installing jq and socat..."
       apt-get update -qq && apt-get install -y jq curl socat lsof network-manager bluez -qq
@@ -45,9 +47,10 @@ if command -v hcitool &> /dev/null && hcitool dev | grep -q hci; then HAS_BT=tru
 mkdir -p $AGENT_DIR
 echo "$SERVER_URL" > $AGENT_DIR/.server
 echo "$TOKEN" > $AGENT_DIR/.token
+echo "$VERSION" > $AGENT_DIR/.version
 
 # Notify Server
-curl -s -o /dev/null -H "X-VPP-HWID: $HWID" -H "X-VPP-OS: $OS_NAME" -H "X-VPP-WIFI: $HAS_WIFI" -H "X-VPP-BT: $HAS_BT" "$SERVER_URL/api/enroll/config/$TOKEN"
+curl -s -o /dev/null -H "X-VPP-HWID: $HWID" -H "X-VPP-OS: $OS_NAME" -H "X-VPP-WIFI: $HAS_WIFI" -H "X-VPP-BT: $HAS_BT" -H "X-VPP-VER: $VERSION" "$SERVER_URL/api/enroll/config/$TOKEN"
 
 # Create Trap Relay Script
 cat <<'EOF_RELAY' > $AGENT_DIR/trap_relay.sh
@@ -74,14 +77,11 @@ PEER_IP="\${SOCAT_PEERADDR:-unknown}"
 # Loop to read input lines and forward to server
 while IFS= read -r LINE || [ -n "$LINE" ]; do 
   # Safe JSON construction using jq to handle escaping
-  # Include PEER_IP as attackerIp for topology visualization
   PAYLOAD=$(jq -n --arg sid "$SID" --arg input "$LINE" --arg aid "$ACTOR_ID" --arg ip "$PEER_IP" '{sessionId: $sid, input: $input, actorId: $aid, attackerIp: $ip}')
   
-  # Send to server only if payload is generated
   if [ ! -z "$PAYLOAD" ]; then
       RESP_JSON=$(curl -s -X POST -H "Content-Type: application/json" -d "$PAYLOAD" "$SERVER/api/trap/interact")
       RESP=$(echo "$RESP_JSON" | jq -r .response)
-      
       if [ "$RESP" == "null" ] || [ -z "$RESP" ]; then
           echo -ne "500 Internal Error\r\n"
       else
@@ -133,7 +133,10 @@ elif [[ "$1" == "--set-sentinel" ]]; then
         echo "[VPP] Sentinel Mode DISABLED"
     fi
 elif [[ "$1" == "--update" ]]; then
-    echo "[VPP] Mock Update Triggered."
+    echo "[VPP] Update command received. Re-installing..."
+    TOKEN=$(cat "$AGENT_DIR/.token")
+    curl -sL "$SERVER/setup" | bash -s "$TOKEN"
+    exit 0
 else 
     echo "VPP Agent OK"
 fi
@@ -147,11 +150,13 @@ cat <<'EOF_SRV' > $AGENT_DIR/agent.sh
 export PATH=$PATH:/usr/sbin:/sbin:/usr/bin:/bin:/usr/local/bin
 SERVER=$(cat /opt/vpp-agent/.server)
 AGENT_DIR="/opt/vpp-agent"
+TOKEN=$(cat "$AGENT_DIR/.token")
 
 # Enrollment Loop
 while [ ! -f "$AGENT_DIR/vpp-id" ]; do
     HWID=$(cat /sys/class/net/eth0/address 2>/dev/null || hostname)
-    RESP=$(curl -s -G --data-urlencode "hwid=$HWID" "$SERVER/api/agent/heartbeat")
+    CUR_VER=$(cat "$AGENT_DIR/.version" 2>/dev/null || echo "1.0.0")
+    RESP=$(curl -s -G --data-urlencode "hwid=$HWID" --data-urlencode "version=$CUR_VER" "$SERVER/api/agent/heartbeat")
     STATUS=$(echo "$RESP" | jq -r '.status')
     if [ "$STATUS" == "APPROVED" ]; then 
         echo "$RESP" | jq -r '.actorId' > "$AGENT_DIR/vpp-id"
@@ -160,19 +165,16 @@ while [ ! -f "$AGENT_DIR/vpp-id" ]; do
 done
 
 ACTOR_ID=$(cat "$AGENT_DIR/vpp-id")
+COUNTER=0
 
-# Sentinel Monitor Logic (Background)
-# Monitors logs for inbound connections when in paranoid mode
+# Sentinel Monitor (Background)
 (
     tail -F /var/log/syslog /var/log/kern.log /var/log/messages 2>/dev/null | while read LOGLINE; do
         if [ -f "$AGENT_DIR/.sentinel" ]; then
-            # Look for Connection Attempts (UFW, IPTables logs usually contain SRC= and PROTO=TCP)
             if echo "$LOGLINE" | grep -q "SRC="; then
-                # Extract Source IP (simple grep)
                 SRC_IP=$(echo "$LOGLINE" | grep -oE 'SRC=[0-9.]+' | cut -d= -f2)
                 if [ ! -z "$SRC_IP" ]; then
-                    # Updated payload to include attackerIp explicitly for the Topology screen
-                    PAYLOAD=$(jq -n --arg sid "SENTINEL" --arg input "Inbound TCP SYN Detected" --arg aid "$ACTOR_ID" --arg ip "$SRC_IP" '{sessionId: $sid, input: $input, actorId: $aid, attackerIp: $ip}')
+                    PAYLOAD=$(jq -n --arg sid "SENTINEL" --arg input "SYN_DETECTED_FROM_$SRC_IP" --arg aid "$ACTOR_ID" --arg ip "$SRC_IP" '{sessionId: $sid, input: $input, actorId: $aid, attackerIp: $ip}')
                     curl -s -X POST -H "Content-Type: application/json" -d "$PAYLOAD" "$SERVER/api/trap/interact" >/dev/null
                 fi
             fi
@@ -193,9 +195,10 @@ while true; do
     
     if [ ! -z "$JOB_ID" ]; then
         CMD=$(echo "$JOB_JSON" | jq -r '.[0].command')
-        # Ack start - USE JQ TO PREVENT SYNTAX ERROR
-        jq -n -c --arg jid "$JOB_ID" --arg stat "RUNNING" '{jobId: $jid, status: $stat}' | \
-        curl -s -X POST -H "Content-Type: application/json" -d @- "$SERVER/api/agent/result"
+        
+        # Ack start - FIXED: Use jq for valid JSON to prevent syntax errors
+        ACK_PAYLOAD=$(jq -n -c --arg jid "$JOB_ID" --arg stat "RUNNING" '{jobId: $jid, status: $stat}')
+        curl -s -X POST -H "Content-Type: application/json" -d "$ACK_PAYLOAD" "$SERVER/api/agent/result"
         
         OUTPUT=$(eval "$CMD" 2>&1)
         
@@ -203,6 +206,22 @@ while true; do
         jq -n -c --arg jid "$JOB_ID" --arg out "$OUTPUT" '{jobId: $jid, status: "COMPLETED", output: $out}' | \
         curl -s -X POST -H "Content-Type: application/json" -d @- "$SERVER/api/agent/result"
     fi
+
+    # Auto-Update Check (Every ~60s)
+    if [ $COUNTER -ge 12 ]; then
+        CUR_VER=$(cat "$AGENT_DIR/.version" 2>/dev/null || echo "1.0.0")
+        HB_RESP=$(curl -s -G --data-urlencode "hwid=$HWID" --data-urlencode "version=$CUR_VER" "$SERVER/api/agent/heartbeat")
+        LATEST_VER=$(echo "$HB_RESP" | jq -r '.latestVersion // empty')
+        
+        if [ ! -z "$LATEST_VER" ] && [ "$LATEST_VER" != "$CUR_VER" ]; then
+            echo "[VPP] Update Available: $LATEST_VER. Downloading..."
+            curl -sL "$SERVER/setup" | bash -s "$TOKEN"
+            exit 0
+        fi
+        COUNTER=0
+    fi
+    
+    COUNTER=$((COUNTER+1))
     sleep 5
 done
 EOF_SRV
@@ -229,6 +248,6 @@ systemctl daemon-reload
 systemctl enable vpp-agent
 systemctl restart vpp-agent
 
-echo "VPP Agent Installed Successfully."
+echo "VPP Agent Installed Successfully (v${CURRENT_AGENT_VERSION})."
 `;
 };
