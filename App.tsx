@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect, useCallback, Suspense } from 'react';
 import { generateInitialActors, generateRandomLog, generateGateways } from './services/mockService';
 import { dbQuery, getSystemConfig, getPendingActors, approvePendingActor, rejectPendingActor, getSystemLogs, sendAuditLog, triggerFleetUpdate } from './services/dbService';
@@ -269,7 +268,7 @@ const App: React.FC = () => {
                     {activeTab === 'reports' && <Reports currentUser={currentUser} logs={logs} actors={actors} />}
                     {activeTab === 'gateways' && <GatewayManager gateways={gateways} onRefresh={loadProductionData} domain={systemConfig?.domain || 'vpp.io'} isProduction={isProduction} />}
                     {activeTab === 'wireless' && <WirelessRecon isProduction={isProduction} actors={actors} />}
-                    {activeTab === 'settings' && <Settings isProduction={isProduction} onToggleProduction={toggleProductionMode} currentUser={currentUser} />}
+                    {activeTab === 'settings' && <Settings isProduction={isProduction} onToggleProduction={toggleProductionMode} currentUser={currentUser} onConfigUpdate={loadProductionData} />}
                     {activeTab === 'actors' && (
                         <div className="space-y-6 animate-fade-in pb-10">
                             <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">

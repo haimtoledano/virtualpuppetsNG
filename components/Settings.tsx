@@ -9,9 +9,10 @@ interface SettingsProps {
   isProduction: boolean;
   onToggleProduction: () => void;
   currentUser: User | null;
+  onConfigUpdate?: () => void;
 }
 
-const Settings: React.FC<SettingsProps> = ({ isProduction, onToggleProduction, currentUser }) => {
+const Settings: React.FC<SettingsProps> = ({ isProduction, onToggleProduction, currentUser, onConfigUpdate }) => {
   const [activeTab, setActiveTab] = useState<'GENERAL' | 'DATABASE' | 'USERS' | 'AI' | 'AUDIT' | 'CORE'>('GENERAL');
   
   const [users, setUsers] = useState<User[]>([]);
@@ -140,6 +141,7 @@ const Settings: React.FC<SettingsProps> = ({ isProduction, onToggleProduction, c
       
       // Update local state so subsequent actions use the fresh config
       setSysConfig(updatedConfig);
+      onConfigUpdate?.();
       
       alert("AI Configuration Saved. You can now use the Test Connection button.");
   };
@@ -169,6 +171,7 @@ const Settings: React.FC<SettingsProps> = ({ isProduction, onToggleProduction, c
           body: JSON.stringify(updatedConfig)
       });
       setSysConfig(updatedConfig);
+      onConfigUpdate?.();
       alert("Syslog Configuration Saved. Events will be forwarded.");
   };
 
@@ -186,7 +189,8 @@ const Settings: React.FC<SettingsProps> = ({ isProduction, onToggleProduction, c
 
           await updateSystemConfig(updated);
           setSysConfig(updated);
-          alert("Organization Details Updated. Refresh to see branding changes.");
+          onConfigUpdate?.();
+          alert("Organization Details Updated Successfully.");
       } catch (e) {
           alert("Failed to update organization details.");
       }

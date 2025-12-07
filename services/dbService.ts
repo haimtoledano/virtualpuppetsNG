@@ -1,4 +1,3 @@
-
 import { Actor, ProxyGateway, User, DbConfig, LogEntry, SystemConfig, Report, CommandJob, PendingActor, DevicePersona, WifiNetwork, BluetoothDevice, AttackSession } from '../types';
 
 const API_BASE = '/api';
@@ -40,7 +39,7 @@ export const updateSystemConfig = async (sysConfig: SystemConfig) => {
 
 export const getSystemConfig = async (): Promise<SystemConfig | null> => {
     try {
-        const res = await fetch(`${API_BASE}/config/system`);
+        const res = await fetch(`${API_BASE}/config/system?_t=${Date.now()}`);
         if (res.status !== 200) return null;
         return await res.json();
     } catch { return null; }

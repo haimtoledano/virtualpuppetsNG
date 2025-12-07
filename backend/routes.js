@@ -20,6 +20,7 @@ router.get('/health', (req, res) => {
 });
 
 router.get('/config/system', async (req, res) => {
+    res.set('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
     if (!dbPool) return res.status(503).json({});
     try {
         const result = await dbPool.request().query("SELECT * FROM SystemConfig");
