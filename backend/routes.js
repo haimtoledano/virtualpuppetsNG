@@ -203,7 +203,7 @@ router.get('/actors', async (req, res) => {
             hasWifi: row.HasWifi, hasBluetooth: row.HasBluetooth, wifiScanningEnabled: row.WifiScanningEnabled, bluetoothScanningEnabled: row.BluetoothScanningEnabled, 
             cpuLoad: row.CpuLoad, memoryUsage: row.MemoryUsage, temperature: row.Temperature, tcpSentinelEnabled: row.TcpSentinelEnabled, 
             activeTunnels: row.TunnelsJson ? JSON.parse(row.TunnelsJson) : [], deployedHoneyFiles: row.HoneyFilesJson ? JSON.parse(row.HoneyFilesJson) : [], persona: row.Persona ? JSON.parse(row.Persona) : undefined,
-            protocolVersion: row.AgentVersion || 'v1.0' // Map AgentVersion to frontend protocolVersion
+            protocolVersion: row.AgentVersion || 'v1.0'
         }))); 
     } catch (e) { res.status(500).json({error: e.message}); } 
 });
@@ -355,14 +355,18 @@ router.post('/enroll/approve', async (req, res) => {
             .input('name', sql.NVarChar, name)
             .input('ip', sql.NVarChar, pending.DetectedIp)
             .input('os', sql.NVarChar, pending.OsVersion || 'Linux')
+            .input('ver', sql.NVarChar, CURRENT_AGENT_VERSION)
             .query(`
                 INSERT INTO Actors (ActorId, HwId, GatewayId, Name, Status, LocalIp, LastSeen, OsVersion, AgentVersion)
-                VALUES (@aid, @hwid, @gw, @name, 'ONLINE', GETDATE(), @ip, @os, '2.3.0')
+                VALUES (@aid, @hwid, @gw, @name, 'ONLINE', GETDATE(), @ip, @os, @ver)
             `);
 
         await dbPool.request().input('pid', sql.NVarChar, pendingId).query("DELETE FROM PendingActors WHERE Id = @pid");
         res.json({success: true});
-    } catch(e) { res.json({success: false}); }
+    } catch(e) { 
+        console.error("Enrollment Approve Error:", e);
+        res.json({success: false, error: e.message}); 
+    }
 });
 
 router.delete('/enroll/pending/:id', async (req, res) => {
@@ -411,6 +415,19 @@ router.get('/reports', async (req, res) => {
         }));
         res.json(reports);
     } catch(e) { res.json([]); }
+});
+
+// NEW: Missing route fixed
+router.get('/reports/filters', async (req, res) => {
+    if (!dbPool) return res.json({attackers: [], protocols: []});
+    try {
+        const attackersRes = await dbPool.request().query("SELECT DISTINCT SourceIp FROM Logs WHERE SourceIp IS NOT NULL");
+        const protocolsRes = await dbPool.request().query("SELECT DISTINCT Process FROM Logs");
+        res.json({
+            attackers: attackersRes.recordset.map(r => r.SourceIp),
+            protocols: protocolsRes.recordset.map(r => r.Process)
+        });
+    } catch(e) { res.json({attackers: [], protocols: []}); }
 });
 
 router.post('/reports/generate', async (req, res) => {

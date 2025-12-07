@@ -168,8 +168,12 @@ const App: React.FC = () => {
            setPendingActors(prev => prev.filter(p => p.id !== pendingId));
            if (activeTab !== 'dashboard') setActiveTab('actors');
       } else {
-           await approvePendingActor(pendingId, proxyId, name);
-           loadProductionData();
+           const success = await approvePendingActor(pendingId, proxyId, name);
+           if (success) {
+               loadProductionData();
+           } else {
+               alert("Enrollment Failed. Please check the server console logs for database errors.");
+           }
       }
   };
 
