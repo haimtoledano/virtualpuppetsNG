@@ -36,11 +36,26 @@ router.post('/config/system', async (req, res) => {
     try {
         for (const [key, value] of Object.entries(req.body)) {
             const valStr = typeof value === 'object' ? JSON.stringify(value) : String(value);
-            await dbPool.request().input('k', sql.NVarChar, key).input('v', sql.NVarChar, valStr).query(`MERGE SystemConfig AS target USING (SELECT @k, @v) AS source (Key, Val) ON (target.ConfigKey = source.Key) WHEN MATCHED THEN UPDATE SET ConfigValue = source.Val WHEN NOT MATCHED THEN INSERT (ConfigKey, ConfigValue) VALUES (source.Key, source.Val);`);
+            // Fixed MERGE statement: "Key" is a reserved word, switched to explicit column selection and safer aliases
+            await dbPool.request()
+                .input('k', sql.NVarChar, key)
+                .input('v', sql.NVarChar, valStr)
+                .query(`
+                    MERGE SystemConfig AS target 
+                    USING (SELECT @k AS ConfigKey, @v AS ConfigValue) AS source 
+                    ON (target.ConfigKey = source.ConfigKey) 
+                    WHEN MATCHED THEN 
+                        UPDATE SET ConfigValue = source.ConfigValue 
+                    WHEN NOT MATCHED THEN 
+                        INSERT (ConfigKey, ConfigValue) VALUES (source.ConfigKey, source.ConfigValue);
+                `);
         }
         await refreshSyslogConfig();
         res.json({success: true});
-    } catch(e) { res.json({success: false}); }
+    } catch(e) { 
+        console.error("Config Save Error:", e);
+        res.json({success: false, error: e.message}); 
+    }
 });
 
 router.post('/setup/db', async (req, res) => { 
