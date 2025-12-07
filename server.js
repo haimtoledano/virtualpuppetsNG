@@ -37,6 +37,7 @@ if (fs.existsSync(distPath)) {
 app.use((err, req, res, next) => {
     if (err instanceof SyntaxError && 'body' in err) {
         console.error('❌ JSON Syntax Error');
+        console.error('Raw Body:', req.rawBody ? req.rawBody.toString().substring(0, 100) : 'Empty');
         return res.status(400).json({ success: false, error: 'Invalid JSON payload' });
     }
     next();

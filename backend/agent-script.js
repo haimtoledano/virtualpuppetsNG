@@ -10,13 +10,21 @@ if [ "$EUID" -ne 0 ]; then
   exit 1
 fi
 
-# Dependencies
+# Dependencies Installation
+echo "Checking dependencies..."
 if command -v apt-get &> /dev/null; then 
   export DEBIAN_FRONTEND=noninteractive
-  if ! command -v jq &> /dev/null || ! command -v curl &> /dev/null || ! command -v socat &> /dev/null; then 
-    echo "Installing dependencies..."
-    apt-get update -qq && apt-get install -y jq curl socat lsof network-manager bluez -qq
+  # Always try to update and install to ensure versions are correct
+  if ! command -v jq &> /dev/null || ! command -v socat &> /dev/null; then
+      echo "Installing jq and socat..."
+      apt-get update -qq && apt-get install -y jq curl socat lsof network-manager bluez -qq
   fi
+fi
+
+# Fallback: Check if jq actually exists now
+if ! command -v jq &> /dev/null; then
+    echo "❌ Error: 'jq' could not be installed. Agent requires jq to parse JSON."
+    exit 1
 fi
 
 # HWID Detection
@@ -46,18 +54,36 @@ cat <<'EOF_RELAY' > $AGENT_DIR/trap_relay.sh
 #!/bin/bash
 SERVER=$(cat /opt/vpp-agent/.server)
 AGENT_DIR="/opt/vpp-agent"
-# Read Actor ID if available to attribute threats
 ACTOR_ID=$(cat "$AGENT_DIR/vpp-id" 2>/dev/null || echo "unknown")
 
-SID=$(curl -s -X POST "$SERVER/api/trap/init" | jq -r .sessionId)
-curl -s -X POST "$SERVER/api/trap/init" | jq -r .banner
+# Init Session
+SID_JSON=$(curl -s -X POST "$SERVER/api/trap/init")
+SID=$(echo "$SID_JSON" | jq -r .sessionId)
+BANNER=$(echo "$SID_JSON" | jq -r .banner)
+
+if [ "$SID" == "null" ] || [ -z "$SID" ]; then
+    SID="offline-$(date +%s)"
+    BANNER="220 Service Ready"
+fi
+
+echo -ne "$BANNER"
 
 # Loop to read input lines and forward to server
-while IFS= read -r LINE; do 
-  # Safe JSON construction with Actor ID
+while IFS= read -r LINE || [ -n "$LINE" ]; do 
+  # Safe JSON construction using jq to handle escaping
   PAYLOAD=$(jq -n --arg sid "$SID" --arg input "$LINE" --arg aid "$ACTOR_ID" '{sessionId: $sid, input: $input, actorId: $aid}')
-  RESP=$(curl -s -X POST -H "Content-Type: application/json" -d "$PAYLOAD" "$SERVER/api/trap/interact" | jq -r .response)
-  echo -ne "$RESP"
+  
+  # Send to server only if payload is generated
+  if [ ! -z "$PAYLOAD" ]; then
+      RESP_JSON=$(curl -s -X POST -H "Content-Type: application/json" -d "$PAYLOAD" "$SERVER/api/trap/interact")
+      RESP=$(echo "$RESP_JSON" | jq -r .response)
+      
+      if [ "$RESP" == "null" ] || [ -z "$RESP" ]; then
+          echo -ne "500 Internal Error\r\n"
+      else
+          echo -ne "$RESP"
+      fi
+  fi
 done
 EOF_RELAY
 
@@ -94,6 +120,16 @@ elif [[ "$1" == "--forensic" ]]; then
     if [ -f /var/log/auth.log ]; then tail -n 20 /var/log/auth.log; fi
     echo "---OPENFILES---"
     lsof -i -P -n 2>/dev/null | head -50
+elif [[ "$1" == "--set-sentinel" ]]; then
+    if [ "$2" == "on" ]; then
+        touch "$AGENT_DIR/.sentinel"
+        echo "[VPP] Sentinel Mode ENABLED"
+    else
+        rm -f "$AGENT_DIR/.sentinel"
+        echo "[VPP] Sentinel Mode DISABLED"
+    fi
+elif [[ "$1" == "--update" ]]; then
+    echo "[VPP] Mock Update Triggered."
 else 
     echo "VPP Agent OK"
 fi
@@ -121,6 +157,24 @@ done
 
 ACTOR_ID=$(cat "$AGENT_DIR/vpp-id")
 
+# Sentinel Monitor Logic (Background)
+# Monitors logs for inbound connections when in paranoid mode
+(
+    tail -F /var/log/syslog /var/log/kern.log /var/log/messages 2>/dev/null | while read LOGLINE; do
+        if [ -f "$AGENT_DIR/.sentinel" ]; then
+            # Look for Connection Attempts (UFW, IPTables logs usually contain SRC= and PROTO=TCP)
+            if echo "$LOGLINE" | grep -q "SRC="; then
+                # Extract Source IP (simple grep)
+                SRC_IP=$(echo "$LOGLINE" | grep -oE 'SRC=[0-9.]+' | cut -d= -f2)
+                if [ ! -z "$SRC_IP" ]; then
+                    PAYLOAD=$(jq -n --arg sid "SENTINEL" --arg input "SYN_DETECTED_FROM_$SRC_IP" --arg aid "$ACTOR_ID" '{sessionId: $sid, input: $input, actorId: $aid}')
+                    curl -s -X POST -H "Content-Type: application/json" -d "$PAYLOAD" "$SERVER/api/trap/interact" >/dev/null
+                fi
+            fi
+        fi
+    done
+) &
+
 # Main Loop
 while true; do
     CPU=$(top -bn1 | grep "Cpu(s)" | awk '{print $2}' | cut -d. -f1)
@@ -134,10 +188,12 @@ while true; do
     
     if [ ! -z "$JOB_ID" ]; then
         CMD=$(echo "$JOB_JSON" | jq -r '.[0].command')
+        # Ack start
         curl -s -X POST -H "Content-Type: application/json" -d "{\"jobId\":\"$JOB_ID\",\"status\":\"RUNNING\"}" "$SERVER/api/agent/result"
         
         OUTPUT=$(eval "$CMD" 2>&1)
         
+        # Send result
         jq -n -c --arg jid "$JOB_ID" --arg out "$OUTPUT" '{jobId: $jid, status: "COMPLETED", output: $out}' | \
         curl -s -X POST -H "Content-Type: application/json" -d @- "$SERVER/api/agent/result"
     fi
