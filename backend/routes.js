@@ -37,18 +37,22 @@ router.post('/config/system', async (req, res) => {
         for (const [key, value] of Object.entries(req.body)) {
             const valStr = typeof value === 'object' ? JSON.stringify(value) : String(value);
             
-            await dbPool.request()
+            // Explicit UPSERT to avoid MERGE issues
+            const countRes = await dbPool.request()
                 .input('k', sql.NVarChar, key)
-                .input('v', sql.NVarChar, valStr)
-                .query(`
-                    MERGE SystemConfig AS target 
-                    USING (VALUES (@k, @v)) AS source (ConfigKey, ConfigValue) 
-                    ON target.ConfigKey = source.ConfigKey 
-                    WHEN MATCHED THEN 
-                        UPDATE SET ConfigValue = source.ConfigValue 
-                    WHEN NOT MATCHED THEN 
-                        INSERT (ConfigKey, ConfigValue) VALUES (source.ConfigKey, source.ConfigValue);
-                `);
+                .query("SELECT COUNT(*) as count FROM SystemConfig WHERE ConfigKey = @k");
+            
+            if (countRes.recordset[0].count > 0) {
+                 await dbPool.request()
+                    .input('k', sql.NVarChar, key)
+                    .input('v', sql.NVarChar, valStr)
+                    .query("UPDATE SystemConfig SET ConfigValue = @v WHERE ConfigKey = @k");
+            } else {
+                 await dbPool.request()
+                    .input('k', sql.NVarChar, key)
+                    .input('v', sql.NVarChar, valStr)
+                    .query("INSERT INTO SystemConfig (ConfigKey, ConfigValue) VALUES (@k, @v)");
+            }
         }
         await refreshSyslogConfig();
         res.json({success: true});

@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect } from 'react';
 import { User, DbConfig, UserRole, SystemConfig, AiConfig, AiProvider, SyslogConfig } from '../types';
 import { dbQuery, getSystemConfig, updateSystemConfig, connectToDatabase } from '../services/dbService';
@@ -57,19 +56,19 @@ const Settings: React.FC<SettingsProps> = ({ isProduction, onToggleProduction, c
                 const cfg = await getSystemConfig();
                 if (cfg) {
                     setSysConfig(cfg);
-                    if (activeTab === 'AI' && cfg.aiConfig) {
+                    // Hydrate all forms to prevent saving empty defaults
+                    if (cfg.aiConfig) {
                         setAiForm(cfg.aiConfig);
                     }
-                    if (activeTab === 'AUDIT' && cfg.syslogConfig) {
+                    if (cfg.syslogConfig) {
                         setSyslogForm(cfg.syslogConfig);
                     }
-                    if (activeTab === 'CORE') {
-                        setOrgForm({
-                            companyName: cfg.companyName,
-                            domain: cfg.domain,
-                            logoUrl: cfg.logoUrl || ''
-                        });
-                    }
+                    // Hydrate Org Form
+                    setOrgForm({
+                        companyName: cfg.companyName || '',
+                        domain: cfg.domain || '',
+                        logoUrl: cfg.logoUrl || ''
+                    });
                 }
             }
         }
@@ -176,14 +175,13 @@ const Settings: React.FC<SettingsProps> = ({ isProduction, onToggleProduction, c
   const handleSaveOrgConfig = async () => {
       setIsSavingCore(true);
       try {
-          const currentAiConfig = sysConfig?.aiConfig;
           const updated: SystemConfig = {
               companyName: orgForm.companyName,
               domain: orgForm.domain,
               logoUrl: orgForm.logoUrl,
               setupCompletedAt: new Date().toISOString(),
-              aiConfig: currentAiConfig,
-              syslogConfig: syslogForm
+              aiConfig: sysConfig?.aiConfig || aiForm,
+              syslogConfig: sysConfig?.syslogConfig || syslogForm
           };
 
           await updateSystemConfig(updated);
@@ -632,7 +630,7 @@ const Settings: React.FC<SettingsProps> = ({ isProduction, onToggleProduction, c
             </div>
         )}
 
-        {/* Core & Branding Tab (Same as before) */}
+        {/* Core & Branding Tab */}
         {activeTab === 'CORE' && isSuperAdmin && (
              <div className="space-y-6">
                 <div className="bg-slate-800 rounded-xl border border-slate-700 p-6 shadow-lg">
