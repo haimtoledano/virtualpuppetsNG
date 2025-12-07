@@ -64,11 +64,11 @@ const Settings: React.FC<SettingsProps> = ({ isProduction, onToggleProduction, c
                     if (cfg.syslogConfig) {
                         setSyslogForm(cfg.syslogConfig);
                     }
-                    // Hydrate Org Form
+                    // Hydrate Org Form with robust fallbacks for casing
                     setOrgForm({
-                        companyName: cfg.companyName || '',
-                        domain: cfg.domain || '',
-                        logoUrl: cfg.logoUrl || ''
+                        companyName: cfg.companyName || (cfg as any).CompanyName || '',
+                        domain: cfg.domain || (cfg as any).Domain || '',
+                        logoUrl: cfg.logoUrl || (cfg as any).LogoUrl || ''
                     });
                 }
             }

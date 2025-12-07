@@ -30,7 +30,18 @@ router.get('/config/system', async (req, res) => {
         const result = await dbPool.request().query("SELECT * FROM SystemConfig");
         const config = {};
         result.recordset.forEach(row => {
-            try { config[row.ConfigKey] = JSON.parse(row.ConfigValue); } catch { config[row.ConfigKey] = row.ConfigValue; }
+            let key = row.ConfigKey;
+            const lowerKey = key.toLowerCase();
+            
+            // Robust Normalization: Map known DB keys to Frontend camelCase
+            if (lowerKey === 'companyname') key = 'companyName';
+            else if (lowerKey === 'domain') key = 'domain';
+            else if (lowerKey === 'logourl') key = 'logoUrl';
+            else if (lowerKey === 'setupcompletedat') key = 'setupCompletedAt';
+            else if (lowerKey === 'aiconfig') key = 'aiConfig';
+            else if (lowerKey === 'syslogconfig') key = 'syslogConfig';
+            
+            try { config[key] = JSON.parse(row.ConfigValue); } catch { config[key] = row.ConfigValue; }
         });
         console.log(`[API] GET /config/system - Returning config:`, JSON.stringify(config));
         res.json(config);

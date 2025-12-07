@@ -334,7 +334,7 @@ const App: React.FC = () => {
       <aside className="w-20 md:w-64 bg-slate-900 border-r border-slate-700 flex flex-col hidden md:flex">
         <div className="p-6 flex items-center justify-center md:justify-start border-b border-slate-800">
             <span className="text-lg font-bold tracking-wider hidden md:block truncate uppercase">
-                {systemConfig?.companyName || 'VIRTUAL PUPPETS'}
+                {systemConfig?.companyName || (systemConfig as any)?.CompanyName || 'VIRTUAL PUPPETS'}
             </span>
         </div>
         <nav className="flex-1 p-4 space-y-2">
