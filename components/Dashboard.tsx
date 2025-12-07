@@ -1,10 +1,7 @@
-
-
-
 import React, { useMemo } from 'react';
 import { Actor, ActorStatus, LogEntry, LogLevel, ProxyGateway } from '../types';
-import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid, LineChart, Line } from 'recharts';
-import { ShieldAlert, Server, Activity, Terminal as TerminalIcon, AlertTriangle, Network, Router, Cpu, Info, Globe, Skull, Cloud, Zap } from 'lucide-react';
+import { XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid, LineChart, Line } from 'recharts';
+import { ShieldAlert, Server, Activity, AlertTriangle, Network, Router, Globe, Skull, Cloud, Zap } from 'lucide-react';
 import Terminal from './Terminal';
 
 interface DashboardProps {

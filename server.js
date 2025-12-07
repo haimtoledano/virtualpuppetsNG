@@ -246,6 +246,127 @@ app.post('/api/config/system', async (req, res) => {
     } catch (e) { res.status(500).json({ success: false, error: e.message }); }
 });
 
+// --- AUTHENTICATION ROUTES ---
+
+app.post('/api/login', async (req, res) => {
+    if (!dbPool) return res.status(503).json({ success: false, error: 'Database not connected' });
+    const { username, password } = req.body;
+    // Simple hash matching logic based on client-side authService
+    // In real app, use bcrypt. Here we match the "btoa_hash_" prefix logic
+    const passwordHash = `btoa_hash_${password}`;
+
+    try {
+        const result = await dbPool.request()
+            .input('u', sql.NVarChar, username)
+            .query("SELECT * FROM Users WHERE username = @u");
+        
+        const user = result.recordset[0];
+        if (!user) {
+            return res.json({ success: false, error: 'User not found' });
+        }
+
+        if (user.passwordHash !== passwordHash) {
+             return res.json({ success: false, error: 'Invalid password' });
+        }
+
+        // Update last login
+        await dbPool.request().input('id', user.id).input('now', new Date()).query("UPDATE Users SET lastLogin = @now WHERE id = @id");
+
+        // Parse preferences
+        if(user.preferences && typeof user.preferences === 'string') {
+             try { user.preferences = JSON.parse(user.preferences); } catch(e) {}
+        }
+
+        res.json({ success: true, user });
+    } catch (e) {
+        res.status(500).json({ success: false, error: e.message });
+    }
+});
+
+app.post('/api/mfa/setup', async (req, res) => {
+    const { userId } = req.body;
+    const secret = authenticator.generateSecret();
+    const otpauth = authenticator.keyuri(userId, 'VirtualPuppets', secret);
+    const qrCode = await QRCode.toDataURL(otpauth);
+    res.json({ secret, qrCode });
+});
+
+app.post('/api/mfa/verify', async (req, res) => {
+     if (!dbPool) return res.status(503);
+     const { userId, token } = req.body;
+     try {
+         const result = await dbPool.request().input('id', userId).query("SELECT mfaSecret FROM Users WHERE id = @id");
+         const secret = result.recordset[0]?.mfaSecret;
+         if(!secret) return res.json({ success: false }); 
+         
+         const isValid = authenticator.check(token, secret);
+         res.json({ success: isValid });
+     } catch(e) { res.json({ success: false }); }
+});
+
+app.post('/api/mfa/confirm', async (req, res) => {
+    if (!dbPool) return res.status(503);
+    const { userId, secret, token } = req.body;
+    
+    const isValid = authenticator.check(token, secret);
+    if(isValid) {
+        await dbPool.request()
+            .input('id', userId)
+            .input('sec', secret)
+            .query("UPDATE Users SET mfaEnabled = 1, mfaSecret = @sec WHERE id = @id");
+        res.json({ success: true });
+    } else {
+        res.json({ success: false });
+    }
+});
+
+// --- USER MANAGEMENT ROUTES ---
+
+app.post('/api/users', async (req, res) => {
+     if (!dbPool) return res.status(503);
+     const u = req.body;
+     await dbPool.request()
+        .input('id', u.id)
+        .input('name', u.username)
+        .input('hash', u.passwordHash)
+        .input('role', u.role)
+        .query("INSERT INTO Users (id, username, passwordHash, role, mfaEnabled) VALUES (@id, @name, @hash, @role, 0)");
+     res.json({ success: true });
+});
+
+app.put('/api/users/:id', async (req, res) => {
+     if (!dbPool) return res.status(503);
+     const u = req.body;
+     await dbPool.request()
+        .input('id', req.params.id)
+        .input('role', u.role)
+        .input('hash', u.passwordHash)
+        .query("UPDATE Users SET role = @role, passwordHash = @hash WHERE id = @id");
+     res.json({ success: true });
+});
+
+app.put('/api/users/:id/preferences', async (req, res) => {
+    if (!dbPool) return res.status(503);
+    const prefs = JSON.stringify(req.body);
+    await dbPool.request()
+        .input('id', req.params.id)
+        .input('p', prefs)
+        .query("UPDATE Users SET preferences = @p WHERE id = @id");
+    res.json({ success: true });
+});
+
+app.delete('/api/users/:id', async (req, res) => {
+     if (!dbPool) return res.status(503);
+     await dbPool.request().input('id', req.params.id).query("DELETE FROM Users WHERE id = @id");
+     res.json({ success: true });
+});
+
+app.post('/api/users/:id/reset-mfa', async (req, res) => {
+     if (!dbPool) return res.status(503);
+     await dbPool.request().input('id', req.params.id).query("UPDATE Users SET mfaEnabled = 0, mfaSecret = NULL WHERE id = @id");
+     res.json({ success: true });
+});
+
 // Generic Table Access
 const getTableData = async (table, res) => {
     if (!dbPool) return res.json([]);
@@ -401,6 +522,79 @@ app.put('/api/actors/:id/persona', async (req, res) => {
 app.put('/api/actors/:id/acknowledge', async (req, res) => {
     if (!dbPool) return res.status(503);
     await dbPool.request().input('id', sql.NVarChar, req.params.id).query("UPDATE Actors SET status = 'ONLINE' WHERE id = @id");
+    res.json({ success: true });
+});
+
+// --- NEW: Reports API ---
+app.get('/api/reports', async (req, res) => {
+    if (!dbPool) return res.json([]);
+    try {
+        const result = await dbPool.request().query("SELECT * FROM Reports ORDER BY createdAt DESC");
+        const reports = result.recordset.map(r => ({ ...r, content: JSON.parse(r.content || '{}') }));
+        res.json(reports);
+    } catch(e) { res.json([]); }
+});
+
+app.post('/api/reports/generate', async (req, res) => {
+    if (!dbPool) return res.status(503);
+    const { type, generatedBy, customBody, snapshotData, incidentFilters, incidentDetails } = req.body;
+    
+    // Build Report Content
+    const content = {
+        summaryText: customBody || 'Auto-Generated Report',
+        snapshotData,
+        incidentFilters,
+        incidentDetails,
+        totalEvents: 0, // In real app, query these
+        compromisedNodes: 0,
+        activeNodes: 0,
+        customBody
+    };
+
+    if (type === 'SECURITY_AUDIT') {
+        // Fetch real stats
+        try {
+            const stats = await dbPool.request().query(`
+                SELECT 
+                    (SELECT COUNT(*) FROM SystemLogs) as totalEvents,
+                    (SELECT COUNT(*) FROM Actors WHERE status = 'COMPROMISED') as compromisedNodes,
+                    (SELECT COUNT(*) FROM Actors WHERE status = 'ONLINE') as activeNodes
+            `);
+            const s = stats.recordset[0];
+            content.totalEvents = s.totalEvents;
+            content.compromisedNodes = s.compromisedNodes;
+            content.activeNodes = s.activeNodes;
+            
+            // Top Attackers
+            const attackers = await dbPool.request().query(`
+                SELECT TOP 5 sourceIp as ip, COUNT(*) as count 
+                FROM SystemLogs 
+                WHERE sourceIp IS NOT NULL 
+                GROUP BY sourceIp 
+                ORDER BY count DESC
+            `);
+            content.topAttackers = attackers.recordset;
+        } catch(e) {}
+    }
+
+    const id = `rep-${Math.random().toString(36).substr(2,6)}`;
+    const title = type === 'CUSTOM' ? 'Analyst Note' : type === 'AI_INSIGHT' ? (incidentDetails?.title || 'AI Threat Analysis') : 'System Security Report';
+
+    await dbPool.request()
+        .input('id', id)
+        .input('title', title)
+        .input('gen', generatedBy)
+        .input('type', type)
+        .input('content', JSON.stringify(content))
+        .input('now', new Date())
+        .query("INSERT INTO Reports (id, title, generatedBy, type, content, createdAt, status, dateRange) VALUES (@id, @title, @gen, @type, @content, @now, 'READY', 'LAST_24H')");
+    
+    res.json({ success: true, id });
+});
+
+app.delete('/api/reports/:id', async (req, res) => {
+    if (!dbPool) return res.status(503);
+    await dbPool.request().input('id', req.params.id).query("DELETE FROM Reports WHERE id = @id");
     res.json({ success: true });
 });
 
