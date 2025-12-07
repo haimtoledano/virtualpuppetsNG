@@ -32,18 +32,18 @@ router.get('/config/system', async (req, res) => {
 });
 
 router.post('/config/system', async (req, res) => {
-    if (!dbPool) return res.json({success: false});
+    if (!dbPool) return res.json({success: false, error: "Database not connected"});
     try {
         for (const [key, value] of Object.entries(req.body)) {
             const valStr = typeof value === 'object' ? JSON.stringify(value) : String(value);
-            // Fixed MERGE statement: "Key" is a reserved word, switched to explicit column selection and safer aliases
+            
             await dbPool.request()
                 .input('k', sql.NVarChar, key)
                 .input('v', sql.NVarChar, valStr)
                 .query(`
                     MERGE SystemConfig AS target 
-                    USING (SELECT @k AS ConfigKey, @v AS ConfigValue) AS source 
-                    ON (target.ConfigKey = source.ConfigKey) 
+                    USING (VALUES (@k, @v)) AS source (ConfigKey, ConfigValue) 
+                    ON target.ConfigKey = source.ConfigKey 
                     WHEN MATCHED THEN 
                         UPDATE SET ConfigValue = source.ConfigValue 
                     WHEN NOT MATCHED THEN 
