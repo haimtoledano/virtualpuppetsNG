@@ -1,3 +1,10 @@
+
+
+
+
+
+
+
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { Actor, LogEntry, ActorStatus, AiAnalysis, ProxyGateway, HoneyFile, ActiveTunnel, DevicePersona, CommandJob, LogLevel, User, UserPreferences, ForensicSnapshot, ForensicProcess, AttackSession } from '../types';
 import { executeRemoteCommand, getAvailableCloudTraps, toggleTunnelMock, AVAILABLE_PERSONAS, generateRandomLog, performForensicScan, getAttackSessions, deleteAttackSession } from '../services/mockService';
@@ -11,8 +18,8 @@ interface ActorDetailProps {
   gateway?: ProxyGateway;
   logs: LogEntry[];
   onBack: () => void;
-  isProduction: boolean;
-  currentUser: User | null;
+  isProduction?: boolean;
+  currentUser?: User | null;
   onUpdatePreferences?: (prefs: UserPreferences) => void;
   autoRunForensic?: boolean;
 }
@@ -30,22 +37,60 @@ const DEFAULT_TRAP_PORTS: Record<string, number> = {
     'trap-postgres': 5432
 };
 
+const SERVER_TRAP_PORTS: Record<string, number> = {
+    'trap-ftp': 10021,
+    'trap-telnet': 10023,
+    'trap-redis': 10079
+};
+
+// --- GAUGE COMPONENT ---
 const Gauge = ({ value, label, type, unit = '%', icon: Icon }: { value: number, label: string, type: 'CPU' | 'RAM' | 'TEMP', unit?: string, icon?: any }) => {
     const radius = 24; 
     const circumference = 2 * Math.PI * radius;
     const progress = Math.min(Math.max(0, value), 100);
     const strokeDashoffset = circumference - (progress / 100) * circumference;
+    
     const gradientId = `grad-${type}`;
-    let colors = ['#3b82f6', '#60a5fa'];
-    if (type === 'CPU') { if (value < 50) colors = ['#10b981', '#34d399']; else if (value < 80) colors = ['#f59e0b', '#fbbf24']; else colors = ['#ef4444', '#f87171']; } else if (type === 'TEMP') { if (value < 60) colors = ['#10b981', '#34d399']; else if (value < 80) colors = ['#f97316', '#fb923c']; else colors = ['#ef4444', '#b91c1c']; }
+    let colors = ['#3b82f6', '#60a5fa']; // Default Blue (RAM)
+    
+    if (type === 'CPU') {
+         if (value < 50) colors = ['#10b981', '#34d399']; // Green
+         else if (value < 80) colors = ['#f59e0b', '#fbbf24']; // Yellow
+         else colors = ['#ef4444', '#f87171']; // Red
+    } else if (type === 'TEMP') {
+         if (value < 60) colors = ['#10b981', '#34d399']; // Green
+         else if (value < 80) colors = ['#f97316', '#fb923c']; // Orange
+         else colors = ['#ef4444', '#b91c1c']; // Red
+    }
+    
     return (
         <div className="flex flex-col items-center justify-center w-full">
             <div className="relative w-16 h-16 group">
-                 {(type !== 'RAM' && value > 80) && <div className="absolute inset-0 bg-red-500/20 blur-xl rounded-full animate-pulse"></div>}
+                 {/* Glow Effect for High values */}
+                 {(type !== 'RAM' && value > 80) && (
+                     <div className="absolute inset-0 bg-red-500/20 blur-xl rounded-full animate-pulse"></div>
+                 )}
+                 
                  <svg className="w-full h-full transform -rotate-90 relative z-10">
-                    <defs><linearGradient id={gradientId} x1="0%" y1="0%" x2="100%" y2="100%"><stop offset="0%" stopColor={colors[0]} /><stop offset="100%" stopColor={colors[1]} /></linearGradient></defs>
+                    <defs>
+                        <linearGradient id={gradientId} x1="0%" y1="0%" x2="100%" y2="100%">
+                            <stop offset="0%" stopColor={colors[0]} />
+                            <stop offset="100%" stopColor={colors[1]} />
+                        </linearGradient>
+                    </defs>
+                    {/* Track */}
                     <circle cx="32" cy="32" r={radius} stroke="#1e293b" strokeWidth="6" fill="transparent" />
-                    <circle cx="32" cy="32" r={radius} stroke={`url(#${gradientId})`} strokeWidth="6" fill="transparent" strokeDasharray={circumference} strokeDashoffset={strokeDashoffset} strokeLinecap="round" className="transition-all duration-1000 ease-out shadow-lg"/>
+                    {/* Progress */}
+                    <circle 
+                        cx="32" cy="32" r={radius} 
+                        stroke={`url(#${gradientId})`} 
+                        strokeWidth="6" 
+                        fill="transparent" 
+                        strokeDasharray={circumference} 
+                        strokeDashoffset={strokeDashoffset} 
+                        strokeLinecap="round" 
+                        className="transition-all duration-1000 ease-out shadow-lg"
+                    />
                 </svg>
                 <div className="absolute inset-0 flex flex-col items-center justify-center z-20">
                     {Icon && <Icon className="w-3.5 h-3.5 mb-0.5" style={{ color: colors[0] }} />}
@@ -57,36 +102,65 @@ const Gauge = ({ value, label, type, unit = '%', icon: Icon }: { value: number, 
     );
 };
 
+
 const ActorDetail: React.FC<ActorDetailProps> = ({ actor, gateway, logs: initialLogs, onBack, isProduction, currentUser, onUpdatePreferences, autoRunForensic }) => {
   const [activeTab, setActiveTab] = useState<'OVERVIEW' | 'TERMINAL' | 'DECEPTION' | 'NETWORK' | 'FORENSICS'>('OVERVIEW');
+  
+  // Local log state for "Live Telemetry" injection
   const [localLogs, setLocalLogs] = useState<LogEntry[]>([]);
   const displayLogs = [...initialLogs, ...localLogs].sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
+
+  // IP State
   const [displayedLocalIp, setDisplayedLocalIp] = useState<string | null>(null);
   const [isScanningIp, setIsScanningIp] = useState(false);
+
+  // Edit Name State
   const [isEditingName, setIsEditingName] = useState(false);
   const [editedName, setEditedName] = useState(actor.name);
   const [isDeleting, setIsDeleting] = useState(false);
   const [isResetting, setIsResetting] = useState(false);
+
+  // Command & Terminal State
   const [commandHistory, setCommandHistory] = useState<CommandJob[]>([]);
+  
+  // AI Analysis State
   const [aiAnalysis, setAiAnalysis] = useState<AiAnalysis | null>(null);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
+  
+  // Deception State
   const [honeyFiles, setHoneyFiles] = useState<HoneyFile[]>(actor.deployedHoneyFiles || []);
   const [isGeneratingDeception, setIsGeneratingDeception] = useState(false);
+
+  // Tunnels State
   const [tunnels, setTunnels] = useState<ActiveTunnel[]>(actor.activeTunnels || []);
   const [pendingTunnel, setPendingTunnel] = useState<string | null>(null);
+  
+  // Custom Tunnel State
   const [customPort, setCustomPort] = useState('');
   const [customService, setCustomService] = useState('Custom App');
+
+  // Persona State
   const [activePersona, setActivePersona] = useState<DevicePersona>(actor.persona || AVAILABLE_PERSONAS[0]);
   const [isChangingPersona, setIsChangingPersona] = useState(false);
+
+  // Sentinel State
   const [isSentinelEnabled, setIsSentinelEnabled] = useState(actor.tcpSentinelEnabled || false);
+
+  // Topology Reset State
   const [topologyDismissedTime, setTopologyDismissedTime] = useState<number>(0);
+
+  // Port Scan State
   const [scannedPorts, setScannedPorts] = useState<{system: any[], application: any[]} | null>(null);
   const [isScanningPorts, setIsScanningPorts] = useState(false);
+
+  // FORENSICS STATE
   const [isGatheringForensics, setIsGatheringForensics] = useState(false);
   const [forensicData, setForensicData] = useState<ForensicSnapshot | null>(null);
   const [forensicView, setForensicView] = useState<'SNAPSHOT' | 'SESSIONS'>('SNAPSHOT');
   const [isSavingReport, setIsSavingReport] = useState(false);
   const hasAutoRunRef = useRef(false);
+  
+  // GHOST MODE / REPLAY STATE
   const [recordedSessions, setRecordedSessions] = useState<AttackSession[]>([]);
   const [activeSession, setActiveSession] = useState<AttackSession | null>(null);
   const [replayTime, setReplayTime] = useState(0);
@@ -96,10 +170,12 @@ const ActorDetail: React.FC<ActorDetailProps> = ({ actor, gateway, logs: initial
   const [isRefreshingSessions, setIsRefreshingSessions] = useState(false);
   const replayTimerRef = useRef<number | null>(null);
 
+  // --- PERSISTENCE FOR TOPOLOGY VIEW ---
   useEffect(() => {
       if (currentUser?.preferences?.topologyDismissed?.[actor.id]) {
           setTopologyDismissedTime(currentUser.preferences.topologyDismissed[actor.id]);
       } else if (!isProduction) {
+          // Fallback for Mock Mode
           const saved = localStorage.getItem(`vpp_topology_dismissed_mock_${actor.id}`);
           setTopologyDismissedTime(saved ? parseInt(saved, 10) : 0);
       } else {
@@ -110,13 +186,20 @@ const ActorDetail: React.FC<ActorDetailProps> = ({ actor, gateway, logs: initial
   const handleClearTopology = () => {
       const now = Date.now();
       setTopologyDismissedTime(now);
+
       if (currentUser && onUpdatePreferences) {
-          onUpdatePreferences({ topologyDismissed: { ...(currentUser.preferences?.topologyDismissed || {}), [actor.id]: now } });
+          onUpdatePreferences({
+              topologyDismissed: {
+                  ...(currentUser.preferences?.topologyDismissed || {}),
+                  [actor.id]: now
+              }
+          });
       } else if (!isProduction) {
           localStorage.setItem(`vpp_topology_dismissed_mock_${actor.id}`, now.toString());
       }
   };
 
+  // --- MOCK SIMULATION FOR LIVE TELEMETRY ---
   useEffect(() => {
       if (isProduction) return;
       const interval = setInterval(() => {
@@ -128,13 +211,19 @@ const ActorDetail: React.FC<ActorDetailProps> = ({ actor, gateway, logs: initial
       return () => clearInterval(interval);
   }, [isProduction, actor, isSentinelEnabled]);
 
-  useEffect(() => { handleFetchIp(); }, [actor.id]);
+  // --- AUTO SCAN INTERNAL IP ---
+  useEffect(() => {
+      handleFetchIp();
+  }, [actor.id]);
 
+  // Polling for command results
   useEffect(() => {
     if (!isProduction) return;
+
     const interval = setInterval(async () => {
         const cmds = await getActorCommands(actor.id);
         setCommandHistory(cmds);
+        
         if (isScanningIp) {
             const ipJob = cmds.find(c => c.command === 'hostname -I' && c.status === 'COMPLETED');
             if (ipJob && ipJob.output) {
@@ -149,19 +238,33 @@ const ActorDetail: React.FC<ActorDetailProps> = ({ actor, gateway, logs: initial
     return () => clearInterval(interval);
   }, [actor.id, isScanningIp, isProduction]);
 
+  // --- POLL FOR PORT SCAN RESULTS ---
   useEffect(() => {
       if (!isScanningPorts) return;
+      
       const scanJob = commandHistory.find(c => c.command === 'ss -lntup' && c.status === 'COMPLETED');
-      if (scanJob && scanJob.output) { parsePortScan(scanJob.output); setIsScanningPorts(false); }
+      if (scanJob && scanJob.output) {
+          parsePortScan(scanJob.output);
+          setIsScanningPorts(false);
+      }
   }, [commandHistory, isScanningPorts]);
 
+  // --- LOAD SESSIONS WHEN TAB CHANGES ---
   const handleLoadSessions = async () => {
       setIsRefreshingSessions(true);
+      
       if (isProduction) {
+          // Use real API in production
           const sessions = await getAttackSessionsProd();
           setRecordedSessions(sessions);
       } else {
-          const currentActorState = { ...actor, activeTunnels: tunnels, persona: activePersona, status: (tunnels.length > 0 || isSentinelEnabled) ? ActorStatus.COMPROMISED : actor.status };
+          // Mock mode
+          const currentActorState = { 
+              ...actor, 
+              activeTunnels: tunnels, 
+              persona: activePersona,
+              status: (tunnels.length > 0 || isSentinelEnabled) ? ActorStatus.COMPROMISED : actor.status 
+          };
           const sessions = await getAttackSessions(actor.id, currentActorState);
           setRecordedSessions(sessions);
       }
@@ -169,48 +272,78 @@ const ActorDetail: React.FC<ActorDetailProps> = ({ actor, gateway, logs: initial
   };
 
   useEffect(() => {
-      if (activeTab === 'FORENSICS' && forensicView === 'SESSIONS') { handleLoadSessions(); }
+      if (activeTab === 'FORENSICS' && forensicView === 'SESSIONS') {
+          handleLoadSessions();
+      }
   }, [activeTab, forensicView, actor.id, actor, tunnels, activePersona, isSentinelEnabled, isProduction]);
 
+  // --- REPLAY LOGIC ---
   useEffect(() => {
       if (isPlaying && activeSession) {
           replayTimerRef.current = window.setInterval(() => {
               setReplayTime(prev => {
-                  const nextTime = prev + (50 * replaySpeed);
-                  if (nextTime >= (activeSession.durationSeconds * 1000)) { setIsPlaying(false); return activeSession.durationSeconds * 1000; }
+                  const nextTime = prev + (50 * replaySpeed); // 50ms steps * speed
+                  if (nextTime >= (activeSession.durationSeconds * 1000)) {
+                      setIsPlaying(false);
+                      return activeSession.durationSeconds * 1000;
+                  }
                   return nextTime;
               });
           }, 50);
-      } else { if (replayTimerRef.current) clearInterval(replayTimerRef.current); }
+      } else {
+          if (replayTimerRef.current) clearInterval(replayTimerRef.current);
+      }
       return () => { if (replayTimerRef.current) clearInterval(replayTimerRef.current); };
   }, [isPlaying, replaySpeed, activeSession]);
 
   useEffect(() => {
       if (activeSession) {
+          // Reconstruct content based on time
           let content = '';
           const framesToRender = activeSession.frames.filter(f => f.time <= replayTime);
-          framesToRender.forEach(f => { if (f.data === '\n') content += '\n'; else if (f.type === 'INPUT') content += f.data; else content += f.data; });
+          framesToRender.forEach(f => {
+              if (f.data === '\n') {
+                  content += '\n';
+              } else if (f.type === 'INPUT') {
+                  content += f.data;
+              } else {
+                  content += f.data;
+              }
+          });
           setReplayContent(content);
       }
   }, [replayTime, activeSession]);
 
+  // --- AUTO RUN FORENSIC LOGIC ---
   useEffect(() => {
       if (autoRunForensic && !hasAutoRunRef.current) {
           hasAutoRunRef.current = true;
           setActiveTab('FORENSICS');
           setForensicView('SNAPSHOT');
+          // Add small delay to allow tab switch rendering
           setTimeout(() => handleForensicScan(), 100);
       }
   }, [autoRunForensic]);
 
   const handleFetchIp = async () => {
       let hasPending = false;
-      if (commandHistory.some(c => c.command === 'hostname -I' && (c.status === 'PENDING' || c.status === 'RUNNING'))) { hasPending = true; }
+      if (commandHistory.some(c => c.command === 'hostname -I' && (c.status === 'PENDING' || c.status === 'RUNNING'))) {
+          hasPending = true;
+      }
+      
       if (isProduction && !hasPending) {
           const remoteCmds = await getActorCommands(actor.id);
-          if (remoteCmds.some(c => c.command === 'hostname -I' && (c.status === 'PENDING' || c.status === 'RUNNING'))) { hasPending = true; setCommandHistory(remoteCmds); }
+          if (remoteCmds.some(c => c.command === 'hostname -I' && (c.status === 'PENDING' || c.status === 'RUNNING'))) {
+              hasPending = true;
+              setCommandHistory(remoteCmds);
+          }
       }
-      if (hasPending) { setIsScanningIp(true); return; }
+
+      if (hasPending) {
+          setIsScanningIp(true);
+          return;
+      }
+
       setIsScanningIp(true);
       await handleCommand('hostname -I');
   };
@@ -222,24 +355,58 @@ const ActorDetail: React.FC<ActorDetailProps> = ({ actor, gateway, logs: initial
           jobId = id || '';
       } else {
           jobId = `job-mock-${Date.now()}`;
-          const newJob: CommandJob = { id: jobId, actorId: actor.id, command: cmd, status: 'RUNNING', createdAt: new Date(), updatedAt: new Date() };
+          const newJob: CommandJob = {
+              id: jobId,
+              actorId: actor.id,
+              command: cmd,
+              status: 'RUNNING',
+              createdAt: new Date(),
+              updatedAt: new Date()
+          };
           setCommandHistory(prev => [newJob, ...prev]);
+          
           executeRemoteCommand(actor.id, cmd, actor).then(output => {
-               setCommandHistory(prev => prev.map(job => job.id === newJob.id ? { ...job, status: 'COMPLETED', output } : job));
-               if (cmd === 'hostname -I') { setDisplayedLocalIp(actor.localIp); setIsScanningIp(false); }
+               setCommandHistory(prev => prev.map(job => 
+                  job.id === newJob.id 
+                  ? { ...job, status: 'COMPLETED', output } 
+                  : job
+               ));
+               if (cmd === 'hostname -I') {
+                   setDisplayedLocalIp(actor.localIp);
+                   setIsScanningIp(false);
+               }
           });
       }
       return jobId;
   };
 
-  const handleScanPorts = async () => { setIsScanningPorts(true); setScannedPorts(null); await handleCommand('ss -lntup'); };
-  
+  const handleScanPorts = async () => {
+      setIsScanningPorts(true);
+      setScannedPorts(null);
+      await handleCommand('ss -lntup');
+  };
+
   const parsePortScan = (output: string) => {
       const lines = output.split('\n');
       const system: any[] = [];
       const application: any[] = [];
       const seen = new Set<string>();
-      const getServiceName = (p: number) => { if (p === 21) return 'FTP'; if (p === 22) return 'SSH'; if (p === 23) return 'Telnet'; if (p === 53) return 'DNS'; if (p === 80) return 'HTTP'; if (p === 443) return 'HTTPS'; if (p === 3000) return 'Grafana/Dev'; if (p === 3306) return 'MySQL'; if (p === 5432) return 'PostgreSQL'; if (p === 6379) return 'Redis'; if (p === 8080) return 'HTTP-Alt'; return 'TCP'; };
+
+      const getServiceName = (p: number) => {
+          if (p === 21) return 'FTP';
+          if (p === 22) return 'SSH';
+          if (p === 23) return 'Telnet';
+          if (p === 53) return 'DNS';
+          if (p === 80) return 'HTTP';
+          if (p === 443) return 'HTTPS';
+          if (p === 3000) return 'Grafana/Dev';
+          if (p === 3306) return 'MySQL';
+          if (p === 5432) return 'PostgreSQL';
+          if (p === 6379) return 'Redis';
+          if (p === 8080) return 'HTTP-Alt';
+          return 'TCP';
+      };
+
       lines.forEach(line => {
           const match = line.match(/^(udp|tcp)\s+\w+\s+\d+\s+\d+\s+([^\s:]+|\[.*?\]):(\d+)\s+.*users:\(\("([^"]+)"/);
           if (match) {
@@ -248,32 +415,125 @@ const ActorDetail: React.FC<ActorDetailProps> = ({ actor, gateway, logs: initial
               const port = parseInt(match[3]);
               const process = match[4];
               bindIp = bindIp.replace('[', '').replace(']', '');
+
               if (bindIp.startsWith('127.') || bindIp === '::1') return;
+
               const key = `${proto}:${port}`;
               if (seen.has(key)) return;
               seen.add(key);
+
               const item = { port, proto, service: getServiceName(port), source: process };
-              if (process.includes('socat') || process.includes('vpp-agent') || process.includes('python')) { item.service = process.includes('socat') ? 'Tunnel' : 'Persona'; application.push(item); } else { system.push(item); }
+
+              if (process.includes('socat') || process.includes('vpp-agent') || process.includes('python')) {
+                   item.service = process.includes('socat') ? 'Tunnel' : 'Persona';
+                   application.push(item);
+              } else {
+                   system.push(item);
+              }
           }
       });
+
       setScannedPorts({ system: system.sort((a,b) => a.port - b.port), application: application.sort((a,b) => a.port - b.port) });
   };
 
-  const handleSaveName = async () => { if (editedName.trim() !== actor.name) { await updateActorName(actor.id, editedName); } setIsEditingName(false); };
-  const handleDeleteActor = async () => { if (confirm(`Are you sure you want to decommission ${actor.name}?`)) { setIsDeleting(true); try { if (actor.status === 'ONLINE' || actor.status === 'COMPROMISED') { const uninstallCmd = `nohup bash -c "sleep 5; systemctl stop vpp-agent; systemctl disable vpp-agent; rm -f /etc/systemd/system/vpp-agent.service; systemctl daemon-reload; rm -rf /opt/vpp-agent" >/dev/null 2>&1 &`; if (isProduction) { await queueSystemCommand(actor.id, uninstallCmd); await new Promise(resolve => setTimeout(resolve, 4000)); } } await deleteActor(actor.id); onBack(); } catch (e) { alert("Delete failed"); } finally { setIsDeleting(false); } } };
-  const handleDeleteSession = async (e: React.MouseEvent, sessionId: string) => { e.stopPropagation(); if (confirm("Permanently delete this recorded session?")) { setRecordedSessions(prev => prev.filter(s => s.id !== sessionId)); if (activeSession?.id === sessionId) setActiveSession(null); if (isProduction) await deleteAttackSessionProd(sessionId); else await deleteAttackSession(sessionId); } };
-  const handleAiAnalyze = async () => { setIsAnalyzing(true); const result = await analyzeLogsWithAi(displayLogs, actor.status); setAiAnalysis(result); setIsAnalyzing(false); };
-  const handleResetStatus = async () => { await resetActorStatus(actor.id); actor.status = ActorStatus.ONLINE; };
-  const handleFactoryReset = async () => { if (!confirm(`Warning: This will clear all tunnels and reset agent state. Continue?`)) return; setIsResetting(true); if (isProduction) { await resetActorToFactory(actor.id); } else { await handleCommand('vpp-agent --factory-reset'); } setTunnels([]); setHoneyFiles([]); actor.status = ActorStatus.ONLINE; setIsSentinelEnabled(false); handleClearTopology(); setTimeout(() => setIsResetting(false), 2000); };
-  const handleDeployDeception = async (type: 'CREDENTIALS' | 'CONFIG') => { setIsGeneratingDeception(true); const file = await generateDeceptionContent(type); if (file) { const targetPath = `/home/${file.filename}`; const updatedFile = { ...file, path: '/home/' }; const newFilesList = [...honeyFiles, updatedFile]; setHoneyFiles(newFilesList); if (isProduction) await updateActorHoneyFiles(actor.id, newFilesList); await handleCommand(`echo "${file.contentPreview}" > ${targetPath}`); } setIsGeneratingDeception(false); };
+  const handleSaveName = async () => {
+      if (editedName.trim() !== actor.name) {
+          await updateActorName(actor.id, editedName);
+      }
+      setIsEditingName(false);
+  };
+
+  const handleDeleteActor = async () => {
+      if (confirm(`Are you sure you want to decommission ${actor.name}? This will attempt to uninstall the agent from the device and then remove the record.`)) {
+          setIsDeleting(true);
+          try {
+             if (actor.status === 'ONLINE' || actor.status === 'COMPROMISED') {
+                 const uninstallCmd = `nohup bash -c "sleep 5; systemctl stop vpp-agent; systemctl disable vpp-agent; rm -f /etc/systemd/system/vpp-agent.service; systemctl daemon-reload; rm -rf /opt/vpp-agent" >/dev/null 2>&1 &`;
+                 if (isProduction) {
+                     await queueSystemCommand(actor.id, uninstallCmd);
+                     await new Promise(resolve => setTimeout(resolve, 4000));
+                 }
+             }
+             await deleteActor(actor.id);
+             onBack();
+          } catch (e) {
+             alert("Delete failed, check console.");
+          } finally {
+             setIsDeleting(false);
+          }
+      }
+  };
+
+  const handleDeleteSession = async (e: React.MouseEvent, sessionId: string) => {
+    e.stopPropagation();
+    if (confirm("Permanently delete this recorded session?")) {
+        // Optimistically remove from UI
+        setRecordedSessions(prev => prev.filter(s => s.id !== sessionId));
+        if (activeSession?.id === sessionId) setActiveSession(null);
+        
+        // Call service
+        if (isProduction) {
+            await deleteAttackSessionProd(sessionId);
+        } else {
+            await deleteAttackSession(sessionId);
+        }
+    }
+  };
+
+  const handleAiAnalyze = async () => {
+      setIsAnalyzing(true);
+      const result = await analyzeLogsWithAi(displayLogs, actor.status);
+      setAiAnalysis(result);
+      setIsAnalyzing(false);
+  };
+
+  const handleResetStatus = async () => {
+      await resetActorStatus(actor.id);
+      actor.status = ActorStatus.ONLINE;
+  };
+
+  const handleFactoryReset = async () => {
+      if (!confirm(`Warning: This will clear all tunnels, deception files, and reset the agent state for ${actor.name}. Continue?`)) return;
+      
+      setIsResetting(true);
+      if (isProduction) {
+          await resetActorToFactory(actor.id);
+      } else {
+          await handleCommand('vpp-agent --factory-reset');
+      }
+      
+      setTunnels([]);
+      setHoneyFiles([]);
+      actor.status = ActorStatus.ONLINE;
+      setIsSentinelEnabled(false);
+      handleClearTopology();
+      
+      setTimeout(() => setIsResetting(false), 2000);
+  };
+
+  const handleDeployDeception = async (type: 'CREDENTIALS' | 'CONFIG') => {
+      setIsGeneratingDeception(true);
+      const file = await generateDeceptionContent(type);
+      if (file) {
+          const targetPath = `/home/${file.filename}`;
+          const updatedFile = { ...file, path: '/home/' };
+          const newFilesList = [...honeyFiles, updatedFile];
+          setHoneyFiles(newFilesList);
+          
+          if (isProduction) await updateActorHoneyFiles(actor.id, newFilesList);
+          await handleCommand(`echo "${file.contentPreview}" > ${targetPath}`);
+      }
+      setIsGeneratingDeception(false);
+  };
 
   const handleStopTunnel = async (tunnelId: string) => {
       const tunnelToStop = tunnels.find(t => t.id === tunnelId);
       const updatedTunnels = tunnels.filter(t => t.id !== tunnelId);
       setTunnels(updatedTunnels);
       if (isProduction) await updateActorTunnels(actor.id, updatedTunnels);
+      
       if (tunnelToStop) {
-        await handleCommand(`pkill -f "TCP4-LISTEN:${tunnelToStop.localPort}" || pkill -f "TCP-LISTEN:${tunnelToStop.localPort}" || true`);
+        await handleCommand(`pkill -f "TCP-LISTEN:${tunnelToStop.localPort}" || true`);
       } else {
         await handleCommand(`pkill -f "socat" || true`);
       }
@@ -287,30 +547,24 @@ const ActorDetail: React.FC<ActorDetailProps> = ({ actor, gateway, logs: initial
           setPendingTunnel(null);
           return;
       }
-      
       const port = DEFAULT_TRAP_PORTS[trapId] || (3306 + tunnels.length);
-      const trap = getAvailableCloudTraps().find(t => t.id === trapId)!;
-      const newTunnel = await toggleTunnelMock(actor, trapId, port);
-      
-      // *** UPDATED LOGIC: EXECUTE RELAY SCRIPT INSTEAD OF DIRECT FORWARDING ***
-      if (isProduction) {
-           newTunnel.remoteEndpoint = `Cloud API (${trap.serviceType})`;
-           
-           // Determine the Trap Type to pass to script (e.g. FTP, Redis)
-           const trapType = trap.serviceType;
-           
-           // Use the relay script which handles HTTP encapsulation
-           const cmd = `nohup socat TCP4-LISTEN:${port},fork,reuseaddr EXEC:"/opt/vpp-agent/trap_relay.sh '${trapType}'" >/dev/null 2>&1 & # ${newTunnel.id}`;
-           await handleCommand(cmd);
-           
-      } else {
-           // Mock
-           await handleCommand(`nohup socat TCP-LISTEN:${port},fork SYSTEM:'echo VPP_TRAP_SINK; cat' >/dev/null 2>&1 & # ${newTunnel.id}`);
-      }
-      
+      const newTunnel = await toggleTunnelMock(actor, trapId, port); 
       const updatedTunnels = [...tunnels, newTunnel];
       setTunnels(updatedTunnels);
       if (isProduction) await updateActorTunnels(actor.id, updatedTunnels);
+      
+      // Determine server IP (assume browser can resolve it, agent likely can too if DNS is setup, otherwise default to window.location.hostname for simple setups)
+      const serverIp = window.location.hostname;
+      const remotePort = SERVER_TRAP_PORTS[trapId];
+
+      if (isProduction && remotePort) {
+           // Tunnel to REAL Honeypot on Server
+           await handleCommand(`nohup socat TCP-LISTEN:${port},fork TCP:${serverIp}:${remotePort} >/dev/null 2>&1 & # ${newTunnel.id}`);
+      } else {
+           // Local Echo or Mock
+           await handleCommand(`nohup socat TCP-LISTEN:${port},fork SYSTEM:'echo VPP_TRAP_SINK; cat' >/dev/null 2>&1 & # ${newTunnel.id}`);
+      }
+      
       setPendingTunnel(null);
   };
 
@@ -321,19 +575,22 @@ const ActorDetail: React.FC<ActorDetailProps> = ({ actor, gateway, logs: initial
       const newTunnel: ActiveTunnel = {
           id: `tun-custom-${Date.now()}`,
           localPort: port,
-          remoteEndpoint: `cloud-api-relay`,
+          remoteEndpoint: `cloud-trap-custom:${port}`,
           status: 'ACTIVE',
           bytesTransferred: 0,
           uptimeSeconds: 0,
-          trap: { id: `custom-${Date.now()}`, name: customService || 'Custom Service', description: 'User-defined port', serviceType: 'TCP Raw', riskLevel: 'MEDIUM' }
+          trap: {
+              id: `custom-${Date.now()}`,
+              name: customService || 'Custom Service',
+              description: 'User-defined port forwarding',
+              serviceType: 'TCP Raw',
+              riskLevel: 'MEDIUM'
+          }
       };
       const updatedTunnels = [...tunnels, newTunnel];
       setTunnels(updatedTunnels);
       if (isProduction) await updateActorTunnels(actor.id, updatedTunnels);
-      
-      // Use Relay for Custom too
-      const cmd = `nohup socat TCP4-LISTEN:${port},fork,reuseaddr EXEC:"/opt/vpp-agent/trap_relay.sh 'Raw'" >/dev/null 2>&1 & # ${newTunnel.id}`;
-      await handleCommand(cmd);
+      await handleCommand(`nohup socat TCP-LISTEN:${port},fork SYSTEM:'echo VPP_TRAP_SINK; cat' >/dev/null 2>&1 & # ${newTunnel.id}`);
       setCustomPort('');
   };
 
@@ -343,7 +600,10 @@ const ActorDetail: React.FC<ActorDetailProps> = ({ actor, gateway, logs: initial
       setIsChangingPersona(true);
       if (isProduction) await updateActorPersona(actor.id, p);
       await handleCommand(`vpp-agent --set-persona "${p.name}"`); 
-      setTimeout(() => { setActivePersona(p); setIsChangingPersona(false); }, 2000);
+      setTimeout(() => {
+          setActivePersona(p);
+          setIsChangingPersona(false);
+      }, 2000);
   };
 
   const handleToggleSentinel = async () => {
@@ -351,7 +611,9 @@ const ActorDetail: React.FC<ActorDetailProps> = ({ actor, gateway, logs: initial
       setIsSentinelEnabled(newState);
       if (isProduction) await toggleActorSentinel(actor.id, newState);
       await handleCommand(`vpp-agent --set-sentinel ${newState ? 'on' : 'off'}`);
-      if (isProduction) { setTimeout(() => { getActorCommands(actor.id).then(setCommandHistory); }, 1500); }
+      if (isProduction) {
+          setTimeout(() => { getActorCommands(actor.id).then(setCommandHistory); }, 1500);
+      }
   };
 
   const handleTestLog = () => {
@@ -361,40 +623,78 @@ const ActorDetail: React.FC<ActorDetailProps> = ({ actor, gateway, logs: initial
       setLocalLogs(prev => [mockLog, ...prev]);
   };
 
+  // --- FORENSIC SCAN HANDLER ---
   const handleForensicScan = async () => {
       setIsGatheringForensics(true);
-      setForensicView('SNAPSHOT');
-      setForensicData(null);
+      setForensicView('SNAPSHOT'); // Ensure we are on snapshot view
+      setForensicData(null); // Reset previous data
+
       if (isProduction) {
+          // Send the clean, native forensic command that was added to the agent script
           const oneClickCmd = `vpp-agent --forensic`;
           await handleCommand(oneClickCmd);
+          
+          // Use polling to actively wait for the result
           const pollInterval = setInterval(async () => {
                const cmds = await getActorCommands(actor.id);
+               // Find the completed job
                const job = cmds.find(c => c.command === oneClickCmd && c.status === 'COMPLETED');
+               
                if (job && job.output) {
                    clearInterval(pollInterval);
+                   
+                   // Robust Parsing Logic (Line-by-Line State Machine)
                    const lines = job.output.split('\n');
                    let currentSection = '';
-                   const extracted: any = { PROCESSES: [], NETWORK: [], AUTH: [], OPENFILES: [] };
+                   const extracted: any = {
+                       PROCESSES: [],
+                       NETWORK: [],
+                       AUTH: [],
+                       OPENFILES: []
+                   };
+
                    lines.forEach(line => {
                        const t = line.trim();
                        if (t === '---PROCESSES---') { currentSection = 'PROCESSES'; return; }
                        if (t === '---NETWORK---') { currentSection = 'NETWORK'; return; }
                        if (t === '---AUTH---') { currentSection = 'AUTH'; return; }
                        if (t === '---OPENFILES---') { currentSection = 'OPENFILES'; return; }
+                       
                        if (currentSection) extracted[currentSection].push(line);
                    });
+                   
+                   // Parse Process Table (Skip Header)
                    const processes = extracted.PROCESSES.slice(1).map((line: string) => {
                        const cols = line.trim().split(/\s+/);
+                       // Basic validation to ensure line is a process record
                        if(cols.length < 4) return null;
-                       return { user: cols[0], pid: cols[1], cpu: cols[2], mem: cols[3], command: cols.slice(10).join(' '), risk: 'LOW' as 'LOW' };
+                       return {
+                           user: cols[0], pid: cols[1], cpu: cols[2], mem: cols[3], command: cols.slice(10).join(' '), risk: 'LOW' as 'LOW'
+                       };
                    }).filter((p: any) => p && p.pid);
-                   setForensicData({ timestamp: new Date(), processes: processes, connections: extracted.NETWORK, authLogs: extracted.AUTH, openFiles: extracted.OPENFILES });
+
+                   setForensicData({
+                       timestamp: new Date(),
+                       processes: processes,
+                       connections: extracted.NETWORK,
+                       authLogs: extracted.AUTH,
+                       openFiles: extracted.OPENFILES
+                   });
                    setIsGatheringForensics(false);
                }
-          }, 1000);
-          setTimeout(() => { clearInterval(pollInterval); if (isGatheringForensics) setIsGatheringForensics(false); }, 15000);
+          }, 1000); // Check every second
+
+          // Safety Timeout
+          setTimeout(() => {
+              clearInterval(pollInterval);
+              if (isGatheringForensics) {
+                  setIsGatheringForensics(false);
+                  // Optional: Show error
+              }
+          }, 15000);
+
       } else {
+          // MOCK MODE: Pass actor context for dynamic forensic generation
           const data = await performForensicScan(actor.id, actor);
           setForensicData(data);
           setIsGatheringForensics(false);
@@ -404,37 +704,101 @@ const ActorDetail: React.FC<ActorDetailProps> = ({ actor, gateway, logs: initial
   const handleSaveForensicReport = async () => {
       if (!forensicData || !currentUser) return;
       setIsSavingReport(true);
-      const payload = { type: 'FORENSIC_SNAPSHOT', generatedBy: currentUser.username, snapshotData: forensicData };
+      
+      const payload = {
+          type: 'FORENSIC_SNAPSHOT',
+          generatedBy: currentUser.username,
+          snapshotData: forensicData
+      };
+      
       const success = await generateReport(payload);
-      if (success) alert("Snapshot saved successfully to System Reports."); else alert("Failed to save report.");
+      if (success) {
+          alert("Snapshot saved successfully to System Reports.");
+      } else {
+          alert("Failed to save report.");
+      }
       setIsSavingReport(false);
   };
 
+  // --- THREAT TOPOLOGY LOGIC ---
   const threatTopology = useMemo(() => {
       const threats = new Map<string, { ip: string, protocol: string, count: number, port?: string }>();
       const intercepted: string[] = [];
       const ipRegex = /(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})/;
+
       displayLogs.forEach(log => {
           if (new Date(log.timestamp).getTime() <= topologyDismissedTime) return;
           if (log.sourceIp === 'Address' || log.message.includes('Address:Port')) return;
+
           let attackerIp = log.sourceIp;
           let destPort = undefined;
+
           const complexMatch = log.message.match(/from\s+(?:[0-9a-f.:]+|\[.*?\]):(\d+)\s+(?:to|->)\s+(?:[0-9a-f.:]+|\[.*?\])?:(\d+)/i);
-          if (complexMatch) { const p1 = parseInt(complexMatch[1]); const p2 = parseInt(complexMatch[2]); if (p2 > 30000 && p1 < 30000) { destPort = p1.toString(); } else { destPort = p2.toString(); } } else { const portMatch = log.message.match(/to\s+(?:[0-9.]+|\[.*?\]):(\d+)/); if (portMatch) destPort = portMatch[1]; }
-          if (!attackerIp && (log.level === 'WARNING' || log.level === 'CRITICAL')) { const match = log.message.match(ipRegex); if (match) { attackerIp = match[0]; if (attackerIp === '127.0.0.1' || attackerIp === '0.0.0.0' || attackerIp === actor.localIp || attackerIp === displayedLocalIp) { attackerIp = undefined; } } }
-          if (attackerIp && (log.level === 'WARNING' || log.level === 'CRITICAL')) { let existing = threats.get(attackerIp); if (!existing) { existing = { ip: attackerIp, protocol: log.process, count: 0, port: destPort }; threats.set(attackerIp, existing); } else { existing.count++; if (!existing.port && destPort) existing.port = destPort; } }
-          if (log.message.includes('cmd:') || log.message.includes('Executing') || log.message.includes('stdin')) { const clean = log.message.replace(/.*cmd: /, '').replace(/.*Executing /, ''); if (!intercepted.includes(clean)) intercepted.push(clean); }
+          if (complexMatch) {
+              const p1 = parseInt(complexMatch[1]);
+              const p2 = parseInt(complexMatch[2]);
+              if (p2 > 30000 && p1 < 30000) {
+                  destPort = p1.toString();
+              } else {
+                  destPort = p2.toString();
+              }
+          } else {
+              const portMatch = log.message.match(/to\s+(?:[0-9.]+|\[.*?\]):(\d+)/);
+              if (portMatch) destPort = portMatch[1];
+          }
+
+          if (!attackerIp && (log.level === 'WARNING' || log.level === 'CRITICAL')) {
+              const match = log.message.match(ipRegex);
+              if (match) {
+                  attackerIp = match[0];
+                  if (attackerIp === '127.0.0.1' || attackerIp === '0.0.0.0' || attackerIp === actor.localIp || attackerIp === displayedLocalIp) {
+                      attackerIp = undefined;
+                  }
+              }
+          }
+
+          if (attackerIp && (log.level === 'WARNING' || log.level === 'CRITICAL')) {
+              let existing = threats.get(attackerIp);
+              if (!existing) {
+                   existing = { ip: attackerIp, protocol: log.process, count: 0, port: destPort };
+                   threats.set(attackerIp, existing);
+              } else {
+                   existing.count++;
+                   if (!existing.port && destPort) existing.port = destPort;
+              }
+          }
+          if (log.message.includes('cmd:') || log.message.includes('Executing') || log.message.includes('stdin')) {
+              const clean = log.message.replace(/.*cmd: /, '').replace(/.*Executing /, '');
+              if (!intercepted.includes(clean)) intercepted.push(clean);
+          }
       });
+
       return { attackers: Array.from(threats.values()), payloads: intercepted.slice(0, 5) };
   }, [displayLogs, actor.localIp, displayedLocalIp, topologyDismissedTime]);
 
   const portExposure = useMemo(() => {
       if (scannedPorts) { return scannedPorts; }
-      const getServiceName = (p: number) => { if (p === 21) return 'FTP'; if (p === 22) return 'SSH'; if (p === 80) return 'HTTP'; if (p === 443) return 'HTTPS'; if (p === 3306) return 'MySQL'; return 'TCP-Service'; };
+      const getServiceName = (p: number) => {
+          if (p === 21) return 'FTP'; if (p === 22) return 'SSH'; if (p === 80) return 'HTTP'; if (p === 443) return 'HTTPS'; if (p === 3306) return 'MySQL'; return 'TCP-Service';
+      };
       const system = [{ port: 22, proto: 'TCP', service: 'SSH (Mgmt)', source: 'Host OS' }];
       const application: any[] = [];
-      if (activePersona && activePersona.openPorts) { activePersona.openPorts.forEach(p => { if (!application.some(a => a.port === p)) { application.push({ port: p, proto: 'TCP', service: getServiceName(p), source: `Persona: ${activePersona.name}` }); } }); }
-      tunnels.forEach(t => { const existingIdx = application.findIndex(a => a.port === t.localPort); if (existingIdx >= 0) { application[existingIdx].source = 'Cloud Tunnel (Override)'; application[existingIdx].service = t.trap.serviceType; } else { application.push({ port: t.localPort, proto: 'TCP', service: t.trap.serviceType, source: 'Cloud Tunnel' }); } });
+      if (activePersona && activePersona.openPorts) {
+          activePersona.openPorts.forEach(p => {
+              if (!application.some(a => a.port === p)) {
+                  application.push({ port: p, proto: 'TCP', service: getServiceName(p), source: `Persona: ${activePersona.name}` });
+              }
+          });
+      }
+      tunnels.forEach(t => {
+          const existingIdx = application.findIndex(a => a.port === t.localPort);
+          if (existingIdx >= 0) {
+              application[existingIdx].source = 'Cloud Tunnel (Override)';
+              application[existingIdx].service = t.trap.serviceType;
+          } else {
+              application.push({ port: t.localPort, proto: 'TCP', service: t.trap.serviceType, source: 'Cloud Tunnel' });
+          }
+      });
       return { system, application: application.sort((a,b) => a.port - b.port) };
   }, [activePersona, tunnels, scannedPorts]);
 
@@ -443,10 +807,15 @@ const ActorDetail: React.FC<ActorDetailProps> = ({ actor, gateway, logs: initial
   const blockedByPersona = activePersona.openPorts || [];
   const systemPorts = [22];
   const getPersonaConflicts = (persona: DevicePersona) => persona.openPorts.filter(p => [...systemPorts, ...blockedByTunnels].includes(p));
-  const getTunnelConflicts = (trapId: string) => { const defaultPort = DEFAULT_TRAP_PORTS[trapId]; if (!defaultPort) return []; return [...systemPorts, ...blockedByTunnels, ...blockedByPersona].includes(defaultPort) ? [defaultPort] : []; };
+  const getTunnelConflicts = (trapId: string) => {
+      const defaultPort = DEFAULT_TRAP_PORTS[trapId];
+      if (!defaultPort) return [];
+      return [...systemPorts, ...blockedByTunnels, ...blockedByPersona].includes(defaultPort) ? [defaultPort] : [];
+  };
 
   return (
     <div className="space-y-6 animate-fade-in pb-10">
+      {/* HEADER */}
       <div className="bg-slate-800 rounded-xl border border-slate-700 p-6 shadow-xl relative overflow-hidden">
         <div className={`absolute top-0 right-0 w-64 h-64 bg-gradient-to-br opacity-10 rounded-full blur-3xl -mr-16 -mt-16 pointer-events-none ${actor.status === 'COMPROMISED' ? 'from-red-500 to-orange-500' : 'from-blue-500 to-emerald-500'}`} />
         <div className="relative z-10">
@@ -561,6 +930,7 @@ const ActorDetail: React.FC<ActorDetailProps> = ({ actor, gateway, logs: initial
           </div>
       )}
 
+      {/* Tabs Navigation */}
       <div className="border-b border-slate-700 flex space-x-6 overflow-x-auto">
           <button onClick={() => setActiveTab('OVERVIEW')} className={`pb-3 text-sm font-bold border-b-2 transition-colors whitespace-nowrap ${activeTab === 'OVERVIEW' ? 'border-blue-500 text-blue-400' : 'border-transparent text-slate-500 hover:text-white'}`}>OVERVIEW</button>
           <button onClick={() => setActiveTab('TERMINAL')} className={`pb-3 text-sm font-bold border-b-2 transition-colors whitespace-nowrap ${activeTab === 'TERMINAL' ? 'border-blue-500 text-blue-400' : 'border-transparent text-slate-500 hover:text-white'}`}>LIVE TERMINAL</button>
@@ -625,6 +995,7 @@ const ActorDetail: React.FC<ActorDetailProps> = ({ actor, gateway, logs: initial
           </div>
       )}
 
+      {/* FORENSICS TAB */}
       {activeTab === 'FORENSICS' && (
            <div className="bg-slate-800 rounded-xl border border-slate-700 overflow-hidden shadow-lg flex flex-col h-full min-h-[600px]">
                 <div className="bg-slate-900 p-4 border-b border-slate-700 flex justify-between items-center">
@@ -636,100 +1007,261 @@ const ActorDetail: React.FC<ActorDetailProps> = ({ actor, gateway, logs: initial
                         </div>
                     </div>
                     <div className="flex space-x-2">
-                        <button onClick={() => setForensicView('SNAPSHOT')} className={`px-3 py-1.5 text-xs font-bold rounded flex items-center ${forensicView === 'SNAPSHOT' ? 'bg-slate-700 text-white' : 'text-slate-500 hover:text-white'}`}><Camera className="w-3 h-3 mr-1" /> SNAPSHOT</button>
-                        <button onClick={() => setForensicView('SESSIONS')} className={`px-3 py-1.5 text-xs font-bold rounded flex items-center ${forensicView === 'SESSIONS' ? 'bg-slate-700 text-white' : 'text-slate-500 hover:text-white'}`}><Film className="w-3 h-3 mr-1" /> GHOST MODE (REPLAY)</button>
+                        <button 
+                            onClick={() => setForensicView('SNAPSHOT')}
+                            className={`px-3 py-1.5 text-xs font-bold rounded flex items-center ${forensicView === 'SNAPSHOT' ? 'bg-slate-700 text-white' : 'text-slate-500 hover:text-white'}`}
+                        >
+                            <Camera className="w-3 h-3 mr-1" /> SNAPSHOT
+                        </button>
+                        <button 
+                            onClick={() => setForensicView('SESSIONS')}
+                            className={`px-3 py-1.5 text-xs font-bold rounded flex items-center ${forensicView === 'SESSIONS' ? 'bg-slate-700 text-white' : 'text-slate-500 hover:text-white'}`}
+                        >
+                            <Film className="w-3 h-3 mr-1" /> GHOST MODE (REPLAY)
+                        </button>
                     </div>
                 </div>
+
+                {/* Content Area */}
                 <div className="p-6 flex-1 overflow-y-auto">
+                    
+                    {/* --- SNAPSHOT VIEW --- */}
                     {forensicView === 'SNAPSHOT' && (
                         <>
                             <div className="flex justify-end mb-4 space-x-3">
                                 {forensicData && (
-                                    <button onClick={handleSaveForensicReport} disabled={isSavingReport} className="bg-slate-700 hover:bg-slate-600 text-white px-4 py-2 rounded font-bold text-sm flex items-center transition-colors">
-                                        {isSavingReport ? <Loader className="w-4 h-4 mr-2 animate-spin"/> : <Save className="w-4 h-4 mr-2"/>} SAVE AS REPORT
+                                    <button
+                                        onClick={handleSaveForensicReport}
+                                        disabled={isSavingReport}
+                                        className="bg-slate-700 hover:bg-slate-600 text-white px-4 py-2 rounded font-bold text-sm flex items-center transition-colors"
+                                    >
+                                        {isSavingReport ? <Loader className="w-4 h-4 mr-2 animate-spin"/> : <Save className="w-4 h-4 mr-2"/>}
+                                        SAVE AS REPORT
                                     </button>
                                 )}
-                                <button onClick={handleForensicScan} disabled={isGatheringForensics} className={`px-4 py-2 rounded font-bold text-sm flex items-center transition-all ${isGatheringForensics ? 'bg-slate-700 text-slate-400 cursor-not-allowed' : 'bg-red-600 hover:bg-red-500 text-white shadow-lg shadow-red-600/20 hover:scale-105'}`}>
+                                <button 
+                                    onClick={handleForensicScan}
+                                    disabled={isGatheringForensics}
+                                    className={`px-4 py-2 rounded font-bold text-sm flex items-center transition-all ${
+                                        isGatheringForensics 
+                                        ? 'bg-slate-700 text-slate-400 cursor-not-allowed'
+                                        : 'bg-red-600 hover:bg-red-500 text-white shadow-lg shadow-red-600/20 hover:scale-105'
+                                    }`}
+                                >
                                     {isGatheringForensics ? <Loader className="w-4 h-4 mr-2 animate-spin" /> : <Zap className="w-4 h-4 mr-2" />}
                                     {isGatheringForensics ? 'GATHERING EVIDENCE...' : '⚡ RUN FORENSIC SCAN'}
                                 </button>
                             </div>
-                            {!forensicData && !isGatheringForensics && ( <div className="flex flex-col items-center justify-center h-full text-slate-500 opacity-50 py-20"><Search className="w-16 h-16 mb-4" /><p className="text-lg">No forensic data available.</p><p className="text-sm">Click "RUN FORENSIC SCAN" to gather current system state.</p></div> )}
-                            {isGatheringForensics && ( <div className="flex flex-col items-center justify-center h-full py-20"><Loader className="w-12 h-12 text-blue-500 animate-spin mb-4" /><div className="text-blue-400 font-mono text-sm animate-pulse">Establishing secure channel...</div><div className="text-slate-500 text-xs mt-2">Dumping process table...</div><div className="text-slate-500 text-xs">Tracing network sockets...</div></div> )}
+
+                            {!forensicData && !isGatheringForensics && (
+                                <div className="flex flex-col items-center justify-center h-full text-slate-500 opacity-50 py-20">
+                                    <Search className="w-16 h-16 mb-4" />
+                                    <p className="text-lg">No forensic data available.</p>
+                                    <p className="text-sm">Click "RUN FORENSIC SCAN" to gather current system state.</p>
+                                </div>
+                            )}
+
+                            {isGatheringForensics && (
+                                <div className="flex flex-col items-center justify-center h-full py-20">
+                                    <Loader className="w-12 h-12 text-blue-500 animate-spin mb-4" />
+                                    <div className="text-blue-400 font-mono text-sm animate-pulse">Establishing secure channel...</div>
+                                    <div className="text-slate-500 text-xs mt-2">Dumping process table...</div>
+                                    <div className="text-slate-500 text-xs">Tracing network sockets...</div>
+                                </div>
+                            )}
+
                             {forensicData && !isGatheringForensics && (
                                 <div className="space-y-6 animate-fade-in">
                                     <div className="text-right text-xs text-slate-500 font-mono mb-2">Snapshot Timestamp: {new Date(forensicData.timestamp).toLocaleString()}</div>
+                                    
+                                    {/* 1. Process List */}
                                     <div className="border border-slate-700 rounded-lg overflow-hidden">
-                                        <div className="bg-slate-900/50 p-3 border-b border-slate-700 flex items-center font-bold text-slate-300 text-sm"><Activity className="w-4 h-4 mr-2 text-blue-400" /> Process Tree Analysis (Top CPU/Mem)</div>
+                                        <div className="bg-slate-900/50 p-3 border-b border-slate-700 flex items-center font-bold text-slate-300 text-sm">
+                                            <Activity className="w-4 h-4 mr-2 text-blue-400" /> Process Tree Analysis (Top CPU/Mem)
+                                        </div>
                                         <table className="w-full text-left text-xs">
-                                            <thead className="bg-slate-900 text-slate-500"><tr><th className="p-2">PID</th><th className="p-2">USER</th><th className="p-2">CPU%</th><th className="p-2">MEM%</th><th className="p-2">COMMAND</th><th className="p-2 text-right">RISK</th></tr></thead>
+                                            <thead className="bg-slate-900 text-slate-500">
+                                                <tr>
+                                                    <th className="p-2">PID</th>
+                                                    <th className="p-2">USER</th>
+                                                    <th className="p-2">CPU%</th>
+                                                    <th className="p-2">MEM%</th>
+                                                    <th className="p-2">COMMAND</th>
+                                                    <th className="p-2 text-right">RISK</th>
+                                                </tr>
+                                            </thead>
                                             <tbody className="divide-y divide-slate-700 bg-slate-800">
                                                 {forensicData.processes.map((proc, i) => (
                                                     <tr key={i} className={`hover:bg-slate-700/50 ${proc.risk === 'HIGH' ? 'bg-red-900/10' : proc.risk === 'MEDIUM' ? 'bg-yellow-900/10' : ''}`}>
-                                                        <td className="p-2 font-mono text-slate-400">{proc.pid}</td><td className="p-2 text-white">{proc.user}</td><td className="p-2 text-slate-300">{proc.cpu}</td><td className="p-2 text-slate-300">{proc.mem}</td><td className="p-2 font-mono text-yellow-500 break-all">{proc.command}</td>
-                                                        <td className="p-2 text-right">{proc.risk === 'HIGH' ? <span className="bg-red-600 text-white px-1.5 py-0.5 rounded text-[10px] font-bold">HIGH</span> : proc.risk === 'MEDIUM' ? <span className="bg-yellow-600 text-white px-1.5 py-0.5 rounded text-[10px] font-bold">MED</span> : <span className="text-slate-600 text-[10px]">LOW</span>}</td>
+                                                        <td className="p-2 font-mono text-slate-400">{proc.pid}</td>
+                                                        <td className="p-2 text-white">{proc.user}</td>
+                                                        <td className="p-2 text-slate-300">{proc.cpu}</td>
+                                                        <td className="p-2 text-slate-300">{proc.mem}</td>
+                                                        <td className="p-2 font-mono text-yellow-500 break-all">{proc.command}</td>
+                                                        <td className="p-2 text-right">
+                                                            {proc.risk === 'HIGH' 
+                                                                ? <span className="bg-red-600 text-white px-1.5 py-0.5 rounded text-[10px] font-bold">HIGH</span>
+                                                                : proc.risk === 'MEDIUM' 
+                                                                    ? <span className="bg-yellow-600 text-white px-1.5 py-0.5 rounded text-[10px] font-bold">MED</span>
+                                                                    : <span className="text-slate-600 text-[10px]">LOW</span>
+                                                            }
+                                                        </td>
                                                     </tr>
                                                 ))}
                                             </tbody>
                                         </table>
                                     </div>
+
                                     <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                                        {/* 2. Network Connections */}
                                         <div className="border border-slate-700 rounded-lg overflow-hidden flex flex-col">
-                                            <div className="bg-slate-900/50 p-3 border-b border-slate-700 flex items-center font-bold text-slate-300 text-sm"><Network className="w-4 h-4 mr-2 text-emerald-400" /> Network Artifacts (Netstat/SS)</div>
-                                            <div className="bg-black p-3 font-mono text-xs text-emerald-500 overflow-x-auto whitespace-pre h-64">{forensicData.connections.length > 0 ? forensicData.connections.join('\n') : <span className="text-slate-600 italic">No active connections found.</span>}</div>
+                                            <div className="bg-slate-900/50 p-3 border-b border-slate-700 flex items-center font-bold text-slate-300 text-sm">
+                                                <Network className="w-4 h-4 mr-2 text-emerald-400" /> Network Artifacts (Netstat/SS)
+                                            </div>
+                                            <div className="bg-black p-3 font-mono text-xs text-emerald-500 overflow-x-auto whitespace-pre h-64">
+                                                {forensicData.connections.length > 0 
+                                                    ? forensicData.connections.join('\n') 
+                                                    : <span className="text-slate-600 italic">No active connections found.</span>
+                                                }
+                                            </div>
                                         </div>
+
+                                        {/* 3. Auth Logs */}
                                         <div className="border border-slate-700 rounded-lg overflow-hidden flex flex-col">
-                                            <div className="bg-slate-900/50 p-3 border-b border-slate-700 flex items-center font-bold text-slate-300 text-sm"><FileText className="w-4 h-4 mr-2 text-yellow-400" /> Recent Auth Journal</div>
-                                            <div className="bg-black p-3 font-mono text-xs text-slate-400 overflow-x-auto whitespace-pre h-64">{forensicData.authLogs.length > 0 ? forensicData.authLogs.map((l, i) => (<div key={i} className="border-b border-slate-800 pb-1 mb-1 last:border-0">{l}</div>)) : <span className="text-slate-600 italic">No auth logs retrieved.</span>}</div>
+                                            <div className="bg-slate-900/50 p-3 border-b border-slate-700 flex items-center font-bold text-slate-300 text-sm">
+                                                <FileText className="w-4 h-4 mr-2 text-yellow-400" /> Recent Auth Journal
+                                            </div>
+                                            <div className="bg-black p-3 font-mono text-xs text-slate-400 overflow-x-auto whitespace-pre h-64">
+                                                {forensicData.authLogs.length > 0 
+                                                    ? forensicData.authLogs.map((l, i) => (
+                                                        <div key={i} className="border-b border-slate-800 pb-1 mb-1 last:border-0">{l}</div>
+                                                    ))
+                                                    : <span className="text-slate-600 italic">No auth logs retrieved.</span>
+                                                }
+                                            </div>
                                         </div>
                                     </div>
+                                    
+                                    {/* 4. Open Files (Mock Only usually) */}
                                     {forensicData.openFiles.length > 0 && (
                                         <div className="border border-slate-700 rounded-lg overflow-hidden">
-                                            <div className="bg-slate-900/50 p-3 border-b border-slate-700 flex items-center font-bold text-slate-300 text-sm"><HardDrive className="w-4 h-4 mr-2 text-purple-400" /> Suspicious Open File Handles</div>
-                                            <div className="bg-slate-800 p-0">{forensicData.openFiles.map((line, i) => (<div key={i} className="p-2 border-b border-slate-700 text-xs font-mono text-purple-300 hover:bg-slate-700">{line}</div>))}</div>
+                                            <div className="bg-slate-900/50 p-3 border-b border-slate-700 flex items-center font-bold text-slate-300 text-sm">
+                                                <HardDrive className="w-4 h-4 mr-2 text-purple-400" /> Suspicious Open File Handles
+                                            </div>
+                                            <div className="bg-slate-800 p-0">
+                                                {forensicData.openFiles.map((line, i) => (
+                                                    <div key={i} className="p-2 border-b border-slate-700 text-xs font-mono text-purple-300 hover:bg-slate-700">{line}</div>
+                                                ))}
+                                            </div>
                                         </div>
                                     )}
+
                                 </div>
                             )}
                         </>
                     )}
+
+                    {/* --- GHOST MODE (SESSION REPLAY) VIEW --- */}
                     {forensicView === 'SESSIONS' && (
                         <div className="h-full flex flex-col lg:flex-row gap-6">
+                            {/* Session List */}
                             <div className="w-full lg:w-1/3 bg-slate-900 rounded border border-slate-700 overflow-hidden flex flex-col">
-                                <div className="p-3 bg-slate-800 border-b border-slate-700 text-sm font-bold text-slate-300 flex justify-between items-center"><span>Recorded Sessions</span><button onClick={handleLoadSessions} disabled={isRefreshingSessions} className="text-slate-500 hover:text-white p-1 rounded hover:bg-slate-700 transition-colors" title="Refresh Session List"><RefreshCw className={`w-3.5 h-3.5 ${isRefreshingSessions ? 'animate-spin' : ''}`} /></button></div>
+                                <div className="p-3 bg-slate-800 border-b border-slate-700 text-sm font-bold text-slate-300 flex justify-between items-center">
+                                     <span>Recorded Sessions</span>
+                                     <button 
+                                        onClick={handleLoadSessions} 
+                                        disabled={isRefreshingSessions} 
+                                        className="text-slate-500 hover:text-white p-1 rounded hover:bg-slate-700 transition-colors"
+                                        title="Refresh Session List"
+                                     >
+                                         <RefreshCw className={`w-3.5 h-3.5 ${isRefreshingSessions ? 'animate-spin' : ''}`} />
+                                     </button>
+                                </div>
                                 <div className="flex-1 overflow-y-auto">
                                     {recordedSessions.length === 0 ? (
-                                        <div className="p-8 text-center text-slate-500 text-xs italic flex flex-col items-center"><Film className="w-8 h-8 mb-2 opacity-20" />No recorded attack sessions found.<br/>Enable a Trap to capture interactions.</div>
+                                        <div className="p-8 text-center text-slate-500 text-xs italic flex flex-col items-center">
+                                            <Film className="w-8 h-8 mb-2 opacity-20" />
+                                            No recorded attack sessions found.
+                                            <br/>Enable a Trap to capture interactions.
+                                        </div>
                                     ) : (
                                         recordedSessions.map(session => (
-                                            <div key={session.id} onClick={() => { setActiveSession(session); setReplayTime(0); setIsPlaying(false); }} className={`p-3 border-b border-slate-800 cursor-pointer hover:bg-slate-800 transition-colors group relative ${activeSession?.id === session.id ? 'bg-blue-900/20 border-l-4 border-l-blue-500' : ''}`}>
-                                                <div className="flex justify-between items-start mb-1 pr-6"><span className="text-xs font-bold text-white">{new Date(session.startTime).toLocaleString()}</span><span className="text-[10px] bg-red-900/50 text-red-300 px-1.5 rounded border border-red-800">{session.protocol}</span></div>
+                                            <div 
+                                                key={session.id} 
+                                                onClick={() => { setActiveSession(session); setReplayTime(0); setIsPlaying(false); }}
+                                                className={`p-3 border-b border-slate-800 cursor-pointer hover:bg-slate-800 transition-colors group relative ${activeSession?.id === session.id ? 'bg-blue-900/20 border-l-4 border-l-blue-500' : ''}`}
+                                            >
+                                                <div className="flex justify-between items-start mb-1 pr-6">
+                                                    <span className="text-xs font-bold text-white">{new Date(session.startTime).toLocaleString()}</span>
+                                                    <span className="text-[10px] bg-red-900/50 text-red-300 px-1.5 rounded border border-red-800">{session.protocol}</span>
+                                                </div>
                                                 <div className="text-xs text-slate-400 font-mono mb-1">{session.attackerIp}</div>
                                                 <div className="text-[10px] text-slate-600">{session.durationSeconds.toFixed(1)}s Duration • {session.frames.length} Events</div>
-                                                <button onClick={(e) => handleDeleteSession(e, session.id)} className="absolute top-3 right-2 text-slate-600 hover:text-red-500 opacity-0 group-hover:opacity-100 transition-opacity p-1.5" title="Delete Recording"><Trash2 className="w-3.5 h-3.5" /></button>
+                                                
+                                                <button 
+                                                    onClick={(e) => handleDeleteSession(e, session.id)}
+                                                    className="absolute top-3 right-2 text-slate-600 hover:text-red-500 opacity-0 group-hover:opacity-100 transition-opacity p-1.5"
+                                                    title="Delete Recording"
+                                                >
+                                                    <Trash2 className="w-3.5 h-3.5" />
+                                                </button>
                                             </div>
                                         ))
                                     )}
                                 </div>
                             </div>
+
+                            {/* Player */}
                             <div className="flex-1 bg-black rounded border border-slate-700 flex flex-col overflow-hidden relative">
                                 {!activeSession ? (
-                                    <div className="flex items-center justify-center h-full text-slate-600 flex-col"><Film className="w-12 h-12 mb-4 opacity-20" /><p>Select a session to replay</p></div>
+                                    <div className="flex items-center justify-center h-full text-slate-600 flex-col">
+                                        <Film className="w-12 h-12 mb-4 opacity-20" />
+                                        <p>Select a session to replay</p>
+                                    </div>
                                 ) : (
                                     <>
-                                        <div className="flex-1 p-4 font-mono text-xs md:text-sm overflow-y-auto whitespace-pre-wrap text-green-500 bg-black">{replayContent}<span className="animate-pulse inline-block w-2 h-4 bg-green-500 ml-1 align-middle"></span></div>
+                                        {/* Terminal Screen */}
+                                        <div className="flex-1 p-4 font-mono text-xs md:text-sm overflow-y-auto whitespace-pre-wrap text-green-500 bg-black">
+                                            {replayContent}
+                                            <span className="animate-pulse inline-block w-2 h-4 bg-green-500 ml-1 align-middle"></span>
+                                        </div>
+
+                                        {/* Controls */}
                                         <div className="bg-slate-800 p-3 border-t border-slate-700">
-                                            <div className="flex items-center justify-between mb-2 text-[10px] text-slate-400 font-mono"><span>{(replayTime/1000).toFixed(1)}s</span><span>{activeSession.durationSeconds.toFixed(1)}s</span></div>
-                                            <div className="relative h-2 bg-slate-700 rounded-full mb-4 cursor-pointer group" onClick={(e) => { const rect = e.currentTarget.getBoundingClientRect(); const x = e.clientX - rect.left; const pct = x / rect.width; setReplayTime(pct * activeSession.durationSeconds * 1000); }}>
-                                                <div className="absolute top-0 left-0 h-full bg-blue-500 rounded-full pointer-events-none" style={{ width: `${(replayTime / (activeSession.durationSeconds * 1000)) * 100}%` }}></div>
-                                                <div className="absolute top-1/2 -mt-1.5 w-3 h-3 bg-white rounded-full shadow cursor-grab group-hover:scale-125 transition-transform" style={{ left: `calc(${(replayTime / (activeSession.durationSeconds * 1000)) * 100}% - 6px)` }}></div>
+                                            <div className="flex items-center justify-between mb-2 text-[10px] text-slate-400 font-mono">
+                                                <span>{(replayTime/1000).toFixed(1)}s</span>
+                                                <span>{activeSession.durationSeconds.toFixed(1)}s</span>
                                             </div>
+                                            {/* Scrubber */}
+                                            <div className="relative h-2 bg-slate-700 rounded-full mb-4 cursor-pointer group" onClick={(e) => {
+                                                const rect = e.currentTarget.getBoundingClientRect();
+                                                const x = e.clientX - rect.left;
+                                                const pct = x / rect.width;
+                                                setReplayTime(pct * activeSession.durationSeconds * 1000);
+                                            }}>
+                                                <div 
+                                                    className="absolute top-0 left-0 h-full bg-blue-500 rounded-full pointer-events-none" 
+                                                    style={{ width: `${(replayTime / (activeSession.durationSeconds * 1000)) * 100}%` }}
+                                                ></div>
+                                                <div 
+                                                    className="absolute top-1/2 -mt-1.5 w-3 h-3 bg-white rounded-full shadow cursor-grab group-hover:scale-125 transition-transform"
+                                                    style={{ left: `calc(${(replayTime / (activeSession.durationSeconds * 1000)) * 100}% - 6px)` }}
+                                                ></div>
+                                            </div>
+
                                             <div className="flex justify-center items-center space-x-6">
-                                                <button onClick={() => setReplaySpeed(s => s === 1 ? 2 : s === 2 ? 4 : 1)} className="text-xs font-bold text-slate-500 w-12 text-center hover:text-white">{replaySpeed}x</button>
+                                                <button onClick={() => setReplaySpeed(s => s === 1 ? 2 : s === 2 ? 4 : 1)} className="text-xs font-bold text-slate-500 w-12 text-center hover:text-white">
+                                                    {replaySpeed}x
+                                                </button>
                                                 <button onClick={() => { setReplayTime(Math.max(0, replayTime - 5000)); }} className="text-slate-400 hover:text-white"><Rewind className="w-5 h-5" /></button>
-                                                <button onClick={() => setIsPlaying(!isPlaying)} className="bg-blue-600 hover:bg-blue-500 text-white p-3 rounded-full shadow-lg transition-transform hover:scale-105">{isPlaying ? <Pause className="w-6 h-6" /> : <Play className="w-6 h-6 ml-1" />}</button>
+                                                <button 
+                                                    onClick={() => setIsPlaying(!isPlaying)} 
+                                                    className="bg-blue-600 hover:bg-blue-500 text-white p-3 rounded-full shadow-lg transition-transform hover:scale-105"
+                                                >
+                                                    {isPlaying ? <Pause className="w-6 h-6" /> : <Play className="w-6 h-6 ml-1" />}
+                                                </button>
                                                 <button onClick={() => { setReplayTime(Math.min(activeSession.durationSeconds * 1000, replayTime + 5000)); }} className="text-slate-400 hover:text-white"><FastForward className="w-5 h-5" /></button>
-                                                <div className="w-12"></div>
+                                                <div className="w-12"></div> {/* Spacer */}
                                             </div>
                                         </div>
                                     </>
@@ -737,6 +1269,7 @@ const ActorDetail: React.FC<ActorDetailProps> = ({ actor, gateway, logs: initial
                             </div>
                         </div>
                     )}
+
                 </div>
            </div>
       )}
@@ -838,6 +1371,7 @@ const ActorDetail: React.FC<ActorDetailProps> = ({ actor, gateway, logs: initial
 
       {activeTab === 'NETWORK' && (
           <div className="space-y-6">
+              {/* SENTINEL MODE BANNER */}
               <div className={`rounded-xl border p-6 shadow-lg transition-all ${isSentinelEnabled ? 'bg-red-900/10 border-red-500/50 shadow-red-900/20' : 'bg-slate-800 border-slate-700'}`}>
                   <div className="flex justify-between items-start">
                       <div className="flex items-start">
@@ -854,31 +1388,50 @@ const ActorDetail: React.FC<ActorDetailProps> = ({ actor, gateway, logs: initial
                   </div>
               </div>
 
+              {/* TRAP PROJECTOR UI */}
               <div className="grid grid-cols-1 md:grid-cols-2 gap-6 h-[500px]">
+                  
+                  {/* LEFT: Active Tunnels Dashboard */}
                   <div className="bg-slate-800 rounded-xl border border-slate-700 p-6 shadow-lg flex flex-col">
                       <h3 className="text-lg font-bold text-white mb-2 flex items-center"><Network className="w-5 h-5 mr-2 text-emerald-400" /> Active Cloud Tunnels</h3>
                       <p className="text-slate-400 text-xs mb-4">Live connections forwarded to the central server honeypots.</p>
                       
                       <div className="flex-1 space-y-4 overflow-y-auto pr-2">
                           {tunnels.length === 0 && (
-                              <div className="h-full flex flex-col items-center justify-center text-slate-500 opacity-50 border-2 border-dashed border-slate-700 rounded-lg"><Monitor className="w-12 h-12 mb-3" /><p className="text-sm font-bold">No Active Projections</p><p className="text-xs">Select a trap from the catalog to project.</p></div>
+                              <div className="h-full flex flex-col items-center justify-center text-slate-500 opacity-50 border-2 border-dashed border-slate-700 rounded-lg">
+                                  <Monitor className="w-12 h-12 mb-3" />
+                                  <p className="text-sm font-bold">No Active Projections</p>
+                                  <p className="text-xs">Select a trap from the catalog to project.</p>
+                              </div>
                           )}
                           {tunnels.map(t => (
                               <div key={t.id} className="bg-slate-900 border border-emerald-900/50 p-4 rounded-lg relative overflow-hidden group">
+                                  {/* Animated Activity Line */}
                                   <div className="absolute top-0 left-0 w-full h-0.5 bg-gradient-to-r from-transparent via-emerald-500 to-transparent opacity-50 animate-shimmer"></div>
+                                  
                                   <div className="flex justify-between items-start">
                                       <div>
-                                          <div className="flex items-center"><span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse mr-2"></span><div className="font-bold text-emerald-400 text-sm">{t.trap.name}</div></div>
-                                          <div className="text-xs text-slate-400 font-mono mt-1 ml-4">Local Port: <span className="text-white font-bold">{t.localPort}</span> &rarr; {t.remoteEndpoint.includes('cloud-trap-vnet') ? 'Cloud (Mock)' : <span className="text-blue-400">{t.remoteEndpoint}</span>}</div>
-                                          <div className="text-[10px] text-slate-600 mt-2 ml-4 flex items-center"><Activity className="w-3 h-3 mr-1" /> Uptime: {Math.floor(Math.random()*100)}m</div>
+                                          <div className="flex items-center">
+                                              <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse mr-2"></span>
+                                              <div className="font-bold text-emerald-400 text-sm">{t.trap.name}</div>
+                                          </div>
+                                          <div className="text-xs text-slate-400 font-mono mt-1 ml-4">
+                                              Local Port: <span className="text-white font-bold">{t.localPort}</span> &rarr; Cloud
+                                          </div>
+                                          <div className="text-[10px] text-slate-600 mt-2 ml-4 flex items-center">
+                                              <Activity className="w-3 h-3 mr-1" /> Uptime: {Math.floor(Math.random()*100)}m
+                                          </div>
                                       </div>
-                                      <button onClick={() => handleStopTunnel(t.id)} className="bg-slate-800 hover:bg-red-900/50 text-slate-400 hover:text-red-400 p-2 rounded transition-colors border border-slate-700 hover:border-red-500"><Power className="w-4 h-4" /></button>
+                                      <button onClick={() => handleStopTunnel(t.id)} className="bg-slate-800 hover:bg-red-900/50 text-slate-400 hover:text-red-400 p-2 rounded transition-colors border border-slate-700 hover:border-red-500">
+                                          <Power className="w-4 h-4" />
+                                      </button>
                                   </div>
                               </div>
                           ))}
                       </div>
                   </div>
 
+                  {/* RIGHT: Trap Catalog */}
                   <div className="bg-slate-800 rounded-xl border border-slate-700 p-6 shadow-lg flex flex-col">
                       <h3 className="text-lg font-bold text-white mb-2 flex items-center"><Database className="w-5 h-5 mr-2 text-blue-400" /> Trap Catalog</h3>
                       <p className="text-slate-400 text-xs mb-4">Project high-interaction vulnerabilities from the server to this device.</p>
@@ -889,33 +1442,83 @@ const ActorDetail: React.FC<ActorDetailProps> = ({ actor, gateway, logs: initial
                               const isPending = pendingTunnel === trap.id;
                               const conflictingPorts = getTunnelConflicts(trap.id);
                               const hasConflict = conflictingPorts.length > 0 && !isActive;
+                              
                               return (
                                   <div key={trap.id} className="relative group">
-                                      <button onClick={() => !hasConflict && handleToggleTunnel(trap.id)} disabled={isPending || (hasConflict && !isActive)} className={`w-full text-left p-3 rounded border flex items-center justify-between transition-all ${isActive ? 'bg-emerald-900/10 border-emerald-500/50' : hasConflict ? 'bg-slate-900/40 border-slate-800 cursor-not-allowed grayscale opacity-60' : 'bg-slate-900 border-slate-700 hover:border-blue-500 hover:bg-slate-800'}`}>
+                                      <button 
+                                        onClick={() => !hasConflict && handleToggleTunnel(trap.id)} 
+                                        disabled={isPending || (hasConflict && !isActive)} 
+                                        className={`w-full text-left p-3 rounded border flex items-center justify-between transition-all ${
+                                            isActive 
+                                            ? 'bg-emerald-900/10 border-emerald-500/50' 
+                                            : hasConflict 
+                                                ? 'bg-slate-900/40 border-slate-800 cursor-not-allowed grayscale opacity-60' 
+                                                : 'bg-slate-900 border-slate-700 hover:border-blue-500 hover:bg-slate-800'
+                                        }`}
+                                      >
                                           <div className="flex items-center">
-                                              <div className={`p-2 rounded mr-3 ${isActive ? 'bg-emerald-500/20 text-emerald-400' : 'bg-slate-800 text-slate-500'}`}><Server className="w-4 h-4" /></div>
-                                              <div><div className={`font-bold text-sm ${isActive ? 'text-emerald-400' : 'text-slate-200'}`}>{trap.name}</div><div className="text-xs text-slate-500">{trap.serviceType} <span className="opacity-50">({DEFAULT_TRAP_PORTS[trap.id] || 'Dynamic'})</span></div></div>
+                                              <div className={`p-2 rounded mr-3 ${isActive ? 'bg-emerald-500/20 text-emerald-400' : 'bg-slate-800 text-slate-500'}`}>
+                                                  <Server className="w-4 h-4" />
+                                              </div>
+                                              <div>
+                                                  <div className={`font-bold text-sm ${isActive ? 'text-emerald-400' : 'text-slate-200'}`}>{trap.name}</div>
+                                                  <div className="text-xs text-slate-500">{trap.serviceType} <span className="opacity-50">({DEFAULT_TRAP_PORTS[trap.id] || 'Dynamic'})</span></div>
+                                              </div>
                                           </div>
-                                          <div className="flex items-center">{isPending ? (<Loader className="w-4 h-4 animate-spin text-blue-400" />) : (<div className={`w-8 h-4 rounded-full relative transition-colors ${isActive ? 'bg-emerald-500' : 'bg-slate-700'}`}><div className={`absolute top-0.5 w-3 h-3 bg-white rounded-full transition-all ${isActive ? 'left-[18px]' : 'left-0.5'}`} /></div>)}</div>
+                                          
+                                          <div className="flex items-center">
+                                              {isPending ? (
+                                                  <Loader className="w-4 h-4 animate-spin text-blue-400" />
+                                              ) : (
+                                                  <div className={`w-8 h-4 rounded-full relative transition-colors ${isActive ? 'bg-emerald-500' : 'bg-slate-700'}`}>
+                                                      <div className={`absolute top-0.5 w-3 h-3 bg-white rounded-full transition-all ${isActive ? 'left-[18px]' : 'left-0.5'}`} />
+                                                  </div>
+                                              )}
+                                          </div>
                                       </button>
-                                      {hasConflict && ( <div className="absolute inset-0 hidden group-hover:flex items-center justify-center pointer-events-none z-10"><div className="bg-red-900/90 text-red-200 text-xs px-2 py-1 rounded shadow-lg border border-red-500/50 backdrop-blur-[1px]">Port {conflictingPorts.join(', ')} occupied</div></div> )}
+                                      
+                                      {hasConflict && (
+                                          <div className="absolute inset-0 hidden group-hover:flex items-center justify-center pointer-events-none z-10">
+                                              <div className="bg-red-900/90 text-red-200 text-xs px-2 py-1 rounded shadow-lg border border-red-500/50 backdrop-blur-[1px]">
+                                                  Port {conflictingPorts.join(', ')} occupied
+                                              </div>
+                                          </div>
+                                      )}
                                   </div>
                               );
                           })}
                       </div>
 
+                      {/* Custom Forwarding */}
                       <div className="border-t border-slate-700 pt-4 mt-2">
                           <h4 className="text-xs font-bold text-slate-400 uppercase mb-2">Custom Projection</h4>
                           <div className="flex gap-2">
-                              <input placeholder="Port (e.g. 8080)" className="bg-slate-900 border border-slate-600 rounded px-2 py-2 text-xs text-white outline-none w-24 focus:border-blue-500" value={customPort} onChange={e => setCustomPort(e.target.value)} />
-                              <input placeholder="Service Name" className="bg-slate-900 border border-slate-600 rounded px-2 py-2 text-xs text-white outline-none flex-1 focus:border-blue-500" value={customService} onChange={e => setCustomService(e.target.value)} />
-                              <button onClick={handleStartCustomTunnel} disabled={!customPort} className="bg-blue-600 hover:bg-blue-500 text-white px-3 py-1 rounded text-xs font-bold disabled:opacity-50">OPEN</button>
+                              <input 
+                                placeholder="Port (e.g. 8080)" 
+                                className="bg-slate-900 border border-slate-600 rounded px-2 py-2 text-xs text-white outline-none w-24 focus:border-blue-500" 
+                                value={customPort} 
+                                onChange={e => setCustomPort(e.target.value)} 
+                              />
+                              <input 
+                                placeholder="Service Name" 
+                                className="bg-slate-900 border border-slate-600 rounded px-2 py-2 text-xs text-white outline-none flex-1 focus:border-blue-500" 
+                                value={customService} 
+                                onChange={e => setCustomService(e.target.value)} 
+                              />
+                              <button 
+                                onClick={handleStartCustomTunnel} 
+                                disabled={!customPort} 
+                                className="bg-blue-600 hover:bg-blue-500 text-white px-3 py-1 rounded text-xs font-bold disabled:opacity-50"
+                              >
+                                OPEN
+                              </button>
                           </div>
                       </div>
                   </div>
               </div>
           </div>
       )}
+
     </div>
   );
 };
