@@ -37,11 +37,11 @@ const GatewayManager: React.FC<GatewayManagerProps> = ({ gateways, onRefresh, do
       if (isProduction) {
           await registerGateway(newGw);
           const token = await generateEnrollmentToken('SITE', newGw.id);
-          setInstallToken(`curl -sL http://${domain}/api/setup | sudo bash -s ${token}`);
+          setInstallToken(`curl -sL http://${domain}/setup | sudo bash -s ${token}`);
           onRefresh();
       } else {
           // Mock
-          setInstallToken(`curl -sL http://${domain}/api/setup | sudo bash -s ${newGw.id}`);
+          setInstallToken(`curl -sL http://${domain}/setup | sudo bash -s ${newGw.id}`);
           // Note: In mock mode, we can't easily persist the gateway to the main list without lifting state up significantly, 
           // but checking "isProduction" usually covers the use case.
       }

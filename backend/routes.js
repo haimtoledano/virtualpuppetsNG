@@ -4,7 +4,6 @@ import QRCode from 'qrcode';
 import sql from 'mssql';
 import { dbPool, connectToDb, saveDbConfigLocal, runSchemaMigrations, refreshSyslogConfig, sendToSyslog, getDbConfig } from './database.js';
 import { getSessions, deleteSession, initTrap, interactTrap } from './honeypot.js';
-import { generateAgentScript } from './agent-script.js';
 
 const router = express.Router();
 
@@ -399,21 +398,6 @@ router.post('/agent/scan-results', async (req, res) => {
         }
         res.json({success: true});
     } catch(e) { res.json({success: false}); }
-});
-
-router.get('/setup', (req, res) => {
-    const host = req.get('host');
-    const protocol = req.protocol;
-    const serverUrl = `${protocol}://${host}`;
-    // We assume the first argument to the bash script is TOKEN
-    // However, the script is dynamic based on token passed in CLI args.
-    // The previous implementation replaced $1 in the script text, but our new generator
-    // creates the script with the token embedded if we pass it, OR we can stick to $1.
-    // The simplified version:
-    const script = generateAgentScript(serverUrl, '$1');
-    res.setHeader('Content-Type', 'text/plain');
-    // Force LF line endings for bash compatibility
-    res.send(script.replace(/\r\n/g, '\n').trim());
 });
 
 export default router;

@@ -9,6 +9,7 @@ import { authenticator } from 'otplib';
 // Backend Modules
 import { initDb, dbPool } from './backend/database.js';
 import { startHoneypots } from './backend/honeypot.js';
+import { generateAgentScript } from './backend/agent-script.js';
 import apiRoutes from './backend/routes.js';
 import sql from 'mssql';
 
@@ -65,6 +66,18 @@ const init = async () => {
 
 // Mount API Routes
 app.use('/api', apiRoutes);
+
+// Root Setup Route (Serves Bash Script)
+app.get('/setup', (req, res) => {
+    const host = req.get('host');
+    const protocol = req.protocol;
+    const serverUrl = `${protocol}://${host}`;
+    // We pass $1 as the token placeholder for the bash script argument
+    const script = generateAgentScript(serverUrl, '$1');
+    res.setHeader('Content-Type', 'text/plain');
+    // Force LF line endings for bash compatibility
+    res.send(script.replace(/\r\n/g, '\n').trim());
+});
 
 // Explicit API 404 Handler
 app.all('/api/*', (req, res) => {
