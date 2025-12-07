@@ -3,7 +3,7 @@ import React, { useState, useEffect, useCallback, Suspense } from 'react';
 import { generateInitialActors, generateRandomLog, generateGateways } from './services/mockService';
 import { dbQuery, getSystemConfig, getPendingActors, approvePendingActor, rejectPendingActor, getSystemLogs, sendAuditLog, triggerFleetUpdate } from './services/dbService';
 import { saveUserPreferences } from './services/authService';
-import { Actor, LogEntry, ProxyGateway, PendingActor, ActorStatus, User, SystemConfig, UserPreferences } from './types';
+import { Actor, LogEntry, ProxyGateway, PendingActor, ActorStatus, User, SystemConfig, UserPreferences, LogLevel } from './types';
 import { LayoutDashboard, Settings as SettingsIcon, Network, Plus, LogOut, User as UserIcon, FileText, Globe, Router, Radio, Loader, RefreshCw, Zap } from 'lucide-react';
 
 // Lazy Load Components
@@ -124,17 +124,33 @@ const App: React.FC = () => {
       return () => clearInterval(interval);
   }, []);
 
+  // --- LOG GENERATION & ALERT TRIGGER ---
   useEffect(() => {
+    // MOCK MODE LOGIC
     if (!isProduction && actors.length > 0) {
         const interval = setInterval(() => {
           const newLog = generateRandomLog(actors);
+          
           setLogs(prev => {
             const updated = [...prev, newLog];
             return updated.length > 200 ? updated.slice(updated.length - 200) : updated;
           });
+
+          // CRITICAL: Sync the "Event" to the Actor State to trigger alerts
+          if (newLog.level === LogLevel.CRITICAL) {
+              setActors(prevActors => prevActors.map(a => {
+                  if (a.id === newLog.actorId && a.status === ActorStatus.ONLINE) {
+                      return { ...a, status: ActorStatus.COMPROMISED };
+                  }
+                  return a;
+              }));
+          }
+
         }, 2000);
         return () => clearInterval(interval);
     } 
+    
+    // PRODUCTION MODE LOGIC
     if (isProduction && currentUser) {
         const interval = setInterval(async () => {
              const realLogs = await getSystemLogs();
@@ -142,7 +158,7 @@ const App: React.FC = () => {
         }, 3000); // 3s polling
         return () => clearInterval(interval);
     }
-  }, [isProduction, currentUser]);
+  }, [isProduction, currentUser, actors]); // Added actors to dependency to ensure mock generation uses latest state
 
   const handleAdoptDevice = async (pendingId: string, proxyId: string, name: string) => {
       if (!isProduction) {

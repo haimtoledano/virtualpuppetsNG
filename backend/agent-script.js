@@ -1,5 +1,4 @@
 export const generateAgentScript = (serverUrl, token) => {
-  // Safe Bash Script with HEREDOCs flush left to prevent indentation errors
   return `#!/bin/bash
 TOKEN="${token}"
 SERVER_URL="${serverUrl}"
@@ -46,11 +45,17 @@ curl -s -o /dev/null -H "X-VPP-HWID: $HWID" -H "X-VPP-OS: $OS_NAME" -H "X-VPP-WI
 cat <<'EOF_RELAY' > $AGENT_DIR/trap_relay.sh
 #!/bin/bash
 SERVER=$(cat /opt/vpp-agent/.server)
+AGENT_DIR="/opt/vpp-agent"
+# Read Actor ID if available to attribute threats
+ACTOR_ID=$(cat "$AGENT_DIR/vpp-id" 2>/dev/null || echo "unknown")
+
 SID=$(curl -s -X POST "$SERVER/api/trap/init" | jq -r .sessionId)
 curl -s -X POST "$SERVER/api/trap/init" | jq -r .banner
-while read -r LINE; do 
-  # Safe JSON construction
-  PAYLOAD=$(jq -n --arg sid "$SID" --arg input "$LINE" '{sessionId: $sid, input: $input}')
+
+# Loop to read input lines and forward to server
+while IFS= read -r LINE; do 
+  # Safe JSON construction with Actor ID
+  PAYLOAD=$(jq -n --arg sid "$SID" --arg input "$LINE" --arg aid "$ACTOR_ID" '{sessionId: $sid, input: $input, actorId: $aid}')
   RESP=$(curl -s -X POST -H "Content-Type: application/json" -d "$PAYLOAD" "$SERVER/api/trap/interact" | jq -r .response)
   echo -ne "$RESP"
 done

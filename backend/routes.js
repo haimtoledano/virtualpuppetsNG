@@ -292,16 +292,56 @@ router.get('/recon/wifi', async (req, res) => { if (!dbPool) return res.json([])
 router.get('/recon/bluetooth', async (req, res) => { if (!dbPool) return res.json([]); try { const r = await dbPool.request().query("SELECT * FROM BluetoothDevices ORDER BY LastSeen DESC"); res.json(r.recordset); } catch(e) { res.json([]); } });
 
 // --- TRAP / GHOST MODE API ---
-router.post('/trap/init', (req, res) => {
+router.post('/trap/init', async (req, res) => {
     const sid = `trap-${Date.now()}`;
+    const { actorId } = req.body;
     const data = initTrap(sid);
+    // Log init
+    if (dbPool && actorId && actorId !== 'unknown') {
+        try {
+            await dbPool.request()
+                .input('aid', sql.NVarChar, actorId)
+                .input('lvl', sql.NVarChar, 'INFO')
+                .input('proc', sql.NVarChar, 'trap-relay')
+                .input('msg', sql.NVarChar, `[TRAP INIT] New session ${sid}`)
+                .query("INSERT INTO Logs (LogId, ActorId, Level, Process, Message, Timestamp) VALUES (NEWID(), @aid, @lvl, @proc, @msg, GETDATE())");
+        } catch(e) {}
+    }
     res.json(data);
 });
-router.post('/trap/interact', (req, res) => {
-    const { sessionId, input } = req.body;
+
+router.post('/trap/interact', async (req, res) => {
+    const { sessionId, input, actorId } = req.body;
     const response = interactTrap(input);
+    
+    // Log interaction and trigger alert if connected
+    if (dbPool && actorId && actorId !== 'unknown') {
+        try {
+            const cleanInput = (input || '').trim().substring(0, 50);
+            const isSensitive = /USER|PASS|AUTH|SELECT|DROP|UNION/i.test(cleanInput);
+            const level = isSensitive ? 'CRITICAL' : 'WARNING';
+            
+            // 1. Insert Log
+            await dbPool.request()
+                .input('aid', sql.NVarChar, actorId)
+                .input('lvl', sql.NVarChar, level)
+                .input('proc', sql.NVarChar, 'trap-relay')
+                .input('msg', sql.NVarChar, `[TRAP ALERT] Input: ${cleanInput}`)
+                .query("INSERT INTO Logs (LogId, ActorId, Level, Process, Message, Timestamp) VALUES (NEWID(), @aid, @lvl, @proc, @msg, GETDATE())");
+            
+            // 2. Update Status to COMPROMISED
+            await dbPool.request()
+                .input('aid', sql.NVarChar, actorId)
+                .query("UPDATE Actors SET Status = 'COMPROMISED' WHERE ActorId = @aid");
+                
+        } catch (e) {
+            console.error("Failed to log trap interaction", e);
+        }
+    }
+    
     res.json(response);
 });
+
 router.get('/sessions', (req, res) => res.json(getSessions()));
 router.delete('/sessions/:id', (req, res) => { deleteSession(req.params.id); res.json({ success: true }); });
 
