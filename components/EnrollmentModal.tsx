@@ -135,7 +135,7 @@ const EnrollmentModal: React.FC<EnrollmentModalProps> = ({
 
   const handleCopy = () => {
       const proxyFlag = (!isProduction && selectedProxyId !== 'DIRECT') ? ` --proxy ${selectedProxyId}` : '';
-      const cmd = `curl -sL http://${domain}/setup | sudo bash -s ${token}${proxyFlag}`;
+      const cmd = `curl -sL http://${domain}/api/setup | sudo bash -s ${token}${proxyFlag}`;
       
       if (navigator.clipboard && navigator.clipboard.writeText) {
           navigator.clipboard.writeText(cmd);
@@ -182,11 +182,11 @@ const EnrollmentModal: React.FC<EnrollmentModalProps> = ({
               onGatewayRegistered();
           }
           const t = await generateEnrollmentToken('SITE', newGw.id);
-          const cmd = `curl -sL http://${domain}/setup-proxy | sudo bash -s ${t}`;
+          const cmd = `curl -sL http://${domain}/api/setup | sudo bash -s ${t}`;
           setSiteToken(cmd);
       } else {
           alert("Site created (Simulation). In production, this would register the gateway in DB.");
-          setSiteToken(`curl -sL http://${domain}/setup-proxy | sudo bash -s ${newGw.id}`);
+          setSiteToken(`curl -sL http://${domain}/api/setup | sudo bash -s ${newGw.id}`);
       }
   };
 
@@ -263,7 +263,7 @@ const EnrollmentModal: React.FC<EnrollmentModalProps> = ({
                                     </div>
                                 ) : (
                                     <code className="font-mono text-emerald-400 text-xs md:text-sm break-all mr-4">
-                                        curl -sL {domain.startsWith('http') ? domain : `http://${domain}`}/setup | sudo bash -s {token} {(!isProduction && selectedProxyId !== 'DIRECT') ? `--proxy ${selectedProxyId}` : ''}
+                                        curl -sL {domain.startsWith('http') ? domain : `http://${domain}`}/api/setup | sudo bash -s {token} {(!isProduction && selectedProxyId !== 'DIRECT') ? `--proxy ${selectedProxyId}` : ''}
                                     </code>
                                 )}
                                 

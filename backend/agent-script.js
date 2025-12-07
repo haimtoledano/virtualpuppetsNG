@@ -1,5 +1,5 @@
-
 export const generateAgentScript = (serverUrl, token) => {
+  // Safe Bash Script with HEREDOCs flush left to prevent indentation errors
   return `#!/bin/bash
 TOKEN="${token}"
 SERVER_URL="${serverUrl}"
