@@ -348,6 +348,8 @@ router.post('/enroll/approve', async (req, res) => {
         const pending = pendingRes.recordset[0];
         
         const actorId = `puppet-${Math.random().toString(36).substr(2,6)}`;
+        
+        // FIXED: Swapped @ip and GETDATE() to match LocalIp (string) and LastSeen (datetime)
         await dbPool.request()
             .input('aid', sql.NVarChar, actorId)
             .input('hwid', sql.NVarChar, pending.HwId)
@@ -358,7 +360,7 @@ router.post('/enroll/approve', async (req, res) => {
             .input('ver', sql.NVarChar, CURRENT_AGENT_VERSION)
             .query(`
                 INSERT INTO Actors (ActorId, HwId, GatewayId, Name, Status, LocalIp, LastSeen, OsVersion, AgentVersion)
-                VALUES (@aid, @hwid, @gw, @name, 'ONLINE', GETDATE(), @ip, @os, @ver)
+                VALUES (@aid, @hwid, @gw, @name, 'ONLINE', @ip, GETDATE(), @os, @ver)
             `);
 
         await dbPool.request().input('pid', sql.NVarChar, pendingId).query("DELETE FROM PendingActors WHERE Id = @pid");
