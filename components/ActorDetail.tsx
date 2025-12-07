@@ -5,6 +5,7 @@
 
 
 
+
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { Actor, LogEntry, ActorStatus, AiAnalysis, ProxyGateway, HoneyFile, ActiveTunnel, DevicePersona, CommandJob, LogLevel, User, UserPreferences, ForensicSnapshot, ForensicProcess, AttackSession } from '../types';
 import { executeRemoteCommand, getAvailableCloudTraps, toggleTunnelMock, AVAILABLE_PERSONAS, generateRandomLog, performForensicScan, getAttackSessions, deleteAttackSession } from '../services/mockService';
@@ -533,7 +534,7 @@ const ActorDetail: React.FC<ActorDetailProps> = ({ actor, gateway, logs: initial
       if (isProduction) await updateActorTunnels(actor.id, updatedTunnels);
       
       if (tunnelToStop) {
-        await handleCommand(`pkill -f "TCP-LISTEN:${tunnelToStop.localPort}" || true`);
+        await handleCommand(`pkill -f "TCP4-LISTEN:${tunnelToStop.localPort}" || pkill -f "TCP-LISTEN:${tunnelToStop.localPort}" || true`);
       } else {
         await handleCommand(`pkill -f "socat" || true`);
       }
@@ -549,9 +550,6 @@ const ActorDetail: React.FC<ActorDetailProps> = ({ actor, gateway, logs: initial
       }
       const port = DEFAULT_TRAP_PORTS[trapId] || (3306 + tunnels.length);
       const newTunnel = await toggleTunnelMock(actor, trapId, port); 
-      const updatedTunnels = [...tunnels, newTunnel];
-      setTunnels(updatedTunnels);
-      if (isProduction) await updateActorTunnels(actor.id, updatedTunnels);
       
       // Determine server IP (assume browser can resolve it, agent likely can too if DNS is setup, otherwise default to window.location.hostname for simple setups)
       const serverIp = window.location.hostname;
@@ -559,11 +557,16 @@ const ActorDetail: React.FC<ActorDetailProps> = ({ actor, gateway, logs: initial
 
       if (isProduction && remotePort) {
            // Tunnel to REAL Honeypot on Server
-           await handleCommand(`nohup socat TCP-LISTEN:${port},fork TCP:${serverIp}:${remotePort} >/dev/null 2>&1 & # ${newTunnel.id}`);
+           newTunnel.remoteEndpoint = `${serverIp}:${remotePort}`;
+           await handleCommand(`nohup socat TCP4-LISTEN:${port},fork,reuseaddr TCP4:${serverIp}:${remotePort} >/dev/null 2>&1 & # ${newTunnel.id}`);
       } else {
            // Local Echo or Mock
            await handleCommand(`nohup socat TCP-LISTEN:${port},fork SYSTEM:'echo VPP_TRAP_SINK; cat' >/dev/null 2>&1 & # ${newTunnel.id}`);
       }
+      
+      const updatedTunnels = [...tunnels, newTunnel];
+      setTunnels(updatedTunnels);
+      if (isProduction) await updateActorTunnels(actor.id, updatedTunnels);
       
       setPendingTunnel(null);
   };
@@ -1416,7 +1419,7 @@ const ActorDetail: React.FC<ActorDetailProps> = ({ actor, gateway, logs: initial
                                               <div className="font-bold text-emerald-400 text-sm">{t.trap.name}</div>
                                           </div>
                                           <div className="text-xs text-slate-400 font-mono mt-1 ml-4">
-                                              Local Port: <span className="text-white font-bold">{t.localPort}</span> &rarr; Cloud
+                                              Local Port: <span className="text-white font-bold">{t.localPort}</span> &rarr; {t.remoteEndpoint.includes('cloud-trap-vnet') ? 'Cloud (Mock)' : <span className="text-blue-400">{t.remoteEndpoint}</span>}
                                           </div>
                                           <div className="text-[10px] text-slate-600 mt-2 ml-4 flex items-center">
                                               <Activity className="w-3 h-3 mr-1" /> Uptime: {Math.floor(Math.random()*100)}m

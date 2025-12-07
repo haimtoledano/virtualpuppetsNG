@@ -113,6 +113,7 @@ const startHoneypotListener = (server, port, name) => {
 const startFtpServer = () => {
     const server = net.createServer((socket) => {
         const { record } = createSession(socket, 'FTP');
+        console.log(`[FTP] New connection from ${socket.remoteAddress}`);
         
         const send = (msg) => {
             if (socket.writable) {
@@ -121,8 +122,8 @@ const startFtpServer = () => {
             }
         };
 
-        // Initial Banner
-        setTimeout(() => send('220 (vsFTPd 2.3.4)\r\n'), 200);
+        // Initial Banner - Immediate Response
+        send('220 (vsFTPd 2.3.4)\r\n');
 
         socket.on('data', (data) => {
             record('INPUT', data);
@@ -148,6 +149,7 @@ const startFtpServer = () => {
 const startTelnetServer = () => {
     const server = net.createServer((socket) => {
         const { record } = createSession(socket, 'TELNET');
+        console.log(`[TELNET] New connection from ${socket.remoteAddress}`);
         let state = 'LOGIN';
 
         const send = (msg) => {
@@ -157,7 +159,8 @@ const startTelnetServer = () => {
             }
         };
 
-        setTimeout(() => send('\r\nUbuntu 20.04.6 LTS\r\nserver login: '), 200);
+        // Initial Banner - Immediate Response
+        send('\r\nUbuntu 20.04.6 LTS\r\nserver login: ');
 
         socket.on('data', (data) => {
             record('INPUT', data); // Telnet sends char by char often, but for simplicity
@@ -181,6 +184,7 @@ const startTelnetServer = () => {
 const startRedisServer = () => {
     const server = net.createServer((socket) => {
         const { record } = createSession(socket, 'REDIS');
+        console.log(`[REDIS] New connection from ${socket.remoteAddress}`);
         
         const send = (msg) => {
             if (socket.writable) {
