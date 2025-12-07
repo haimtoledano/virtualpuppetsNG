@@ -40,6 +40,11 @@ app.use(bodyParser.json({
     verify: (req, res, buf) => { req.rawBody = buf.toString(); }
 }));
 
+// Serve Static Files (Correctly placed)
+if (fs.existsSync(distPath)) {
+    app.use(express.static(distPath));
+}
+
 // JSON Syntax Error Handler
 app.use((err, req, res, next) => {
     if (err instanceof SyntaxError && 'body' in err) {
@@ -56,7 +61,7 @@ const getClientIp = (req) => {
 };
 
 // ==========================================
-// 1. HONEYPOT SERVICES (TCP Listeners)
+// 1. HONEYPOT SERVICES
 // ==========================================
 
 const createSession = (socket, protocol) => {
@@ -145,7 +150,7 @@ startTelnetServer();
 startRedisServer();
 
 // ==========================================
-// 2. DATABASE & CONFIG
+// 2. DATABASE
 // ==========================================
 
 const getDbConfig = () => {
@@ -179,30 +184,22 @@ const refreshSyslogConfig = async (pool) => {
     } catch (e) {}
 };
 
-const sendToSyslog = (level, processName, message) => {
-    if (!syslogConfig.enabled || !syslogConfig.host) return;
-    const client = dgram.createSocket('udp4');
-    const msg = `<134>${new Date().toISOString()} VPP-C2 ${processName}: ${message}`;
-    client.send(msg, syslogConfig.port, syslogConfig.host, (err) => { client.close(); });
-};
-
 const runSchemaMigrations = async (pool) => {
     if (!pool) return;
     const req = new sql.Request(pool);
-    // Core Tables
-    try { await req.query(`IF OBJECT_ID('SystemConfig','U') IS NULL CREATE TABLE SystemConfig (ConfigKey NVARCHAR(50) PRIMARY KEY, ConfigValue NVARCHAR(MAX))`); } catch(e){}
-    try { await req.query(`IF OBJECT_ID('Users','U') IS NULL CREATE TABLE Users (UserId NVARCHAR(50) PRIMARY KEY, Username NVARCHAR(100), PasswordHash NVARCHAR(255), Role NVARCHAR(20), MfaEnabled BIT DEFAULT 0, MfaSecret NVARCHAR(100), LastLogin DATETIME, Preferences NVARCHAR(MAX))`); } catch(e){}
-    try { await req.query(`IF OBJECT_ID('Actors','U') IS NULL CREATE TABLE Actors (ActorId NVARCHAR(50) PRIMARY KEY, HwId NVARCHAR(100), GatewayId NVARCHAR(50), Name NVARCHAR(100), Status NVARCHAR(20), LocalIp NVARCHAR(50), LastSeen DATETIME, Config NVARCHAR(MAX), OsVersion NVARCHAR(100), TunnelsJson NVARCHAR(MAX), Persona NVARCHAR(MAX), HoneyFilesJson NVARCHAR(MAX), HasWifi BIT DEFAULT 0, HasBluetooth BIT DEFAULT 0, WifiScanningEnabled BIT DEFAULT 0, BluetoothScanningEnabled BIT DEFAULT 0, CpuLoad FLOAT DEFAULT 0, MemoryUsage FLOAT DEFAULT 0, Temperature FLOAT DEFAULT 0, TcpSentinelEnabled BIT DEFAULT 0, AgentVersion NVARCHAR(50))`); } catch(e){}
-    try { await req.query(`IF OBJECT_ID('Gateways','U') IS NULL CREATE TABLE Gateways (GatewayId NVARCHAR(50) PRIMARY KEY, Name NVARCHAR(100), Location NVARCHAR(100), Status NVARCHAR(20), IpAddress NVARCHAR(50), Lat FLOAT, Lng FLOAT)`); } catch(e){}
-    try { await req.query(`IF OBJECT_ID('Logs','U') IS NULL CREATE TABLE Logs (LogId NVARCHAR(50) PRIMARY KEY, ActorId NVARCHAR(50), Level NVARCHAR(20), Process NVARCHAR(50), Message NVARCHAR(MAX), SourceIp NVARCHAR(50), Timestamp DATETIME)`); } catch(e){}
-    try { await req.query(`IF OBJECT_ID('CommandQueue','U') IS NULL CREATE TABLE CommandQueue (JobId NVARCHAR(50) PRIMARY KEY, ActorId NVARCHAR(50), Command NVARCHAR(MAX), Status NVARCHAR(20), Output NVARCHAR(MAX), CreatedAt DATETIME, UpdatedAt DATETIME)`); } catch(e){}
-    try { await req.query(`IF OBJECT_ID('Reports','U') IS NULL CREATE TABLE Reports (ReportId NVARCHAR(50) PRIMARY KEY, Title NVARCHAR(100), GeneratedBy NVARCHAR(100), Type NVARCHAR(50), CreatedAt DATETIME, ContentJson NVARCHAR(MAX))`); } catch(e){}
-    try { await req.query(`IF OBJECT_ID('EnrollmentTokens','U') IS NULL CREATE TABLE EnrollmentTokens (Token NVARCHAR(50) PRIMARY KEY, Type NVARCHAR(20), TargetId NVARCHAR(50), ConfigJson NVARCHAR(MAX), CreatedAt DATETIME, IsUsed BIT)`); } catch(e){}
-    try { await req.query(`IF OBJECT_ID('PendingActors','U') IS NULL CREATE TABLE PendingActors (Id NVARCHAR(50) PRIMARY KEY, HwId NVARCHAR(100), DetectedIp NVARCHAR(50), TargetGatewayId NVARCHAR(50), DetectedAt DATETIME, OsVersion NVARCHAR(100))`); } catch(e){}
-    try { await req.query(`IF OBJECT_ID('WifiNetworks','U') IS NULL CREATE TABLE WifiNetworks (Id NVARCHAR(50) PRIMARY KEY, Ssid NVARCHAR(100), Bssid NVARCHAR(50), SignalStrength INT, Security NVARCHAR(20), Channel INT, ActorId NVARCHAR(50), ActorName NVARCHAR(100), LastSeen DATETIME)`); } catch(e){}
-    try { await req.query(`IF OBJECT_ID('BluetoothDevices','U') IS NULL CREATE TABLE BluetoothDevices (Id NVARCHAR(50) PRIMARY KEY, Name NVARCHAR(100), Mac NVARCHAR(50), Rssi INT, Type NVARCHAR(20), ActorId NVARCHAR(50), ActorName NVARCHAR(100), LastSeen DATETIME)`); } catch(e){}
-    // Default SuperAdmin
     try {
+        await req.query(`IF OBJECT_ID('SystemConfig','U') IS NULL CREATE TABLE SystemConfig (ConfigKey NVARCHAR(50) PRIMARY KEY, ConfigValue NVARCHAR(MAX))`);
+        await req.query(`IF OBJECT_ID('Users','U') IS NULL CREATE TABLE Users (UserId NVARCHAR(50) PRIMARY KEY, Username NVARCHAR(100), PasswordHash NVARCHAR(255), Role NVARCHAR(20), MfaEnabled BIT DEFAULT 0, MfaSecret NVARCHAR(100), LastLogin DATETIME, Preferences NVARCHAR(MAX))`);
+        await req.query(`IF OBJECT_ID('Actors','U') IS NULL CREATE TABLE Actors (ActorId NVARCHAR(50) PRIMARY KEY, HwId NVARCHAR(100), GatewayId NVARCHAR(50), Name NVARCHAR(100), Status NVARCHAR(20), LocalIp NVARCHAR(50), LastSeen DATETIME, Config NVARCHAR(MAX), OsVersion NVARCHAR(100), TunnelsJson NVARCHAR(MAX), Persona NVARCHAR(MAX), HoneyFilesJson NVARCHAR(MAX), HasWifi BIT DEFAULT 0, HasBluetooth BIT DEFAULT 0, WifiScanningEnabled BIT DEFAULT 0, BluetoothScanningEnabled BIT DEFAULT 0, CpuLoad FLOAT DEFAULT 0, MemoryUsage FLOAT DEFAULT 0, Temperature FLOAT DEFAULT 0, TcpSentinelEnabled BIT DEFAULT 0, AgentVersion NVARCHAR(50))`);
+        await req.query(`IF OBJECT_ID('Gateways','U') IS NULL CREATE TABLE Gateways (GatewayId NVARCHAR(50) PRIMARY KEY, Name NVARCHAR(100), Location NVARCHAR(100), Status NVARCHAR(20), IpAddress NVARCHAR(50), Lat FLOAT, Lng FLOAT)`);
+        await req.query(`IF OBJECT_ID('Logs','U') IS NULL CREATE TABLE Logs (LogId NVARCHAR(50) PRIMARY KEY, ActorId NVARCHAR(50), Level NVARCHAR(20), Process NVARCHAR(50), Message NVARCHAR(MAX), SourceIp NVARCHAR(50), Timestamp DATETIME)`);
+        await req.query(`IF OBJECT_ID('CommandQueue','U') IS NULL CREATE TABLE CommandQueue (JobId NVARCHAR(50) PRIMARY KEY, ActorId NVARCHAR(50), Command NVARCHAR(MAX), Status NVARCHAR(20), Output NVARCHAR(MAX), CreatedAt DATETIME, UpdatedAt DATETIME)`);
+        await req.query(`IF OBJECT_ID('Reports','U') IS NULL CREATE TABLE Reports (ReportId NVARCHAR(50) PRIMARY KEY, Title NVARCHAR(100), GeneratedBy NVARCHAR(100), Type NVARCHAR(50), CreatedAt DATETIME, ContentJson NVARCHAR(MAX))`);
+        await req.query(`IF OBJECT_ID('EnrollmentTokens','U') IS NULL CREATE TABLE EnrollmentTokens (Token NVARCHAR(50) PRIMARY KEY, Type NVARCHAR(20), TargetId NVARCHAR(50), ConfigJson NVARCHAR(MAX), CreatedAt DATETIME, IsUsed BIT)`);
+        await req.query(`IF OBJECT_ID('PendingActors','U') IS NULL CREATE TABLE PendingActors (Id NVARCHAR(50) PRIMARY KEY, HwId NVARCHAR(100), DetectedIp NVARCHAR(50), TargetGatewayId NVARCHAR(50), DetectedAt DATETIME, OsVersion NVARCHAR(100))`);
+        await req.query(`IF OBJECT_ID('WifiNetworks','U') IS NULL CREATE TABLE WifiNetworks (Id NVARCHAR(50) PRIMARY KEY, Ssid NVARCHAR(100), Bssid NVARCHAR(50), SignalStrength INT, Security NVARCHAR(20), Channel INT, ActorId NVARCHAR(50), ActorName NVARCHAR(100), LastSeen DATETIME)`);
+        await req.query(`IF OBJECT_ID('BluetoothDevices','U') IS NULL CREATE TABLE BluetoothDevices (Id NVARCHAR(50) PRIMARY KEY, Name NVARCHAR(100), Mac NVARCHAR(50), Rssi INT, Type NVARCHAR(20), ActorId NVARCHAR(50), ActorName NVARCHAR(100), LastSeen DATETIME)`);
+        
         const uCheck = await req.query("SELECT * FROM Users WHERE Username = 'superadmin'");
         if (uCheck.recordset.length === 0) {
             await req.query("INSERT INTO Users (UserId, Username, PasswordHash, Role) VALUES ('usr-super-01', 'superadmin', 'btoa_hash_123qweASDF!!@!', 'SUPERADMIN')");
@@ -237,10 +234,10 @@ setInterval(async () => {
 }, 120000);
 
 // ==========================================
-// 3. API ROUTES (Must be before Static Files)
+// 3. API ROUTES
 // ==========================================
 
-// --- TRAP API ---
+// Trap
 app.post('/api/trap/init', (req, res) => {
     const sid = `trap-${Date.now()}`;
     trapSessions[sid] = { state: 'INIT' };
@@ -253,7 +250,7 @@ app.post('/api/trap/interact', (req, res) => {
     return res.json({ response: "500 Unknown command.\r\n" });
 });
 
-// --- ENROLLMENT ROUTES (CRITICAL FOR SETUP) ---
+// Enrollment
 app.post('/api/enroll/generate', async (req, res) => {
     if (!dbPool) return res.json({ token: 'OFFLINE_TOKEN' });
     const { type, targetId, config } = req.body;
@@ -263,17 +260,14 @@ app.post('/api/enroll/generate', async (req, res) => {
         res.json({ token });
     } catch (e) { res.status(500).json({ error: e.message }); }
 });
-
 app.get('/api/enroll/config/:token', async (req, res) => {
     if (!dbPool) return res.status(500).send();
-    const { token } = req.params;
     try {
-        const r = await dbPool.request().input('t', sql.NVarChar, token).query("SELECT * FROM EnrollmentTokens WHERE Token = @t");
+        const r = await dbPool.request().input('t', sql.NVarChar, req.params.token).query("SELECT * FROM EnrollmentTokens WHERE Token = @t");
         if (r.recordset.length === 0) return res.status(404).send();
         res.send("OK");
     } catch(e) { res.status(500).send(); }
 });
-
 app.get('/api/enroll/pending', async (req, res) => {
     if (!dbPool) return res.json([]);
     try {
@@ -281,7 +275,6 @@ app.get('/api/enroll/pending', async (req, res) => {
         res.json(result.recordset.map(r => ({ id: r.Id, hwid: r.HwId, detectedIp: r.DetectedIp, detectedAt: r.DetectedAt, osVersion: r.OsVersion })));
     } catch(e) { res.status(500).json({error: e.message}); }
 });
-
 app.post('/api/enroll/approve', async (req, res) => {
     if (!dbPool) return res.json({success: false});
     const { pendingId, proxyId, name } = req.body;
@@ -290,25 +283,17 @@ app.post('/api/enroll/approve', async (req, res) => {
         if (pending.recordset.length === 0) return res.json({success: false});
         const p = pending.recordset[0];
         const newId = `actor-${Math.random().toString(36).substr(2,6)}`;
-        await dbPool.request()
-            .input('aid', sql.NVarChar, newId)
-            .input('hid', sql.NVarChar, p.HwId)
-            .input('gid', sql.NVarChar, proxyId === 'DIRECT' ? null : proxyId)
-            .input('name', sql.NVarChar, name)
-            .input('ip', sql.NVarChar, p.DetectedIp)
-            .input('os', sql.NVarChar, p.OsVersion)
-            .query(`INSERT INTO Actors (ActorId, HwId, GatewayId, Name, Status, LocalIp, LastSeen, OsVersion) VALUES (@aid, @hid, @gid, @name, 'ONLINE', @ip, GETDATE(), @os)`);
+        await dbPool.request().input('aid', sql.NVarChar, newId).input('hid', sql.NVarChar, p.HwId).input('gid', sql.NVarChar, proxyId==='DIRECT'?null:proxyId).input('name', sql.NVarChar, name).input('ip', sql.NVarChar, p.DetectedIp).input('os', sql.NVarChar, p.OsVersion).query(`INSERT INTO Actors (ActorId, HwId, GatewayId, Name, Status, LocalIp, LastSeen, OsVersion) VALUES (@aid, @hid, @gid, @name, 'ONLINE', @ip, GETDATE(), @os)`);
         await dbPool.request().input('pid', sql.NVarChar, pendingId).query("DELETE FROM PendingActors WHERE Id = @pid");
         res.json({success: true});
     } catch(e) { res.status(500).json({error: e.message}); }
 });
-
 app.delete('/api/enroll/pending/:id', async (req, res) => {
     if (!dbPool) return res.json({success: false});
     try { await dbPool.request().input('pid', sql.NVarChar, req.params.id).query("DELETE FROM PendingActors WHERE Id = @pid"); res.json({success: true}); } catch(e) { res.status(500).json({error: e.message}); }
 });
 
-// --- AUTH ---
+// Auth
 app.post('/api/login', async (req, res) => { 
     if (!dbPool) return res.json({success: false, error: "DB not connected"}); 
     const { username, password } = req.body; 
@@ -325,7 +310,7 @@ app.post('/api/login', async (req, res) => {
     } catch (e) { res.json({ success: false, error: e.message }); } 
 });
 
-// --- AGENT INTERACTION ---
+// Agent
 app.get('/api/agent/heartbeat', async (req, res) => {
     if (!dbPool) return res.status(503).json({});
     const { hwid, os } = req.query;
@@ -343,7 +328,6 @@ app.get('/api/agent/heartbeat', async (req, res) => {
         res.json({ status: 'PENDING' });
     } catch(e) { res.status(500).json({}); }
 });
-
 app.get('/api/agent/commands', async (req, res) => {
     if (!dbPool) return res.json([]);
     const { actorId } = req.query;
@@ -353,19 +337,16 @@ app.get('/api/agent/commands', async (req, res) => {
         res.json(result.recordset.map(r => ({ id: r.JobId, command: r.Command })));
     } catch(e) { res.json([]); }
 });
-
 app.post('/api/agent/result', async (req, res) => {
     if (!dbPool) return res.json({});
     const { jobId, status, output } = req.body;
     try { await dbPool.request().input('jid', sql.NVarChar, jobId).input('stat', sql.NVarChar, status).input('out', sql.NVarChar, output).query("UPDATE CommandQueue SET Status = @stat, Output = @out, UpdatedAt = GETDATE() WHERE JobId = @jid"); res.json({success: true}); } catch(e) { res.json({}); }
 });
-
 app.post('/api/agent/scan', async (req, res) => {
     if (!dbPool) return res.json({});
     const { actorId, cpu, ram, temp } = req.body;
     try { if (actorId) await dbPool.request().input('aid', sql.NVarChar, actorId).input('c', sql.Float, parseFloat(cpu)||0).input('r', sql.Float, parseFloat(ram)||0).input('t', sql.Float, parseFloat(temp)||0).query("UPDATE Actors SET CpuLoad = @c, MemoryUsage = @r, Temperature = @t, LastSeen = GETDATE() WHERE ActorId = @aid"); res.json({success:true}); } catch(e) { res.status(500).json({}); }
 });
-
 app.post('/api/agent/scan-results', async (req, res) => {
     if (!dbPool) return res.json({success: false});
     const { actorId, wifi, bluetooth } = req.body;
@@ -374,15 +355,14 @@ app.post('/api/agent/scan-results', async (req, res) => {
         const actorName = actorRes.recordset[0]?.Name || 'Unknown';
         if (wifi && Array.isArray(wifi)) {
             for (const net of wifi) {
-                const netId = `wifi-${actorId}-${net.bssid}`;
-                await dbPool.request().input('nid', sql.NVarChar, netId).input('ssid', sql.NVarChar, net.ssid || '').input('bssid', sql.NVarChar, net.bssid || '').input('sig', sql.Int, parseInt(net.signal) || -100).input('sec', sql.NVarChar, net.security || 'OPEN').input('aid', sql.NVarChar, actorId).input('aname', sql.NVarChar, actorName).query(`IF EXISTS (SELECT 1 FROM WifiNetworks WHERE Id = @nid) UPDATE WifiNetworks SET SignalStrength = @sig, LastSeen = GETDATE() WHERE Id = @nid ELSE INSERT INTO WifiNetworks (Id, Ssid, Bssid, SignalStrength, Security, Channel, ActorId, ActorName, LastSeen) VALUES (@nid, @ssid, @bssid, @sig, @sec, 0, @aid, @aname, GETDATE())`);
+                await dbPool.request().input('nid', sql.NVarChar, `wifi-${actorId}-${net.bssid}`).input('ssid', sql.NVarChar, net.ssid||'').input('bssid', sql.NVarChar, net.bssid||'').input('sig', sql.Int, parseInt(net.signal)||-100).input('sec', sql.NVarChar, net.security||'OPEN').input('aid', sql.NVarChar, actorId).input('aname', sql.NVarChar, actorName).query(`IF EXISTS (SELECT 1 FROM WifiNetworks WHERE Id = @nid) UPDATE WifiNetworks SET SignalStrength = @sig, LastSeen = GETDATE() WHERE Id = @nid ELSE INSERT INTO WifiNetworks (Id, Ssid, Bssid, SignalStrength, Security, Channel, ActorId, ActorName, LastSeen) VALUES (@nid, @ssid, @bssid, @sig, @sec, 0, @aid, @aname, GETDATE())`);
             }
         }
         res.json({success: true});
     } catch(e) { res.json({success: false}); }
 });
 
-// --- DATA & MANAGEMENT ---
+// App Data
 app.get('/api/actors', async (req, res) => { if (!dbPool) return res.json([]); try { const result = await dbPool.request().query("SELECT * FROM Actors"); res.json(result.recordset.map(row => ({ id: row.ActorId, proxyId: row.GatewayId, name: row.Name, localIp: row.LocalIp, status: row.Status, lastSeen: row.LastSeen, osVersion: row.OsVersion, hasWifi: row.HasWifi, hasBluetooth: row.HasBluetooth, wifiScanningEnabled: row.WifiScanningEnabled, bluetoothScanningEnabled: row.BluetoothScanningEnabled, cpuLoad: row.CpuLoad, memoryUsage: row.MemoryUsage, temperature: row.Temperature, tcpSentinelEnabled: row.TcpSentinelEnabled, activeTunnels: row.TunnelsJson ? JSON.parse(row.TunnelsJson) : [], deployedHoneyFiles: row.HoneyFilesJson ? JSON.parse(row.HoneyFilesJson) : [], persona: row.Persona ? JSON.parse(row.Persona) : undefined }))); } catch (e) { res.status(500).json({error: e.message}); } });
 app.put('/api/actors/:id/scanning', async (req, res) => { if (!dbPool) return res.json({success: false}); const { type, enabled } = req.body; try { const col = type === 'WIFI' ? 'WifiScanningEnabled' : 'BluetoothScanningEnabled'; await dbPool.request().input('id', sql.NVarChar, req.params.id).input('val', sql.Bit, enabled ? 1 : 0).query(`UPDATE Actors SET ${col} = @val WHERE ActorId = @id`); res.json({success: true}); } catch(e) { res.status(500).json({error: e.message}); } });
 app.post('/api/setup/db', async (req, res) => { try { await connectToDb(req.body); fs.writeFileSync(CONFIG_FILE, JSON.stringify({...req.body, isConnected: true}, null, 2)); await runSchemaMigrations(dbPool); res.json({ success: true }); } catch (err) { res.status(500).json({ success: false, error: err.message }); } });
@@ -390,7 +370,6 @@ app.get('/api/health', (req, res) => { res.json({ status: 'active', mode: getDbC
 app.get('/api/sessions', (req, res) => res.json(recordedSessions));
 app.delete('/api/sessions/:id', (req, res) => { recordedSessions = recordedSessions.filter(s => s.id !== req.params.id); res.json({ success: true }); });
 
-// --- AGENT SCRIPT ---
 app.get('/setup', (req, res) => {
     const host = req.get('host');
     const protocol = req.protocol;
@@ -487,7 +466,12 @@ systemctl daemon-reload; systemctl enable vpp-agent; systemctl restart vpp-agent
     res.send(script.trim());
 });
 
-// --- SPA Fallback ---
+// Explicit API 404 Handler (Prevents HTML response)
+app.all('/api/*', (req, res) => {
+    res.status(404).json({ error: 'API Endpoint not found' });
+});
+
+// SPA Fallback
 app.get('*', (req, res) => {
     if (req.accepts('html')) {
         const indexPath = path.join(distPath, 'index.html');

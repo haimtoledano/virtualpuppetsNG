@@ -1,20 +1,12 @@
 
-
-
-
-
-
-
-
-
 import React, { useState, useEffect, useCallback, Suspense } from 'react';
 import { generateInitialActors, generateRandomLog, generateGateways } from './services/mockService';
-import { dbQuery, dbUpdate, getSystemConfig, getPendingActors, approvePendingActor, rejectPendingActor, getSystemLogs, sendAuditLog, triggerFleetUpdate } from './services/dbService';
+import { dbQuery, getSystemConfig, getPendingActors, approvePendingActor, rejectPendingActor, getSystemLogs, sendAuditLog, triggerFleetUpdate } from './services/dbService';
 import { saveUserPreferences } from './services/authService';
 import { Actor, LogEntry, ProxyGateway, PendingActor, ActorStatus, User, SystemConfig, UserPreferences } from './types';
 import { LayoutDashboard, Settings as SettingsIcon, Network, Plus, LogOut, User as UserIcon, FileText, Globe, Router, Radio, Loader, RefreshCw, Zap } from 'lucide-react';
 
-// Lazy Load Components to split chunks
+// Lazy Load Components
 const Dashboard = React.lazy(() => import('./components/Dashboard'));
 const ActorDetail = React.lazy(() => import('./components/ActorDetail'));
 const EnrollmentModal = React.lazy(() => import('./components/EnrollmentModal'));
@@ -106,10 +98,10 @@ const App: React.FC = () => {
     if (isProduction && currentUser) {
         const interval = setInterval(async () => {
              const pending = await getPendingActors();
-             setPendingActors(pending || []);
+             if (pending) setPendingActors(pending);
              const dbActors = await dbQuery<Actor[]>('actors');
              if (dbActors) setActors(dbActors);
-        }, 2000); 
+        }, 5000); // Slower polling to be safe
         return () => clearInterval(interval);
     }
   }, [isProduction, currentUser]);
@@ -121,8 +113,7 @@ const App: React.FC = () => {
               return prevActors.map(actor => {
                   const lastSeenTime = new Date(actor.lastSeen).getTime();
                   const timeDiff = Date.now() - lastSeenTime;
-                  // Increase timeout to 10 minutes (600000ms) to avoid fighting with server polling
-                  // and account for potential timezone differences between client and server DB
+                  // 10 minute offline threshold
                   if (timeDiff > 600000 && actor.status === 'ONLINE') {
                       return { ...actor, status: ActorStatus.OFFLINE };
                   }
@@ -147,8 +138,8 @@ const App: React.FC = () => {
     if (isProduction && currentUser) {
         const interval = setInterval(async () => {
              const realLogs = await getSystemLogs();
-             if (realLogs.length > 0) setLogs(realLogs); 
-        }, 1500); // Polling every 1.5s
+             if (realLogs && realLogs.length > 0) setLogs(realLogs); 
+        }, 3000); // 3s polling
         return () => clearInterval(interval);
     }
   }, [isProduction, currentUser]);
