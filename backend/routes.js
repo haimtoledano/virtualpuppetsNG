@@ -20,23 +20,35 @@ router.get('/health', (req, res) => {
 });
 
 router.get('/config/system', async (req, res) => {
+    console.log(`[API] GET /config/system - Request received from ${req.ip}`);
     res.set('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
-    if (!dbPool) return res.status(503).json({});
+    if (!dbPool) {
+        console.warn('[API] GET /config/system - DB Pool not ready');
+        return res.status(503).json({});
+    }
     try {
         const result = await dbPool.request().query("SELECT * FROM SystemConfig");
         const config = {};
         result.recordset.forEach(row => {
             try { config[row.ConfigKey] = JSON.parse(row.ConfigValue); } catch { config[row.ConfigKey] = row.ConfigValue; }
         });
+        console.log(`[API] GET /config/system - Returning config:`, JSON.stringify(config));
         res.json(config);
-    } catch (e) { res.status(500).json({}); }
+    } catch (e) { 
+        console.error('[API] GET /config/system - Error fetching config:', e);
+        res.status(500).json({}); 
+    }
 });
 
 router.post('/config/system', async (req, res) => {
+    console.log(`[API] POST /config/system - Received payload:`, JSON.stringify(req.body));
+    
     if (!dbPool) return res.json({success: false, error: "Database not connected"});
     try {
         for (const [key, value] of Object.entries(req.body)) {
             const valStr = typeof value === 'object' ? JSON.stringify(value) : String(value);
+            
+            console.log(`[API] Processing config key: ${key}`);
             
             // Explicit UPSERT to avoid MERGE issues
             const countRes = await dbPool.request()
@@ -44,11 +56,13 @@ router.post('/config/system', async (req, res) => {
                 .query("SELECT COUNT(*) as count FROM SystemConfig WHERE ConfigKey = @k");
             
             if (countRes.recordset[0].count > 0) {
+                 console.log(`[API] Updating existing key: ${key}`);
                  await dbPool.request()
                     .input('k', sql.NVarChar, key)
                     .input('v', sql.NVarChar, valStr)
                     .query("UPDATE SystemConfig SET ConfigValue = @v WHERE ConfigKey = @k");
             } else {
+                 console.log(`[API] Inserting new key: ${key}`);
                  await dbPool.request()
                     .input('k', sql.NVarChar, key)
                     .input('v', sql.NVarChar, valStr)
@@ -56,9 +70,10 @@ router.post('/config/system', async (req, res) => {
             }
         }
         await refreshSyslogConfig();
+        console.log(`[API] POST /config/system - Save operation completed successfully`);
         res.json({success: true});
     } catch(e) { 
-        console.error("Config Save Error:", e);
+        console.error("[API] POST /config/system - Config Save Error:", e);
         res.json({success: false, error: e.message}); 
     }
 });
