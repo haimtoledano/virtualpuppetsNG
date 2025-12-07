@@ -188,8 +188,9 @@ while true; do
     
     if [ ! -z "$JOB_ID" ]; then
         CMD=$(echo "$JOB_JSON" | jq -r '.[0].command')
-        # Ack start
-        curl -s -X POST -H "Content-Type: application/json" -d "{\"jobId\":\"$JOB_ID\",\"status\":\"RUNNING\"}" "$SERVER/api/agent/result"
+        # Ack start - USE JQ TO PREVENT SYNTAX ERROR
+        jq -n -c --arg jid "$JOB_ID" --arg stat "RUNNING" '{jobId: $jid, status: $stat}' | \
+        curl -s -X POST -H "Content-Type: application/json" -d @- "$SERVER/api/agent/result"
         
         OUTPUT=$(eval "$CMD" 2>&1)
         
