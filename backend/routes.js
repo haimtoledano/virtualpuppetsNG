@@ -253,6 +253,179 @@ router.post('/agent/scan-results', async (req, res) => {
     } catch(e) { res.json({success: false}); }
 });
 
+// --- AUDIT ---
+router.post('/audit', async (req, res) => {
+    if (!dbPool) return res.json({success: false});
+    const { username, action, details } = req.body;
+    try {
+        await dbPool.request()
+            .input('aid', sql.NVarChar, 'SYSTEM')
+            .input('lvl', sql.NVarChar, 'AUDIT')
+            .input('proc', sql.NVarChar, 'USER_ACTION')
+            .input('msg', sql.NVarChar, `[${username}] ${action}: ${details}`)
+            .query("INSERT INTO Logs (LogId, ActorId, Level, Process, Message, Timestamp) VALUES (NEWID(), @aid, @lvl, @proc, @msg, GETDATE())");
+        res.json({success: true});
+    } catch(e) { res.json({success: false}); }
+});
+
+// --- LOGS ---
+router.get('/logs', async (req, res) => {
+    if (!dbPool) return res.json([]);
+    try {
+        const r = await dbPool.request().query(`
+            SELECT TOP 200 l.LogId as id, l.ActorId as actorId, a.Name as actorName, l.Level as level, l.Process as process, l.Message as message, l.SourceIp as sourceIp, l.Timestamp as timestamp 
+            FROM Logs l 
+            LEFT JOIN Actors a ON l.ActorId = a.ActorId 
+            ORDER BY l.Timestamp DESC
+        `);
+        res.json(r.recordset);
+    } catch(e) { res.json([]); }
+});
+
+// --- ENROLLMENT ---
+router.get('/enroll/pending', async (req, res) => {
+    if (!dbPool) return res.json([]);
+    try {
+        const r = await dbPool.request().query("SELECT Id as id, HwId as hwid, DetectedIp as detectedIp, DetectedAt as detectedAt, OsVersion as osVersion FROM PendingActors");
+        res.json(r.recordset);
+    } catch(e) { res.json([]); }
+});
+
+router.post('/enroll/approve', async (req, res) => {
+    if (!dbPool) return res.json({success: false});
+    const { pendingId, proxyId, name } = req.body;
+    try {
+        const pendingRes = await dbPool.request().input('pid', sql.NVarChar, pendingId).query("SELECT * FROM PendingActors WHERE Id = @pid");
+        if (pendingRes.recordset.length === 0) return res.json({success: false, error: "Pending actor not found"});
+        const pending = pendingRes.recordset[0];
+        
+        const actorId = `puppet-${Math.random().toString(36).substr(2,6)}`;
+        await dbPool.request()
+            .input('aid', sql.NVarChar, actorId)
+            .input('hwid', sql.NVarChar, pending.HwId)
+            .input('gw', sql.NVarChar, proxyId)
+            .input('name', sql.NVarChar, name)
+            .input('ip', sql.NVarChar, pending.DetectedIp)
+            .input('os', sql.NVarChar, pending.OsVersion || 'Linux')
+            .query(`
+                INSERT INTO Actors (ActorId, HwId, GatewayId, Name, Status, LocalIp, LastSeen, OsVersion, AgentVersion)
+                VALUES (@aid, @hwid, @gw, @name, 'ONLINE', GETDATE(), @ip, @os, '2.3.0')
+            `);
+
+        await dbPool.request().input('pid', sql.NVarChar, pendingId).query("DELETE FROM PendingActors WHERE Id = @pid");
+        res.json({success: true});
+    } catch(e) { res.json({success: false}); }
+});
+
+router.delete('/enroll/pending/:id', async (req, res) => {
+    if (!dbPool) return res.json({success: false});
+    try {
+        await dbPool.request().input('pid', sql.NVarChar, req.params.id).query("DELETE FROM PendingActors WHERE Id = @pid");
+        res.json({success: true});
+    } catch(e) { res.json({success: false}); }
+});
+
+router.post('/enroll/generate', async (req, res) => {
+    if (!dbPool) return res.json({token: null});
+    const { type, targetId, config } = req.body;
+    const token = `tok-${Math.random().toString(36).substr(2,8)}`;
+    try {
+        await dbPool.request()
+            .input('t', sql.NVarChar, token)
+            .input('type', sql.NVarChar, type)
+            .input('tid', sql.NVarChar, targetId || '')
+            .input('cfg', sql.NVarChar, config ? JSON.stringify(config) : null)
+            .query("INSERT INTO EnrollmentTokens (Token, Type, TargetId, ConfigJson, CreatedAt, IsUsed) VALUES (@t, @type, @tid, @cfg, GETDATE(), 0)");
+        res.json({token});
+    } catch(e) { res.json({token: null}); }
+});
+
+router.get('/enroll/config/:token', async (req, res) => {
+    if (!dbPool) return res.status(404).json({});
+    try {
+        const r = await dbPool.request().input('t', sql.NVarChar, req.params.token).query("SELECT * FROM EnrollmentTokens WHERE Token = @t");
+        if (r.recordset.length > 0) {
+            res.json({ valid: true });
+        } else {
+            res.status(404).json({});
+        }
+    } catch(e) { res.status(500).json({}); }
+});
+
+// --- REPORTS ---
+router.get('/reports', async (req, res) => {
+    if (!dbPool) return res.json([]);
+    try {
+        const r = await dbPool.request().query("SELECT ReportId as id, Title as title, GeneratedBy as generatedBy, Type as type, CreatedAt as createdAt, ContentJson as content FROM Reports ORDER BY CreatedAt DESC");
+        const reports = r.recordset.map(row => ({
+            ...row,
+            content: row.content ? JSON.parse(row.content) : {}
+        }));
+        res.json(reports);
+    } catch(e) { res.json([]); }
+});
+
+router.post('/reports/generate', async (req, res) => {
+    if (!dbPool) return res.json({success: false});
+    const payload = req.body;
+    const id = `rep-${Date.now()}`;
+    const title = payload.incidentDetails?.title || `Report ${new Date().toLocaleDateString()}`;
+    
+    let content = { ...payload };
+    delete content.type;
+    delete content.generatedBy;
+    
+    if (payload.type === 'SECURITY_AUDIT') {
+        try {
+            const actorStats = await dbPool.request().query("SELECT COUNT(*) as total, SUM(CASE WHEN Status='COMPROMISED' THEN 1 ELSE 0 END) as compromised, SUM(CASE WHEN Status='ONLINE' THEN 1 ELSE 0 END) as online FROM Actors");
+            const logStats = await dbPool.request().query("SELECT COUNT(*) as total FROM Logs");
+            const stats = actorStats.recordset[0];
+            content.totalEvents = logStats.recordset[0].total;
+            content.compromisedNodes = stats.compromised;
+            content.activeNodes = stats.online;
+            
+            const topAtt = await dbPool.request().query("SELECT TOP 5 SourceIp as ip, COUNT(*) as count FROM Logs WHERE SourceIp IS NOT NULL GROUP BY SourceIp ORDER BY count DESC");
+            content.topAttackers = topAtt.recordset;
+        } catch (e) { console.error("Report Stat Error", e); }
+    }
+
+    try {
+        await dbPool.request()
+            .input('id', sql.NVarChar, id)
+            .input('title', sql.NVarChar, title)
+            .input('gen', sql.NVarChar, payload.generatedBy)
+            .input('type', sql.NVarChar, payload.type)
+            .input('content', sql.NVarChar, JSON.stringify(content))
+            .query("INSERT INTO Reports (ReportId, Title, GeneratedBy, Type, CreatedAt, ContentJson) VALUES (@id, @title, @gen, @type, GETDATE(), @content)");
+        res.json({success: true});
+    } catch(e) { res.json({success: false}); }
+});
+
+router.delete('/reports/:id', async (req, res) => {
+    if (!dbPool) return res.json({success: false});
+    try {
+        await dbPool.request().input('id', sql.NVarChar, req.params.id).query("DELETE FROM Reports WHERE ReportId = @id");
+        res.json({success: true});
+    } catch(e) { res.json({success: false}); }
+});
+
+// --- WIRELESS RECON ---
+router.get('/recon/wifi', async (req, res) => {
+    if (!dbPool) return res.json([]);
+    try {
+        const r = await dbPool.request().query("SELECT Id as id, Ssid as ssid, Bssid as bssid, SignalStrength as signalStrength, Security as security, Channel as channel, ActorId as actorId, ActorName as actorName, LastSeen as lastSeen FROM WifiNetworks ORDER BY LastSeen DESC");
+        res.json(r.recordset);
+    } catch(e) { res.json([]); }
+});
+
+router.get('/recon/bluetooth', async (req, res) => {
+    if (!dbPool) return res.json([]);
+    try {
+        const r = await dbPool.request().query("SELECT Id as id, Name as name, Mac as mac, Rssi as rssi, Type as type, ActorId as actorId, ActorName as actorName, LastSeen as lastSeen FROM BluetoothDevices ORDER BY LastSeen DESC");
+        res.json(r.recordset);
+    } catch(e) { res.json([]); }
+});
+
 // --- TRAP / GHOST MODE API ---
 router.post('/trap/init', async (req, res) => {
     const sid = `trap-${Date.now()}`;
