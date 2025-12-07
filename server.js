@@ -40,7 +40,7 @@ app.use(bodyParser.json({
     verify: (req, res, buf) => { req.rawBody = buf.toString(); }
 }));
 
-// Serve Static Files (Correctly placed)
+// Serve Static Files
 if (fs.existsSync(distPath)) {
     app.use(express.static(distPath));
 }
@@ -184,6 +184,13 @@ const refreshSyslogConfig = async (pool) => {
     } catch (e) {}
 };
 
+const sendToSyslog = (level, processName, message) => {
+    if (!syslogConfig.enabled || !syslogConfig.host) return;
+    const client = dgram.createSocket('udp4');
+    const msg = `<134>${new Date().toISOString()} VPP-C2 ${processName}: ${message}`;
+    client.send(msg, syslogConfig.port, syslogConfig.host, (err) => { client.close(); });
+};
+
 const runSchemaMigrations = async (pool) => {
     if (!pool) return;
     const req = new sql.Request(pool);
@@ -217,7 +224,7 @@ const init = async () => {
 };
 init();
 
-// --- SCHEDULER ---
+// --- SCHEDULER: Wireless Recon (2 mins) ---
 setInterval(async () => {
     if (!dbPool) return;
     try {
@@ -237,20 +244,220 @@ setInterval(async () => {
 // 3. API ROUTES
 // ==========================================
 
-// Trap
-app.post('/api/trap/init', (req, res) => {
-    const sid = `trap-${Date.now()}`;
-    trapSessions[sid] = { state: 'INIT' };
-    res.json({ sessionId: sid, banner: "220 (vsFTPd 2.3.4)\r\n" });
-});
-app.post('/api/trap/interact', (req, res) => {
-    const { sessionId, input } = req.body;
-    if (input && input.toUpperCase().startsWith('USER')) return res.json({ response: "331 Please specify the password.\r\n" });
-    if (input && input.toUpperCase().startsWith('PASS')) return res.json({ response: "530 Login incorrect.\r\n" });
-    return res.json({ response: "500 Unknown command.\r\n" });
+// --- CORE SYSTEM ROUTES ---
+app.get('/api/health', (req, res) => { 
+    res.json({ status: 'active', mode: getDbConfig()?.isConnected ? 'PRODUCTION' : 'MOCK', dbConnected: !!dbPool }); 
 });
 
-// Enrollment
+app.get('/api/config/system', async (req, res) => {
+    if (!dbPool) return res.status(503).json({});
+    try {
+        const result = await dbPool.request().query("SELECT * FROM SystemConfig");
+        const config = {};
+        result.recordset.forEach(row => {
+            try { config[row.ConfigKey] = JSON.parse(row.ConfigValue); } catch { config[row.ConfigKey] = row.ConfigValue; }
+        });
+        res.json(config);
+    } catch (e) { res.status(500).json({}); }
+});
+
+app.post('/api/config/system', async (req, res) => {
+    if (!dbPool) return res.json({success: false});
+    try {
+        for (const [key, value] of Object.entries(req.body)) {
+            const valStr = typeof value === 'object' ? JSON.stringify(value) : String(value);
+            await dbPool.request().input('k', sql.NVarChar, key).input('v', sql.NVarChar, valStr).query(`MERGE SystemConfig AS target USING (SELECT @k, @v) AS source (Key, Val) ON (target.ConfigKey = source.Key) WHEN MATCHED THEN UPDATE SET ConfigValue = source.Val WHEN NOT MATCHED THEN INSERT (ConfigKey, ConfigValue) VALUES (source.Key, source.Val);`);
+        }
+        await refreshSyslogConfig(dbPool);
+        res.json({success: true});
+    } catch(e) { res.json({success: false}); }
+});
+
+app.post('/api/setup/db', async (req, res) => { 
+    try { 
+        await connectToDb(req.body); 
+        fs.writeFileSync(CONFIG_FILE, JSON.stringify({...req.body, isConnected: true}, null, 2)); 
+        await runSchemaMigrations(dbPool); 
+        res.json({ success: true }); 
+    } catch (err) { res.status(500).json({ success: false, error: err.message }); } 
+});
+
+// --- AUTH ROUTES ---
+app.post('/api/login', async (req, res) => { 
+    if (!dbPool) return res.json({success: false, error: "DB not connected"}); 
+    const { username, password } = req.body; 
+    const hash = `btoa_hash_${password}`; 
+    try { 
+        const result = await dbPool.request().input('u', sql.NVarChar, username).query("SELECT * FROM Users WHERE Username = @u"); 
+        if (result.recordset.length > 0) { 
+            const user = result.recordset[0]; 
+            if (user.PasswordHash === hash) { 
+                return res.json({ success: true, user: { id: user.UserId, username: user.Username, role: user.Role, mfaEnabled: user.MfaEnabled, preferences: user.Preferences ? JSON.parse(user.Preferences) : {} } }); 
+            } 
+        } 
+        res.json({ success: false, error: "Invalid credentials" }); 
+    } catch (e) { res.json({ success: false, error: e.message }); } 
+});
+
+// --- MFA ROUTES ---
+app.post('/api/mfa/setup', async (req, res) => {
+    const { userId } = req.body;
+    const secret = authenticator.generateSecret();
+    const otpauth = authenticator.keyuri(userId, 'Virtual Puppets C2', secret);
+    const qrCode = await QRCode.toDataURL(otpauth);
+    res.json({ secret, qrCode });
+});
+app.post('/api/mfa/verify', async (req, res) => {
+    // This endpoint checks against DB secret
+    if (!dbPool) return res.json({success: false});
+    const { userId, token } = req.body;
+    try {
+        const result = await dbPool.request().input('uid', sql.NVarChar, userId).query("SELECT MfaSecret FROM Users WHERE UserId = @uid");
+        if (result.recordset.length === 0) return res.json({success: false});
+        const secret = result.recordset[0].MfaSecret;
+        if (!secret) return res.json({success: true}); // Bypass if not set
+        const isValid = authenticator.check(token, secret);
+        res.json({success: isValid});
+    } catch(e) { res.json({success: false}); }
+});
+app.post('/api/mfa/confirm', async (req, res) => {
+    // This endpoint saves the secret
+    if (!dbPool) return res.json({success: false});
+    const { userId, secret, token } = req.body;
+    if (authenticator.check(token, secret)) {
+        await dbPool.request().input('uid', sql.NVarChar, userId).input('sec', sql.NVarChar, secret).query("UPDATE Users SET MfaSecret = @sec, MfaEnabled = 1 WHERE UserId = @uid");
+        res.json({success: true});
+    } else {
+        res.json({success: false});
+    }
+});
+
+// --- USER MANAGEMENT ---
+app.get('/api/users', async (req, res) => {
+    if (!dbPool) return res.json([]);
+    try { const r = await dbPool.request().query("SELECT UserId as id, Username as username, Role as role, MfaEnabled as mfaEnabled FROM Users"); res.json(r.recordset); } catch(e) { res.json([]); }
+});
+app.post('/api/users', async (req, res) => {
+    if (!dbPool) return res.json({success: false});
+    const { id, username, passwordHash, role } = req.body;
+    try { await dbPool.request().input('id', sql.NVarChar, id).input('u', sql.NVarChar, username).input('p', sql.NVarChar, passwordHash).input('r', sql.NVarChar, role).query("INSERT INTO Users (UserId, Username, PasswordHash, Role) VALUES (@id, @u, @p, @r)"); res.json({success: true}); } catch(e) { res.json({success: false}); }
+});
+app.put('/api/users/:id', async (req, res) => {
+    if (!dbPool) return res.json({success: false});
+    const { role, passwordHash } = req.body;
+    try { 
+        if (passwordHash) await dbPool.request().input('id', sql.NVarChar, req.params.id).input('p', sql.NVarChar, passwordHash).query("UPDATE Users SET PasswordHash = @p WHERE UserId = @id");
+        await dbPool.request().input('id', sql.NVarChar, req.params.id).input('r', sql.NVarChar, role).query("UPDATE Users SET Role = @r WHERE UserId = @id");
+        res.json({success: true}); 
+    } catch(e) { res.json({success: false}); }
+});
+app.delete('/api/users/:id', async (req, res) => {
+    if (!dbPool) return res.json({success: false});
+    try { await dbPool.request().input('id', sql.NVarChar, req.params.id).query("DELETE FROM Users WHERE UserId = @id"); res.json({success: true}); } catch(e) { res.json({success: false}); }
+});
+app.post('/api/users/:id/reset-mfa', async (req, res) => {
+    if (!dbPool) return res.json({success: false});
+    try { await dbPool.request().input('id', sql.NVarChar, req.params.id).query("UPDATE Users SET MfaEnabled = 0, MfaSecret = NULL WHERE UserId = @id"); res.json({success: true}); } catch(e) { res.json({success: false}); }
+});
+app.put('/api/users/:id/preferences', async (req, res) => {
+    if (!dbPool) return res.json({success: false});
+    try { await dbPool.request().input('id', sql.NVarChar, req.params.id).input('pref', sql.NVarChar, JSON.stringify(req.body)).query("UPDATE Users SET Preferences = @pref WHERE UserId = @id"); res.json({success: true}); } catch(e) { res.json({success: false}); }
+});
+
+// --- GATEWAYS ---
+app.get('/api/gateways', async (req, res) => {
+    if (!dbPool) return res.json([]);
+    try { const r = await dbPool.request().query("SELECT * FROM Gateways"); res.json(r.recordset.map(g => ({ id: g.GatewayId, name: g.Name, location: g.Location, status: g.Status, ip: g.IpAddress, lat: g.Lat, lng: g.Lng }))); } catch(e) { res.json([]); }
+});
+app.post('/api/gateways', async (req, res) => {
+    if (!dbPool) return res.json({success: false});
+    const { id, name, location, ip, status } = req.body;
+    try { await dbPool.request().input('id', sql.NVarChar, id).input('n', sql.NVarChar, name).input('l', sql.NVarChar, location).input('i', sql.NVarChar, ip).input('s', sql.NVarChar, status).query("INSERT INTO Gateways (GatewayId, Name, Location, Status, IpAddress) VALUES (@id, @n, @l, @s, @i)"); res.json({success: true}); } catch(e) { res.json({success: false}); }
+});
+app.delete('/api/gateways/:id', async (req, res) => {
+    if (!dbPool) return res.json({success: false});
+    try { await dbPool.request().input('id', sql.NVarChar, req.params.id).query("DELETE FROM Gateways WHERE GatewayId = @id"); res.json({success: true}); } catch(e) { res.json({success: false}); }
+});
+
+// --- ACTORS (FLEET) ---
+app.get('/api/actors', async (req, res) => { 
+    if (!dbPool) return res.json([]); 
+    try { 
+        const result = await dbPool.request().query("SELECT * FROM Actors"); 
+        res.json(result.recordset.map(row => ({ 
+            id: row.ActorId, proxyId: row.GatewayId, name: row.Name, localIp: row.LocalIp, status: row.Status, lastSeen: row.LastSeen, osVersion: row.OsVersion, 
+            hasWifi: row.HasWifi, hasBluetooth: row.HasBluetooth, wifiScanningEnabled: row.WifiScanningEnabled, bluetoothScanningEnabled: row.BluetoothScanningEnabled, 
+            cpuLoad: row.CpuLoad, memoryUsage: row.MemoryUsage, temperature: row.Temperature, tcpSentinelEnabled: row.TcpSentinelEnabled, 
+            activeTunnels: row.TunnelsJson ? JSON.parse(row.TunnelsJson) : [], deployedHoneyFiles: row.HoneyFilesJson ? JSON.parse(row.HoneyFilesJson) : [], persona: row.Persona ? JSON.parse(row.Persona) : undefined 
+        }))); 
+    } catch (e) { res.status(500).json({error: e.message}); } 
+});
+app.put('/api/actors/:id', async (req, res) => {
+    if (!dbPool) return res.json({success: false});
+    try { await dbPool.request().input('id', sql.NVarChar, req.params.id).input('n', sql.NVarChar, req.body.name).query("UPDATE Actors SET Name = @n WHERE ActorId = @id"); res.json({success: true}); } catch(e) { res.json({success: false}); }
+});
+app.delete('/api/actors/:id', async (req, res) => {
+    if (!dbPool) return res.json({success: false});
+    try { await dbPool.request().input('id', sql.NVarChar, req.params.id).query("DELETE FROM Actors WHERE ActorId = @id"); res.json({success: true}); } catch(e) { res.json({success: false}); }
+});
+app.put('/api/actors/:id/tunnels', async (req, res) => {
+    if (!dbPool) return res.json({success: false});
+    try { await dbPool.request().input('id', sql.NVarChar, req.params.id).input('j', sql.NVarChar, JSON.stringify(req.body)).query("UPDATE Actors SET TunnelsJson = @j WHERE ActorId = @id"); res.json({success: true}); } catch(e) { res.json({success: false}); }
+});
+app.put('/api/actors/:id/honeyfiles', async (req, res) => {
+    if (!dbPool) return res.json({success: false});
+    try { await dbPool.request().input('id', sql.NVarChar, req.params.id).input('j', sql.NVarChar, JSON.stringify(req.body)).query("UPDATE Actors SET HoneyFilesJson = @j WHERE ActorId = @id"); res.json({success: true}); } catch(e) { res.json({success: false}); }
+});
+app.put('/api/actors/:id/persona', async (req, res) => {
+    if (!dbPool) return res.json({success: false});
+    try { await dbPool.request().input('id', sql.NVarChar, req.params.id).input('j', sql.NVarChar, JSON.stringify(req.body)).query("UPDATE Actors SET Persona = @j WHERE ActorId = @id"); res.json({success: true}); } catch(e) { res.json({success: false}); }
+});
+app.put('/api/actors/:id/sentinel', async (req, res) => {
+    if (!dbPool) return res.json({success: false});
+    try { await dbPool.request().input('id', sql.NVarChar, req.params.id).input('v', sql.Bit, req.body.enabled).query("UPDATE Actors SET TcpSentinelEnabled = @v WHERE ActorId = @id"); res.json({success: true}); } catch(e) { res.json({success: false}); }
+});
+app.put('/api/actors/:id/acknowledge', async (req, res) => {
+    if (!dbPool) return res.json({success: false});
+    try { await dbPool.request().input('id', sql.NVarChar, req.params.id).query("UPDATE Actors SET Status = 'ONLINE' WHERE ActorId = @id"); res.json({success: true}); } catch(e) { res.json({success: false}); }
+});
+app.put('/api/actors/:id/scanning', async (req, res) => { 
+    if (!dbPool) return res.json({success: false}); 
+    const { type, enabled } = req.body; 
+    try { 
+        const col = type === 'WIFI' ? 'WifiScanningEnabled' : 'BluetoothScanningEnabled'; 
+        await dbPool.request().input('id', sql.NVarChar, req.params.id).input('val', sql.Bit, enabled ? 1 : 0).query(`UPDATE Actors SET ${col} = @val WHERE ActorId = @id`); 
+        res.json({success: true}); 
+    } catch(e) { res.status(500).json({error: e.message}); } 
+});
+
+// --- COMMANDS ---
+app.post('/api/commands/queue', async (req, res) => {
+    if (!dbPool) return res.json({ jobId: null });
+    const { actorId, command } = req.body;
+    const jobId = `job-${Date.now()}`;
+    try { await dbPool.request().input('jid', sql.NVarChar, jobId).input('aid', sql.NVarChar, actorId).input('cmd', sql.NVarChar, command).query("INSERT INTO CommandQueue (JobId, ActorId, Command, Status, CreatedAt, UpdatedAt) VALUES (@jid, @aid, @cmd, 'PENDING', GETDATE(), GETDATE())"); res.json({ jobId }); } catch(e) { res.json({ jobId: null }); }
+});
+app.get('/api/commands/:actorId', async (req, res) => {
+    if (!dbPool) return res.json([]);
+    try { const r = await dbPool.request().input('aid', sql.NVarChar, req.params.actorId).query("SELECT JobId as id, Command as command, Status as status, Output as output, CreatedAt as createdAt FROM CommandQueue WHERE ActorId = @aid ORDER BY CreatedAt DESC"); res.json(r.recordset); } catch(e) { res.json([]); }
+});
+
+// --- LOGS & AUDIT ---
+app.get('/api/logs', async (req, res) => {
+    if (!dbPool) return res.json([]);
+    try { const r = await dbPool.request().query("SELECT TOP 200 LogId as id, ActorId as actorId, Level as level, Process as process, Message as message, SourceIp as sourceIp, Timestamp as timestamp FROM Logs ORDER BY Timestamp DESC"); res.json(r.recordset); } catch(e) { res.json([]); }
+});
+app.post('/api/audit', async (req, res) => {
+    if (!dbPool) return res.json({success: false});
+    const { username, action, details } = req.body;
+    try { 
+        await dbPool.request().input('u', sql.NVarChar, username).input('a', sql.NVarChar, action).input('d', sql.NVarChar, details).query("INSERT INTO Logs (LogId, ActorId, Level, Process, Message, Timestamp) VALUES (NEWID(), 'SYSTEM', 'INFO', 'AUDIT', @u + ' ' + @a + ': ' + @d, GETDATE())"); 
+        sendToSyslog('INFO', 'AUDIT', `${username} ${action}: ${details}`);
+        res.json({success: true}); 
+    } catch(e) { res.json({success: false}); }
+});
+
+// --- ENROLLMENT ---
 app.post('/api/enroll/generate', async (req, res) => {
     if (!dbPool) return res.json({ token: 'OFFLINE_TOKEN' });
     const { type, targetId, config } = req.body;
@@ -293,24 +500,46 @@ app.delete('/api/enroll/pending/:id', async (req, res) => {
     try { await dbPool.request().input('pid', sql.NVarChar, req.params.id).query("DELETE FROM PendingActors WHERE Id = @pid"); res.json({success: true}); } catch(e) { res.status(500).json({error: e.message}); }
 });
 
-// Auth
-app.post('/api/login', async (req, res) => { 
-    if (!dbPool) return res.json({success: false, error: "DB not connected"}); 
-    const { username, password } = req.body; 
-    const hash = `btoa_hash_${password}`; 
+// --- REPORTS ---
+app.get('/api/reports', async (req, res) => {
+    if (!dbPool) return res.json([]);
+    try { const r = await dbPool.request().query("SELECT * FROM Reports ORDER BY CreatedAt DESC"); res.json(r.recordset.map(x => ({ id: x.ReportId, title: x.Title, generatedBy: x.GeneratedBy, type: x.Type, createdAt: x.CreatedAt, content: JSON.parse(x.ContentJson) }))); } catch(e) { res.json([]); }
+});
+app.post('/api/reports/generate', async (req, res) => {
+    if (!dbPool) return res.json({success: false});
+    const { type, generatedBy, content } = req.body; // Simplified for brevity
+    // In real implementation, this would generate content based on logs
     try { 
-        const result = await dbPool.request().input('u', sql.NVarChar, username).query("SELECT * FROM Users WHERE Username = @u"); 
-        if (result.recordset.length > 0) { 
-            const user = result.recordset[0]; 
-            if (user.PasswordHash === hash) { 
-                return res.json({ success: true, user: { id: user.UserId, username: user.Username, role: user.Role, mfaEnabled: user.MfaEnabled, preferences: user.Preferences ? JSON.parse(user.Preferences) : {} } }); 
-            } 
-        } 
-        res.json({ success: false, error: "Invalid credentials" }); 
-    } catch (e) { res.json({ success: false, error: e.message }); } 
+        const title = `Report ${new Date().toLocaleDateString()}`;
+        await dbPool.request().input('id', sql.NVarChar, `rep-${Date.now()}`).input('t', sql.NVarChar, title).input('g', sql.NVarChar, generatedBy).input('type', sql.NVarChar, type).input('c', sql.NVarChar, JSON.stringify(req.body)).query("INSERT INTO Reports (ReportId, Title, GeneratedBy, Type, CreatedAt, ContentJson) VALUES (@id, @t, @g, @type, GETDATE(), @c)");
+        res.json({success: true}); 
+    } catch(e) { res.json({success: false}); }
+});
+app.delete('/api/reports/:id', async (req, res) => {
+    if (!dbPool) return res.json({success: false});
+    try { await dbPool.request().input('id', sql.NVarChar, req.params.id).query("DELETE FROM Reports WHERE ReportId = @id"); res.json({success: true}); } catch(e) { res.json({success: false}); }
 });
 
-// Agent
+// --- WIRELESS RECON ---
+app.get('/api/recon/wifi', async (req, res) => { if (!dbPool) return res.json([]); try { const r = await dbPool.request().query("SELECT * FROM WifiNetworks ORDER BY LastSeen DESC"); res.json(r.recordset); } catch(e) { res.json([]); } });
+app.get('/api/recon/bluetooth', async (req, res) => { if (!dbPool) return res.json([]); try { const r = await dbPool.request().query("SELECT * FROM BluetoothDevices ORDER BY LastSeen DESC"); res.json(r.recordset); } catch(e) { res.json([]); } });
+
+// --- TRAP / GHOST MODE API ---
+app.post('/api/trap/init', (req, res) => {
+    const sid = `trap-${Date.now()}`;
+    trapSessions[sid] = { state: 'INIT' };
+    res.json({ sessionId: sid, banner: "220 (vsFTPd 2.3.4)\r\n" });
+});
+app.post('/api/trap/interact', (req, res) => {
+    const { sessionId, input } = req.body;
+    if (input && input.toUpperCase().startsWith('USER')) return res.json({ response: "331 Please specify the password.\r\n" });
+    if (input && input.toUpperCase().startsWith('PASS')) return res.json({ response: "530 Login incorrect.\r\n" });
+    return res.json({ response: "500 Unknown command.\r\n" });
+});
+app.get('/api/sessions', (req, res) => res.json(recordedSessions));
+app.delete('/api/sessions/:id', (req, res) => { recordedSessions = recordedSessions.filter(s => s.id !== req.params.id); res.json({ success: true }); });
+
+// --- AGENT ROUTES ---
 app.get('/api/agent/heartbeat', async (req, res) => {
     if (!dbPool) return res.status(503).json({});
     const { hwid, os } = req.query;
@@ -362,14 +591,7 @@ app.post('/api/agent/scan-results', async (req, res) => {
     } catch(e) { res.json({success: false}); }
 });
 
-// App Data
-app.get('/api/actors', async (req, res) => { if (!dbPool) return res.json([]); try { const result = await dbPool.request().query("SELECT * FROM Actors"); res.json(result.recordset.map(row => ({ id: row.ActorId, proxyId: row.GatewayId, name: row.Name, localIp: row.LocalIp, status: row.Status, lastSeen: row.LastSeen, osVersion: row.OsVersion, hasWifi: row.HasWifi, hasBluetooth: row.HasBluetooth, wifiScanningEnabled: row.WifiScanningEnabled, bluetoothScanningEnabled: row.BluetoothScanningEnabled, cpuLoad: row.CpuLoad, memoryUsage: row.MemoryUsage, temperature: row.Temperature, tcpSentinelEnabled: row.TcpSentinelEnabled, activeTunnels: row.TunnelsJson ? JSON.parse(row.TunnelsJson) : [], deployedHoneyFiles: row.HoneyFilesJson ? JSON.parse(row.HoneyFilesJson) : [], persona: row.Persona ? JSON.parse(row.Persona) : undefined }))); } catch (e) { res.status(500).json({error: e.message}); } });
-app.put('/api/actors/:id/scanning', async (req, res) => { if (!dbPool) return res.json({success: false}); const { type, enabled } = req.body; try { const col = type === 'WIFI' ? 'WifiScanningEnabled' : 'BluetoothScanningEnabled'; await dbPool.request().input('id', sql.NVarChar, req.params.id).input('val', sql.Bit, enabled ? 1 : 0).query(`UPDATE Actors SET ${col} = @val WHERE ActorId = @id`); res.json({success: true}); } catch(e) { res.status(500).json({error: e.message}); } });
-app.post('/api/setup/db', async (req, res) => { try { await connectToDb(req.body); fs.writeFileSync(CONFIG_FILE, JSON.stringify({...req.body, isConnected: true}, null, 2)); await runSchemaMigrations(dbPool); res.json({ success: true }); } catch (err) { res.status(500).json({ success: false, error: err.message }); } });
-app.get('/api/health', (req, res) => { res.json({ status: 'active', mode: getDbConfig()?.isConnected ? 'PRODUCTION' : 'MOCK', dbConnected: !!dbPool }); });
-app.get('/api/sessions', (req, res) => res.json(recordedSessions));
-app.delete('/api/sessions/:id', (req, res) => { recordedSessions = recordedSessions.filter(s => s.id !== req.params.id); res.json({ success: true }); });
-
+// --- AGENT SCRIPT ---
 app.get('/setup', (req, res) => {
     const host = req.get('host');
     const protocol = req.protocol;
@@ -466,12 +688,12 @@ systemctl daemon-reload; systemctl enable vpp-agent; systemctl restart vpp-agent
     res.send(script.trim());
 });
 
-// Explicit API 404 Handler (Prevents HTML response)
+// Explicit API 404 Handler (Prevents HTML response and SyntaxError)
 app.all('/api/*', (req, res) => {
     res.status(404).json({ error: 'API Endpoint not found' });
 });
 
-// SPA Fallback
+// SPA Fallback (Catch-all must be LAST)
 app.get('*', (req, res) => {
     if (req.accepts('html')) {
         const indexPath = path.join(distPath, 'index.html');
