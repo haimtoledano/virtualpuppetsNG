@@ -1,3 +1,4 @@
+
 import { GoogleGenAI, Type } from "@google/genai";
 import { LogEntry, AiAnalysis, HoneyFile, AiConfig, AiProvider } from '../types';
 
@@ -24,23 +25,11 @@ const getAiConfig = async (): Promise<AiConfig> => {
 // --- GEMINI IMPLEMENTATION ---
 
 const callGemini = async (config: AiConfig, prompt: string, responseSchema?: any): Promise<any> => {
-    let apiKey;
-    
-    // 1. Try Environment Variable (Preferred per guidelines)
-    try {
-        apiKey = process.env.API_KEY;
-    } catch (e) {
-        // process is likely not defined in this environment
-    }
+    // Strictly use environment variable as per security guidelines
+    const apiKey = process.env.API_KEY;
 
-    // 2. Fallback to User Configured Key (if Env is missing)
-    if (!apiKey && config.apiKey) {
-        apiKey = config.apiKey;
-    }
-
-    // 3. Final Safety Check
     if (!apiKey) {
-        console.warn("Gemini API Key is missing (Env & Config). AI features are disabled.");
+        console.warn("Gemini API Key is missing from environment variables.");
         return null;
     }
 

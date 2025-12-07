@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect } from 'react';
 import { User, DbConfig, UserRole, SystemConfig, AiConfig, AiProvider, SyslogConfig } from '../types';
 import { dbQuery, getSystemConfig, updateSystemConfig, connectToDatabase } from '../services/dbService';
@@ -417,329 +418,198 @@ const Settings: React.FC<SettingsProps> = ({ isProduction, onToggleProduction, c
 
                     {aiForm.provider === 'GEMINI' && (
                         <div>
-                            <label className="block text-slate-500 text-xs font-bold uppercase mb-1">Gemini API Key</label>
-                            <div className="relative">
-                                <Key className="absolute top-3 left-3 w-4 h-4 text-slate-500" />
-                                <input
-                                    type="password"
-                                    value={aiForm.apiKey || ''}
-                                    onChange={e => setAiForm({...aiForm, apiKey: e.target.value})}
-                                    className="w-full bg-slate-900 border border-slate-600 rounded p-3 pl-10 text-white focus:border-purple-500 outline-none"
-                                    placeholder="Enter API Key (Optional - Overrides System Env)"
-                                />
+                            <div className="bg-purple-900/20 border border-purple-500/30 p-3 rounded text-sm text-purple-200 mb-4">
+                                <p>Gemini API Key is managed securely via environment variables.</p>
                             </div>
-                             <p className="text-[10px] text-slate-500 mt-1">
-                                If left empty, the application will use the pre-configured <code>process.env.API_KEY</code>.
-                            </p>
+                            <div className="flex items-center space-x-2 text-emerald-400 text-sm font-bold bg-slate-900 p-3 rounded border border-slate-700">
+                                <ShieldCheck className="w-4 h-4" />
+                                <span>API Key Configured (Environment)</span>
+                            </div>
                         </div>
                     )}
 
                     {aiForm.provider === 'LOCAL' && (
                         <>
-                            <div>
-                                <label className="block text-slate-500 text-xs font-bold uppercase mb-1">Endpoint URL (OpenAI Compatible)</label>
-                                <input 
-                                    value={aiForm.endpoint}
-                                    onChange={e => setAiForm({...aiForm, endpoint: e.target.value})}
-                                    className="w-full bg-slate-900 border border-slate-600 rounded p-3 text-white focus:border-emerald-500 outline-none font-mono text-sm" 
-                                    placeholder="http://localhost:11434/v1/chat/completions"
-                                />
-                            </div>
-                            <div>
-                                <label className="block text-slate-500 text-xs font-bold uppercase mb-1">Authorization Token (Optional)</label>
-                                <input 
-                                    type="password"
-                                    value={aiForm.authToken}
-                                    onChange={e => setAiForm({...aiForm, authToken: e.target.value})}
-                                    className="w-full bg-slate-900 border border-slate-600 rounded p-3 text-white focus:border-emerald-500 outline-none" 
-                                    placeholder="Bearer sk-..."
-                                />
-                            </div>
+                             <div>
+                                 <label className="block text-slate-500 text-xs font-bold uppercase mb-1">Endpoint URL</label>
+                                 <input 
+                                     value={aiForm.endpoint}
+                                     onChange={e => setAiForm({...aiForm, endpoint: e.target.value})}
+                                     className="w-full bg-slate-900 border border-slate-600 rounded p-3 text-white focus:border-emerald-500 outline-none" 
+                                     placeholder="http://localhost:11434/v1/chat/completions"
+                                 />
+                             </div>
+                             <div>
+                                 <label className="block text-slate-500 text-xs font-bold uppercase mb-1">Auth Token (Optional)</label>
+                                 <input 
+                                     type="password"
+                                     value={aiForm.authToken}
+                                     onChange={e => setAiForm({...aiForm, authToken: e.target.value})}
+                                     className="w-full bg-slate-900 border border-slate-600 rounded p-3 text-white focus:border-emerald-500 outline-none" 
+                                     placeholder="Bearer ..."
+                                 />
+                             </div>
                         </>
                     )}
 
-                    <div className="flex gap-4 mt-4">
+                    <div className="flex gap-4 mt-6">
                         <button 
                             onClick={handleTestAi}
                             disabled={isTestingAi}
-                            className={`flex-1 flex justify-center items-center py-3 rounded-lg font-bold transition-colors ${isTestingAi ? 'bg-slate-700 text-slate-400' : 'bg-slate-700 hover:bg-slate-600 text-white'}`}
+                            className={`flex-1 bg-slate-700 hover:bg-slate-600 text-white font-bold py-3 rounded-lg transition-colors flex justify-center items-center ${isTestingAi ? 'opacity-50' : ''}`}
                         >
-                            {isTestingAi ? <RefreshCw className="w-4 h-4 animate-spin mr-2"/> : <Activity className="w-4 h-4 mr-2" />}
+                            {isTestingAi ? <RefreshCw className="animate-spin w-4 h-4 mr-2" /> : <Activity className="w-4 h-4 mr-2" />}
                             Test Connection
                         </button>
-
                         <button 
                             onClick={handleSaveAiConfig}
-                            className="flex-1 bg-blue-600 hover:bg-blue-500 text-white font-bold py-3 rounded-lg transition-colors shadow-lg shadow-blue-600/20"
+                            className="flex-1 bg-purple-600 hover:bg-purple-500 text-white font-bold py-3 rounded-lg transition-colors flex justify-center items-center shadow-lg shadow-purple-600/20"
                         >
-                            SAVE CONFIGURATION
+                            <Save className="w-4 h-4 mr-2" />
+                            Save Configuration
                         </button>
                     </div>
                 </div>
              </div>
         )}
 
-        {activeTab === 'USERS' && (
+        {/* User Management Tab */}
+        {activeTab === 'USERS' && isProduction && isSuperAdmin && (
             <div className="space-y-6">
-                {/* Create New User */}
-                <div className="bg-slate-800 rounded-xl border border-slate-700 p-6 shadow-lg">
-                    <h3 className="text-lg font-bold text-white mb-4 flex items-center">
-                        <Plus className="w-5 h-5 mr-2 text-blue-400" />
-                        Provision New User
-                    </h3>
-                    <div className="flex gap-4 items-end">
-                        <div className="flex-1">
+                 {/* Create User Form */}
+                 <div className="bg-slate-800 rounded-xl border border-slate-700 p-6 shadow-lg">
+                    <h3 className="text-lg font-bold text-white mb-4 flex items-center"><Plus className="w-5 h-5 mr-2" /> Add New User</h3>
+                    <div className="grid grid-cols-1 md:grid-cols-4 gap-4 items-end">
+                        <div>
                             <label className="block text-slate-500 text-xs font-bold uppercase mb-1">Username</label>
-                            <input 
-                                value={newUser.username}
-                                onChange={e => setNewUser({...newUser, username: e.target.value})}
-                                className="w-full bg-slate-900 border border-slate-600 rounded p-2 text-white" 
-                            />
+                            <input className="w-full bg-slate-900 border border-slate-600 rounded p-2 text-white outline-none" value={newUser.username} onChange={e => setNewUser({...newUser, username: e.target.value})} />
                         </div>
-                        <div className="flex-1">
-                            <label className="block text-slate-500 text-xs font-bold uppercase mb-1">Password</label>
-                            <input 
-                                type="password"
-                                value={newUser.password}
-                                onChange={e => setNewUser({...newUser, password: e.target.value})}
-                                className="w-full bg-slate-900 border border-slate-600 rounded p-2 text-white" 
-                            />
+                        <div>
+                             <label className="block text-slate-500 text-xs font-bold uppercase mb-1">Password</label>
+                            <input type="password" className="w-full bg-slate-900 border border-slate-600 rounded p-2 text-white outline-none" value={newUser.password} onChange={e => setNewUser({...newUser, password: e.target.value})} />
                         </div>
-                        <div className="w-32">
-                            <label className="block text-slate-500 text-xs font-bold uppercase mb-1">Role</label>
-                            <select 
-                                value={newUser.role}
-                                onChange={e => setNewUser({...newUser, role: e.target.value as UserRole})}
-                                className="w-full bg-slate-900 border border-slate-600 rounded p-2 text-white"
-                            >
+                        <div>
+                             <label className="block text-slate-500 text-xs font-bold uppercase mb-1">Role</label>
+                            <select className="w-full bg-slate-900 border border-slate-600 rounded p-2 text-white outline-none" value={newUser.role} onChange={e => setNewUser({...newUser, role: e.target.value as UserRole})}>
                                 <option value="VIEWER">Viewer</option>
                                 <option value="ADMIN">Admin</option>
-                                <option value="SUPERADMIN">SuperAdmin</option>
+                                <option value="SUPERADMIN">Super Admin</option>
                             </select>
                         </div>
-                        <button 
-                            onClick={handleAddUser}
-                            className="bg-blue-600 hover:bg-blue-500 text-white px-4 py-2 rounded font-bold transition-colors"
-                        >
-                            Create
-                        </button>
+                        <button onClick={handleAddUser} disabled={!newUser.username || !newUser.password} className="bg-blue-600 hover:bg-blue-500 text-white p-2 rounded font-bold transition-colors disabled:opacity-50">Create User</button>
                     </div>
-                </div>
+                 </div>
 
-                {/* Edit Modal / Inline Edit */}
-                {editingUser && (
-                    <div className="bg-slate-800 rounded-xl border border-blue-500 p-6 shadow-lg relative">
-                        <h3 className="text-lg font-bold text-white mb-4 flex items-center">
-                            <Edit className="w-5 h-5 mr-2 text-blue-400" />
-                            Edit User: {editingUser.username}
-                        </h3>
-                        <div className="grid grid-cols-2 gap-4 mb-4">
-                            <div>
-                                <label className="block text-slate-500 text-xs font-bold uppercase mb-1">Role</label>
-                                <select 
-                                    value={editingUser.role}
-                                    onChange={e => setEditingUser({...editingUser, role: e.target.value as UserRole})}
-                                    className="w-full bg-slate-900 border border-slate-600 rounded p-2 text-white"
-                                >
-                                    <option value="VIEWER">Viewer</option>
-                                    <option value="ADMIN">Admin</option>
-                                    <option value="SUPERADMIN">SuperAdmin</option>
-                                </select>
-                            </div>
-                            <div>
-                                <label className="block text-slate-500 text-xs font-bold uppercase mb-1">New Password (Optional)</label>
-                                <input 
-                                    type="password"
-                                    value={editPassword}
-                                    onChange={e => setEditPassword(e.target.value)}
-                                    placeholder="Leave blank to keep current"
-                                    className="w-full bg-slate-900 border border-slate-600 rounded p-2 text-white" 
-                                />
-                            </div>
-                        </div>
-                        <div className="flex justify-end space-x-2">
-                            <button onClick={() => setEditingUser(null)} className="px-3 py-1 text-slate-400 hover:text-white">Cancel</button>
-                            <button onClick={handleUpdateUser} className="bg-blue-600 hover:bg-blue-500 text-white px-4 py-1 rounded flex items-center">
-                                <Save className="w-4 h-4 mr-2" /> Save Changes
-                            </button>
-                        </div>
-                    </div>
-                )}
-
-                {/* User List */}
-                <div className="bg-slate-800 rounded-xl border border-slate-700 overflow-hidden">
-                    <table className="w-full text-left text-sm">
-                        <thead className="bg-slate-900 text-slate-400">
-                            <tr>
-                                <th className="p-4 font-bold uppercase text-xs">Username</th>
-                                <th className="p-4 font-bold uppercase text-xs">Role</th>
-                                <th className="p-4 font-bold uppercase text-xs">Security</th>
-                                <th className="p-4 font-bold uppercase text-xs text-right">Actions</th>
-                            </tr>
-                        </thead>
-                        <tbody className="divide-y divide-slate-700">
-                            {users.map(u => (
-                                <tr key={u.id} className="hover:bg-slate-700/30">
-                                    <td className="p-4 font-bold text-white">{u.username}</td>
-                                    <td className="p-4">
-                                        <span className={`px-2 py-1 rounded text-xs font-bold ${
-                                            u.role === 'SUPERADMIN' ? 'bg-purple-500/20 text-purple-400' :
-                                            u.role === 'ADMIN' ? 'bg-blue-500/20 text-blue-400' :
-                                            'bg-slate-500/20 text-slate-400'
-                                        }`}>
-                                            {u.role}
-                                        </span>
-                                    </td>
-                                    <td className="p-4">
-                                        {u.mfaEnabled ? (
-                                            <span className="flex items-center text-emerald-400 text-xs">
-                                                <ShieldCheck className="w-3 h-3 mr-1" /> MFA Active
-                                            </span>
-                                        ) : (
-                                            <span className="flex items-center text-yellow-500 text-xs">
-                                                <AlertTriangle className="w-3 h-3 mr-1" /> No MFA
-                                            </span>
-                                        )}
-                                    </td>
-                                    <td className="p-4 text-right">
-                                        <div className="flex items-center justify-end space-x-2">
-                                            <button 
-                                                onClick={() => handleResetMfa(u.id)}
-                                                className="bg-slate-700 hover:bg-yellow-600/20 text-slate-400 hover:text-yellow-500 p-2 rounded transition-colors"
-                                                title="Reset MFA (Force Re-enrollment)"
-                                            >
-                                                <ShieldAlert className="w-4 h-4" />
-                                            </button>
-                                            <button 
-                                                onClick={() => setEditingUser(u)}
-                                                className="bg-slate-700 hover:bg-blue-600/20 text-slate-400 hover:text-blue-400 p-2 rounded transition-colors"
-                                                title="Edit User"
-                                            >
-                                                <Edit className="w-4 h-4" />
-                                            </button>
-                                            <button 
-                                                onClick={() => handleDeleteUser(u.id)}
-                                                className="bg-slate-700 hover:bg-red-600/20 text-slate-400 hover:text-red-400 p-2 rounded transition-colors"
-                                                title="Delete User"
-                                            >
-                                                <Trash2 className="w-4 h-4" />
-                                            </button>
-                                        </div>
-                                    </td>
+                 {/* User List */}
+                 <div className="bg-slate-800 rounded-xl border border-slate-700 p-6 shadow-lg overflow-hidden">
+                    <h3 className="text-lg font-bold text-white mb-4 flex items-center"><Users className="w-5 h-5 mr-2" /> Existing Users</h3>
+                    <div className="overflow-x-auto">
+                        <table className="w-full text-left text-sm">
+                            <thead className="bg-slate-900 text-slate-400 uppercase font-bold text-xs">
+                                <tr>
+                                    <th className="p-3">Username</th>
+                                    <th className="p-3">Role</th>
+                                    <th className="p-3 text-center">MFA Active</th>
+                                    <th className="p-3 text-right">Actions</th>
                                 </tr>
-                            ))}
-                        </tbody>
-                    </table>
-                </div>
+                            </thead>
+                            <tbody className="divide-y divide-slate-700">
+                                {users.map(u => (
+                                    <tr key={u.id} className="hover:bg-slate-700/50">
+                                        <td className="p-3 font-mono">{u.username}</td>
+                                        <td className="p-3">
+                                            <span className={`px-2 py-0.5 rounded text-xs font-bold ${u.role === 'SUPERADMIN' ? 'bg-red-900/30 text-red-400' : u.role === 'ADMIN' ? 'bg-blue-900/30 text-blue-400' : 'bg-slate-700 text-slate-400'}`}>{u.role}</span>
+                                        </td>
+                                        <td className="p-3 text-center">
+                                            {u.mfaEnabled ? <ShieldCheck className="w-4 h-4 text-emerald-500 mx-auto" /> : <span className="text-slate-600">-</span>}
+                                        </td>
+                                        <td className="p-3 flex justify-end space-x-2">
+                                            <button onClick={() => setEditingUser(u)} className="p-1.5 text-slate-400 hover:text-white bg-slate-700 hover:bg-slate-600 rounded"><Edit className="w-4 h-4" /></button>
+                                            <button onClick={() => handleResetMfa(u.id)} className="p-1.5 text-slate-400 hover:text-yellow-400 bg-slate-700 hover:bg-slate-600 rounded" title="Reset MFA"><ShieldAlert className="w-4 h-4" /></button>
+                                            <button onClick={() => handleDeleteUser(u.id)} className="p-1.5 text-slate-400 hover:text-red-400 bg-slate-700 hover:bg-slate-600 rounded"><Trash2 className="w-4 h-4" /></button>
+                                        </td>
+                                    </tr>
+                                ))}
+                            </tbody>
+                        </table>
+                    </div>
+                 </div>
+
+                 {/* Edit User Modal */}
+                 {editingUser && (
+                     <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-50 p-4">
+                         <div className="bg-slate-800 border border-slate-600 rounded-xl p-6 max-w-md w-full shadow-2xl">
+                             <h3 className="text-lg font-bold text-white mb-4">Edit User: {editingUser.username}</h3>
+                             <div className="space-y-4">
+                                 <div>
+                                     <label className="block text-slate-500 text-xs font-bold uppercase mb-1">New Password (Optional)</label>
+                                     <input type="password" className="w-full bg-slate-900 border border-slate-600 rounded p-2 text-white outline-none" placeholder="Leave empty to keep current" value={editPassword} onChange={e => setEditPassword(e.target.value)} />
+                                 </div>
+                                 <div>
+                                     <label className="block text-slate-500 text-xs font-bold uppercase mb-1">Role</label>
+                                     <select className="w-full bg-slate-900 border border-slate-600 rounded p-2 text-white outline-none" value={editingUser.role} onChange={e => setEditingUser({...editingUser, role: e.target.value as UserRole})}>
+                                        <option value="VIEWER">Viewer</option>
+                                        <option value="ADMIN">Admin</option>
+                                        <option value="SUPERADMIN">Super Admin</option>
+                                    </select>
+                                 </div>
+                                 <div className="flex justify-end space-x-3 mt-6">
+                                     <button onClick={() => setEditingUser(null)} className="px-4 py-2 text-slate-400 hover:text-white">Cancel</button>
+                                     <button onClick={handleUpdateUser} className="bg-blue-600 hover:bg-blue-500 text-white px-4 py-2 rounded font-bold">Save Changes</button>
+                                 </div>
+                             </div>
+                         </div>
+                     </div>
+                 )}
             </div>
         )}
 
-        {/* Core & Branding Tab */}
-        {activeTab === 'CORE' && isSuperAdmin && (
-             <div className="space-y-6">
-                <div className="bg-slate-800 rounded-xl border border-slate-700 p-6 shadow-lg">
-                    <div className="flex items-start mb-4">
-                         <div className="bg-blue-900/30 p-3 rounded-full mr-4">
-                            <Building className="w-6 h-6 text-blue-400" />
-                         </div>
-                         <div>
-                             <h3 className="text-lg font-bold text-white">Organization Branding</h3>
-                             <p className="text-slate-400 text-sm">Update company identity details used in reports and headers.</p>
-                         </div>
-                    </div>
-                    
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4 max-w-2xl ml-16">
-                         <div>
-                            <label className="block text-slate-500 text-xs font-bold uppercase mb-1">Company Name</label>
-                            <input 
-                                value={orgForm.companyName}
-                                onChange={e => setOrgForm({...orgForm, companyName: e.target.value})}
-                                className="w-full bg-slate-900 border border-slate-600 rounded p-2 text-white outline-none" 
-                            />
-                        </div>
-                        <div>
-                            <label className="block text-slate-500 text-xs font-bold uppercase mb-1">Domain FQDN</label>
-                             <div className="relative">
-                                <Globe className="absolute left-2 top-2 w-4 h-4 text-slate-500" />
-                                <input 
-                                    value={orgForm.domain}
-                                    onChange={e => setOrgForm({...orgForm, domain: e.target.value})}
-                                    className="w-full bg-slate-900 border border-slate-600 rounded p-2 pl-8 text-white outline-none" 
-                                />
-                            </div>
-                        </div>
-                        <div className="col-span-2">
-                            <label className="block text-slate-500 text-xs font-bold uppercase mb-1">Logo URL</label>
-                            <input 
-                                value={orgForm.logoUrl}
-                                onChange={e => setOrgForm({...orgForm, logoUrl: e.target.value})}
-                                className="w-full bg-slate-900 border border-slate-600 rounded p-2 text-white outline-none" 
-                                placeholder="https://..."
-                            />
-                        </div>
-                    </div>
-                    <div className="flex justify-end mt-4">
-                        <button 
-                            onClick={handleSaveOrgConfig}
-                            disabled={isSavingCore}
-                            className="bg-blue-600 hover:bg-blue-500 text-white px-4 py-2 rounded font-bold flex items-center disabled:opacity-50"
-                        >
-                            <Save className="w-4 h-4 mr-2" /> Save Branding
-                        </button>
-                    </div>
-                </div>
+        {/* Core Setup (SuperAdmin Only) */}
+        {activeTab === 'CORE' && isProduction && isSuperAdmin && (
+             <div className="bg-slate-800 rounded-xl border border-slate-700 p-6 shadow-lg space-y-6">
+                 <div className="flex items-start">
+                     <Building className="w-10 h-10 text-red-500 mr-4" />
+                     <div>
+                         <h3 className="text-xl font-bold text-white">Organization & Branding</h3>
+                         <p className="text-slate-400 text-sm">Customize the interface identity.</p>
+                     </div>
+                 </div>
+                 <div className="grid grid-cols-2 gap-4 max-w-2xl">
+                     <div>
+                         <label className="block text-slate-500 text-xs font-bold uppercase mb-1">Company Name</label>
+                         <input className="w-full bg-slate-900 border border-slate-600 rounded p-3 text-white outline-none" value={orgForm.companyName} onChange={e => setOrgForm({...orgForm, companyName: e.target.value})} />
+                     </div>
+                     <div>
+                         <label className="block text-slate-500 text-xs font-bold uppercase mb-1">Domain</label>
+                         <input className="w-full bg-slate-900 border border-slate-600 rounded p-3 text-white outline-none" value={orgForm.domain} onChange={e => setOrgForm({...orgForm, domain: e.target.value})} />
+                     </div>
+                     <div className="col-span-2">
+                         <label className="block text-slate-500 text-xs font-bold uppercase mb-1">Logo URL (Optional)</label>
+                         <input className="w-full bg-slate-900 border border-slate-600 rounded p-3 text-white outline-none" value={orgForm.logoUrl} onChange={e => setOrgForm({...orgForm, logoUrl: e.target.value})} placeholder="https://..." />
+                     </div>
+                 </div>
+                 <button onClick={handleSaveOrgConfig} disabled={isSavingCore} className="bg-red-600 hover:bg-red-500 text-white px-6 py-2 rounded font-bold shadow-lg shadow-red-900/20 disabled:opacity-50">Save Organization Details</button>
 
-                <div className="bg-slate-800 rounded-xl border border-red-500/30 p-6 shadow-lg">
-                    <div className="flex items-start mb-4">
-                         <div className="bg-red-900/20 p-3 rounded-full mr-4">
-                            <Database className="w-6 h-6 text-red-400" />
-                         </div>
+                 <div className="border-t border-slate-700 pt-6 mt-6">
+                     <div className="flex items-start mb-4">
+                         <Database className="w-10 h-10 text-blue-500 mr-4" />
                          <div>
-                             <h3 className="text-lg font-bold text-white">Database Connection</h3>
-                             <p className="text-slate-400 text-sm">
-                                 <span className="text-red-400 font-bold mr-1">DANGER ZONE:</span> 
-                                 Updating these details will force a reconnection.
-                             </p>
+                             <h3 className="text-xl font-bold text-white">Database Re-Configuration</h3>
+                             <p className="text-slate-400 text-sm">Update connection string. <span className="text-red-400 font-bold">WARNING: Requires server restart.</span></p>
                          </div>
-                    </div>
-                    
-                    <div className="grid grid-cols-1 gap-4 max-w-xl ml-16">
-                         <input 
-                                placeholder="Server Address (e.g. sql.internal:1433)"
-                                className="bg-slate-900 border border-slate-600 rounded p-2 text-sm text-white"
-                                value={dbForm.server}
-                                onChange={(e) => setDbForm({...dbForm, server: e.target.value})}
-                            />
-                            <input 
-                                placeholder="Database Name"
-                                className="bg-slate-900 border border-slate-600 rounded p-2 text-sm text-white"
-                                value={dbForm.database}
-                                onChange={(e) => setDbForm({...dbForm, database: e.target.value})}
-                            />
-                            <input 
-                                placeholder="SA Username"
-                                className="bg-slate-900 border border-slate-600 rounded p-2 text-sm text-white"
-                                value={dbForm.username}
-                                onChange={(e) => setDbForm({...dbForm, username: e.target.value})}
-                            />
-                            <input 
-                                type="password"
-                                placeholder="New Password"
-                                className="bg-slate-900 border border-slate-600 rounded p-2 text-sm text-white"
-                                value={dbForm.password}
-                                onChange={(e) => setDbForm({...dbForm, password: e.target.value})}
-                            />
-                    </div>
-                    <div className="flex justify-end mt-4">
-                        <button 
-                            onClick={handleUpdateDbConnection}
-                            disabled={isSavingCore}
-                            className="bg-red-600 hover:bg-red-500 text-white px-4 py-2 rounded font-bold flex items-center disabled:opacity-50"
-                        >
-                            <RefreshCw className="w-4 h-4 mr-2" /> Update & Reconnect
-                        </button>
-                    </div>
-                </div>
+                     </div>
+                     <div className="bg-black/30 p-4 rounded border border-red-900/30 mb-4 text-xs text-red-300 flex items-center">
+                         <AlertTriangle className="w-4 h-4 mr-2" />
+                         Modifying this will disconnect the current session. Ensure you have the correct credentials.
+                     </div>
+                     <div className="grid grid-cols-2 gap-4 max-w-2xl">
+                        <input className="w-full bg-slate-900 border border-slate-600 rounded p-3 text-white outline-none text-sm" placeholder="Server (e.g. localhost,1433)" value={dbForm.server} onChange={e => setDbForm({...dbForm, server: e.target.value})} />
+                        <input className="w-full bg-slate-900 border border-slate-600 rounded p-3 text-white outline-none text-sm" placeholder="Database Name" value={dbForm.database} onChange={e => setDbForm({...dbForm, database: e.target.value})} />
+                        <input className="w-full bg-slate-900 border border-slate-600 rounded p-3 text-white outline-none text-sm" placeholder="Username" value={dbForm.username} onChange={e => setDbForm({...dbForm, username: e.target.value})} />
+                        <input type="password" className="w-full bg-slate-900 border border-slate-600 rounded p-3 text-white outline-none text-sm" placeholder="Password" value={dbForm.password} onChange={e => setDbForm({...dbForm, password: e.target.value})} />
+                     </div>
+                     <button onClick={handleUpdateDbConnection} disabled={isSavingCore} className="bg-blue-600 hover:bg-blue-500 text-white px-6 py-2 rounded font-bold shadow-lg shadow-blue-900/20 mt-4 disabled:opacity-50">Update Database Connection</button>
+                 </div>
              </div>
         )}
     </div>
