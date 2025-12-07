@@ -94,14 +94,31 @@ const createSession = (socket, protocol) => {
     };
 };
 
+const startHoneypotListener = (server, port, name) => {
+    server.on('error', (e) => {
+        if (e.code === 'EADDRINUSE') {
+            console.log(`[Honeypot] ${name} port ${port} is busy. (Assuming already running)`);
+        } else {
+            console.error(`[Honeypot] ${name} error:`, e);
+        }
+    });
+    try {
+        server.listen(port, () => console.log(`[Honeypot] ${name} listening on ${port}`));
+    } catch (e) {
+        // Ignore synchronous errors
+    }
+};
+
 // 1. FTP Honeypot (Simulates VSFTPD)
 const startFtpServer = () => {
     const server = net.createServer((socket) => {
         const { record } = createSession(socket, 'FTP');
         
         const send = (msg) => {
-            socket.write(msg);
-            record('OUTPUT', msg);
+            if (socket.writable) {
+                socket.write(msg);
+                record('OUTPUT', msg);
+            }
         };
 
         // Initial Banner
@@ -122,8 +139,9 @@ const startFtpServer = () => {
                 send('500 Unknown command.\r\n');
             }
         });
+        socket.on('error', () => {});
     });
-    server.listen(HONEYPOT_PORTS.FTP, () => console.log(`[Honeypot] FTP listening on ${HONEYPOT_PORTS.FTP}`));
+    startHoneypotListener(server, HONEYPOT_PORTS.FTP, 'FTP');
 };
 
 // 2. Telnet Honeypot (Simulates Ubuntu Login)
@@ -133,15 +151,16 @@ const startTelnetServer = () => {
         let state = 'LOGIN';
 
         const send = (msg) => {
-            socket.write(msg);
-            record('OUTPUT', msg);
+            if (socket.writable) {
+                socket.write(msg);
+                record('OUTPUT', msg);
+            }
         };
 
         setTimeout(() => send('\r\nUbuntu 20.04.6 LTS\r\nserver login: '), 200);
 
         socket.on('data', (data) => {
             record('INPUT', data); // Telnet sends char by char often, but for simplicity
-            const input = data.toString().trim();
             
             if (state === 'LOGIN') {
                 send('Password: ');
@@ -153,8 +172,9 @@ const startTelnetServer = () => {
                 }, 800);
             }
         });
+        socket.on('error', () => {});
     });
-    server.listen(HONEYPOT_PORTS.TELNET, () => console.log(`[Honeypot] Telnet listening on ${HONEYPOT_PORTS.TELNET}`));
+    startHoneypotListener(server, HONEYPOT_PORTS.TELNET, 'Telnet');
 };
 
 // 3. Redis Honeypot
@@ -163,8 +183,10 @@ const startRedisServer = () => {
         const { record } = createSession(socket, 'REDIS');
         
         const send = (msg) => {
-            socket.write(msg);
-            record('OUTPUT', msg);
+            if (socket.writable) {
+                socket.write(msg);
+                record('OUTPUT', msg);
+            }
         };
 
         socket.on('data', (data) => {
@@ -179,8 +201,9 @@ const startRedisServer = () => {
                  send('-ERR unknown command\r\n');
             }
         });
+        socket.on('error', () => {});
     });
-    server.listen(HONEYPOT_PORTS.REDIS, () => console.log(`[Honeypot] Redis listening on ${HONEYPOT_PORTS.REDIS}`));
+    startHoneypotListener(server, HONEYPOT_PORTS.REDIS, 'Redis');
 };
 
 // Start Honeypots
@@ -1207,7 +1230,7 @@ app.post('/api/reports/generate', async (req, res) => {
 });
 
 app.get('/api/reports', async (req, res) => { if (!dbPool) return res.json([]); try { const result = await dbPool.request().query("SELECT * FROM Reports ORDER BY CreatedAt DESC"); res.json(result.recordset.map(r => ({ id: r.ReportId, title: r.Title, generatedBy: r.GeneratedBy, type: r.Type, createdAt: r.CreatedAt, content: JSON.parse(r.ContentJson || '{}') }))); } catch(e) { res.json([]); } });
-app.delete('/api/reports/:id', async (req, res) => { if (!dbPool) return res.status(503).json({success: false, error: 'DB Disconnected'}); try { await dbPool.request().input('rid', sql.NVarChar, req.params.id).query("DELETE FROM Reports WHERE ReportId = @rid"); res.json({success: true}); } catch(e) { res.status(500).json({success: false, error: e.message}); } });
+app.delete('/api/reports/:id', async (req, res) => { if (!dbPool) return res.status(500).json({success: false, error: 'DB Disconnected'}); try { await dbPool.request().input('rid', sql.NVarChar, req.params.id).query("DELETE FROM Reports WHERE ReportId = @rid"); res.json({success: true}); } catch(e) { res.status(500).json({success: false, error: e.message}); } });
 app.get('/api/logs', async (req, res) => { if (!dbPool) return res.json([]); try { const result = await dbPool.request().query(`SELECT TOP 100 L.*, A.Name as ActorName FROM Logs L LEFT JOIN Actors A ON L.ActorId = A.ActorId ORDER BY L.Timestamp DESC`); res.json(result.recordset.map(r => ({ id: r.LogId, actorId: r.ActorId, level: r.Level, process: r.Process, message: r.Message, sourceIp: r.SourceIp, timestamp: r.Timestamp, actorName: r.ActorName || 'System' }))); } catch(e) { res.json([]); } });
 
 // --- AUDIT ---
