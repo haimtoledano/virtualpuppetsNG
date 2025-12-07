@@ -310,23 +310,30 @@ router.post('/trap/init', async (req, res) => {
 });
 
 router.post('/trap/interact', async (req, res) => {
-    const { sessionId, input, actorId } = req.body;
+    const { sessionId, input, actorId, attackerIp } = req.body;
     const response = interactTrap(input);
     
     // Log interaction and trigger alert if connected
     if (dbPool && actorId && actorId !== 'unknown') {
         try {
             const cleanInput = (input || '').trim().substring(0, 50);
-            const isSensitive = /USER|PASS|AUTH|SELECT|DROP|UNION/i.test(cleanInput);
-            const level = isSensitive ? 'CRITICAL' : 'WARNING';
             
-            // 1. Insert Log
+            // Critical Check:
+            // 1. Regex for sensitive keywords
+            // 2. Explicit Sentinel Check
+            let level = 'WARNING';
+            const isSensitive = /USER|PASS|AUTH|SELECT|DROP|UNION/i.test(cleanInput);
+            if (isSensitive) level = 'CRITICAL';
+            if (sessionId === 'SENTINEL') level = 'CRITICAL';
+            
+            // 1. Insert Log with SourceIp (Attacker)
             await dbPool.request()
                 .input('aid', sql.NVarChar, actorId)
                 .input('lvl', sql.NVarChar, level)
-                .input('proc', sql.NVarChar, 'trap-relay')
+                .input('proc', sql.NVarChar, sessionId === 'SENTINEL' ? 'sentinel' : 'trap-relay')
                 .input('msg', sql.NVarChar, `[TRAP ALERT] Input: ${cleanInput}`)
-                .query("INSERT INTO Logs (LogId, ActorId, Level, Process, Message, Timestamp) VALUES (NEWID(), @aid, @lvl, @proc, @msg, GETDATE())");
+                .input('ip', sql.NVarChar, attackerIp || null)
+                .query("INSERT INTO Logs (LogId, ActorId, Level, Process, Message, Timestamp, SourceIp) VALUES (NEWID(), @aid, @lvl, @proc, @msg, GETDATE(), @ip)");
             
             // 2. Update Status to COMPROMISED
             await dbPool.request()

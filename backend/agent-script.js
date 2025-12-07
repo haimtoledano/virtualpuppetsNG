@@ -68,10 +68,14 @@ fi
 
 echo -ne "$BANNER"
 
+# Capture Attacker IP from Socat Environment Variable
+PEER_IP="\${SOCAT_PEERADDR:-unknown}"
+
 # Loop to read input lines and forward to server
 while IFS= read -r LINE || [ -n "$LINE" ]; do 
   # Safe JSON construction using jq to handle escaping
-  PAYLOAD=$(jq -n --arg sid "$SID" --arg input "$LINE" --arg aid "$ACTOR_ID" '{sessionId: $sid, input: $input, actorId: $aid}')
+  # Include PEER_IP as attackerIp for topology visualization
+  PAYLOAD=$(jq -n --arg sid "$SID" --arg input "$LINE" --arg aid "$ACTOR_ID" --arg ip "$PEER_IP" '{sessionId: $sid, input: $input, actorId: $aid, attackerIp: $ip}')
   
   # Send to server only if payload is generated
   if [ ! -z "$PAYLOAD" ]; then
@@ -167,7 +171,8 @@ ACTOR_ID=$(cat "$AGENT_DIR/vpp-id")
                 # Extract Source IP (simple grep)
                 SRC_IP=$(echo "$LOGLINE" | grep -oE 'SRC=[0-9.]+' | cut -d= -f2)
                 if [ ! -z "$SRC_IP" ]; then
-                    PAYLOAD=$(jq -n --arg sid "SENTINEL" --arg input "SYN_DETECTED_FROM_$SRC_IP" --arg aid "$ACTOR_ID" '{sessionId: $sid, input: $input, actorId: $aid}')
+                    # Updated payload to include attackerIp explicitly for the Topology screen
+                    PAYLOAD=$(jq -n --arg sid "SENTINEL" --arg input "Inbound TCP SYN Detected" --arg aid "$ACTOR_ID" --arg ip "$SRC_IP" '{sessionId: $sid, input: $input, actorId: $aid, attackerIp: $ip}')
                     curl -s -X POST -H "Content-Type: application/json" -d "$PAYLOAD" "$SERVER/api/trap/interact" >/dev/null
                 fi
             fi
