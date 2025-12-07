@@ -1,4 +1,4 @@
-export const CURRENT_AGENT_VERSION = "2.3.0";
+export const CURRENT_AGENT_VERSION = "2.3.1";
 
 export const generateAgentScript = (serverUrl, token) => {
   return `#!/bin/bash
@@ -191,32 +191,45 @@ while true; do
     curl -s -X POST -H "Content-Type: application/json" -d "$PAYLOAD" "$SERVER/api/agent/scan" >/dev/null
     
     JOB_JSON=$(curl -s "$SERVER/api/agent/commands?actorId=$ACTOR_ID")
-    JOB_ID=$(echo "$JOB_JSON" | jq -r '.[0].id // empty')
     
-    if [ ! -z "$JOB_ID" ]; then
-        CMD=$(echo "$JOB_JSON" | jq -r '.[0].command')
+    # Validation Check: Ensure JOB_JSON is not HTML (error page) or object (error)
+    # Using 'head' to peak at first char to check for array '['
+    FIRST_CHAR=$(echo "$JOB_JSON" | head -c 1)
+    
+    if [ "$FIRST_CHAR" == "[" ]; then
+        JOB_ID=$(echo "$JOB_JSON" | jq -r '.[0].id // empty' 2>/dev/null)
         
-        # Ack start - FIXED: Use jq for valid JSON to prevent syntax errors
-        ACK_PAYLOAD=$(jq -n -c --arg jid "$JOB_ID" --arg stat "RUNNING" '{jobId: $jid, status: $stat}')
-        curl -s -X POST -H "Content-Type: application/json" -d "$ACK_PAYLOAD" "$SERVER/api/agent/result"
-        
-        OUTPUT=$(eval "$CMD" 2>&1)
-        
-        # Send result
-        jq -n -c --arg jid "$JOB_ID" --arg out "$OUTPUT" '{jobId: $jid, status: "COMPLETED", output: $out}' | \
-        curl -s -X POST -H "Content-Type: application/json" -d @- "$SERVER/api/agent/result"
+        if [ ! -z "$JOB_ID" ]; then
+            CMD=$(echo "$JOB_JSON" | jq -r '.[0].command')
+            
+            # Ack start
+            ACK_PAYLOAD=$(jq -n -c --arg jid "$JOB_ID" --arg stat "RUNNING" '{jobId: $jid, status: $stat}')
+            curl -s -X POST -H "Content-Type: application/json" -d "$ACK_PAYLOAD" "$SERVER/api/agent/result"
+            
+            OUTPUT=$(eval "$CMD" 2>&1)
+            
+            # Send result
+            jq -n -c --arg jid "$JOB_ID" --arg out "$OUTPUT" '{jobId: $jid, status: "COMPLETED", output: $out}' | \
+            curl -s -X POST -H "Content-Type: application/json" -d @- "$SERVER/api/agent/result"
+        fi
     fi
 
     # Auto-Update Check (Every ~60s)
     if [ $COUNTER -ge 12 ]; then
         CUR_VER=$(cat "$AGENT_DIR/.version" 2>/dev/null || echo "1.0.0")
+        HWID=$(cat /sys/class/net/eth0/address 2>/dev/null || hostname)
         HB_RESP=$(curl -s -G --data-urlencode "hwid=$HWID" --data-urlencode "version=$CUR_VER" "$SERVER/api/agent/heartbeat")
-        LATEST_VER=$(echo "$HB_RESP" | jq -r '.latestVersion // empty')
         
-        if [ ! -z "$LATEST_VER" ] && [ "$LATEST_VER" != "$CUR_VER" ]; then
-            echo "[VPP] Update Available: $LATEST_VER. Downloading..."
-            curl -sL "$SERVER/setup" | bash -s "$TOKEN"
-            exit 0
+        # Valid JSON check for Heartbeat as well
+        HB_CHAR=$(echo "$HB_RESP" | head -c 1)
+        if [ "$HB_CHAR" == "{" ]; then
+            LATEST_VER=$(echo "$HB_RESP" | jq -r '.latestVersion // empty' 2>/dev/null)
+            
+            if [ ! -z "$LATEST_VER" ] && [ "$LATEST_VER" != "$CUR_VER" ]; then
+                echo "[VPP] Update Available: $LATEST_VER. Downloading..."
+                curl -sL "$SERVER/setup" | bash -s "$TOKEN"
+                exit 0
+            fi
         fi
         COUNTER=0
     fi

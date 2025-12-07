@@ -257,6 +257,23 @@ router.get('/commands/:actorId', async (req, res) => {
     try { const r = await dbPool.request().input('aid', sql.NVarChar, req.params.actorId).query("SELECT JobId as id, Command as command, Status as status, Output as output, CreatedAt as createdAt FROM CommandQueue WHERE ActorId = @aid ORDER BY CreatedAt DESC"); res.json(r.recordset); } catch(e) { res.json([]); }
 });
 
+// FIXED: Add missing route for agent polling that caused jq errors
+router.get('/agent/commands', async (req, res) => {
+    if (!dbPool) return res.json([]);
+    const actorId = req.query.actorId;
+    if (!actorId) return res.json([]);
+    try { 
+        // Return only PENDING commands for execution
+        const r = await dbPool.request()
+            .input('aid', sql.NVarChar, actorId)
+            .query("SELECT TOP 1 JobId as id, Command as command FROM CommandQueue WHERE ActorId = @aid AND Status = 'PENDING' ORDER BY CreatedAt ASC"); 
+        res.json(r.recordset); 
+    } catch(e) { 
+        console.error("[API] Error fetching agent commands:", e);
+        res.json([]); 
+    }
+});
+
 router.post('/agent/result', async (req, res) => {
     if (!dbPool) return res.json({});
     const { jobId, status, output } = req.body;
@@ -462,7 +479,6 @@ router.post('/trap/init', async (req, res) => {
     const sid = `trap-${Date.now()}`;
     const { actorId } = req.body;
     const data = initTrap(sid);
-    // Log init
     if (dbPool && actorId && actorId !== 'unknown') {
         try {
             await dbPool.request()
@@ -480,20 +496,14 @@ router.post('/trap/interact', async (req, res) => {
     const { sessionId, input, actorId, attackerIp } = req.body;
     const response = interactTrap(input);
     
-    // Log interaction and trigger alert if connected
     if (dbPool && actorId && actorId !== 'unknown') {
         try {
             const cleanInput = (input || '').trim().substring(0, 50);
-            
-            // Critical Check:
-            // 1. Regex for sensitive keywords
-            // 2. Explicit Sentinel Check
             let level = 'WARNING';
             const isSensitive = /USER|PASS|AUTH|SELECT|DROP|UNION/i.test(cleanInput);
             if (isSensitive) level = 'CRITICAL';
             if (sessionId === 'SENTINEL') level = 'CRITICAL';
             
-            // 1. Insert Log with SourceIp (Attacker)
             await dbPool.request()
                 .input('aid', sql.NVarChar, actorId)
                 .input('lvl', sql.NVarChar, level)
@@ -502,7 +512,6 @@ router.post('/trap/interact', async (req, res) => {
                 .input('ip', sql.NVarChar, attackerIp || null)
                 .query("INSERT INTO Logs (LogId, ActorId, Level, Process, Message, Timestamp, SourceIp) VALUES (NEWID(), @aid, @lvl, @proc, @msg, GETDATE(), @ip)");
             
-            // 2. Update Status to COMPROMISED
             await dbPool.request()
                 .input('aid', sql.NVarChar, actorId)
                 .query("UPDATE Actors SET Status = 'COMPROMISED' WHERE ActorId = @aid");
@@ -521,7 +530,7 @@ router.delete('/sessions/:id', (req, res) => { deleteSession(req.params.id); res
 // --- AGENT HEARTBEAT & AUTO-UPDATE ---
 router.get('/agent/heartbeat', async (req, res) => {
     if (!dbPool) return res.status(503).json({});
-    const { hwid, os, version } = req.query; // version is now passed
+    const { hwid, os, version } = req.query;
     if (!hwid) return res.status(400).json({});
     
     try {
@@ -529,8 +538,6 @@ router.get('/agent/heartbeat', async (req, res) => {
         
         if (actor.recordset.length > 0) {
             const actorId = actor.recordset[0].ActorId;
-            
-            // Update LastSeen, OS, and AgentVersion
             await dbPool.request()
                 .input('aid', sql.NVarChar, actorId)
                 .input('os', sql.NVarChar, os || 'Unknown')
@@ -543,7 +550,7 @@ router.get('/agent/heartbeat', async (req, res) => {
             return res.json({ 
                 status: 'APPROVED', 
                 actorId: actorId,
-                latestVersion: CURRENT_AGENT_VERSION // Trigger auto-update if mismatch
+                latestVersion: CURRENT_AGENT_VERSION
             });
         }
         
