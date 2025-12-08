@@ -101,6 +101,25 @@ get_hwid() {
     echo "\$HID"
 }
 
+get_os_name() {
+    if [ -f /etc/os-release ]; then
+        . /etc/os-release
+        if [ ! -z "\$PRETTY_NAME" ]; then
+            echo "\$PRETTY_NAME" | tr -d '"'
+            return
+        fi
+        if [ ! -z "\$NAME" ]; then
+            echo "\$NAME \$VERSION" | tr -d '"'
+            return
+        fi
+    fi
+    if command -v lsb_release &> /dev/null; then
+        lsb_release -ds | tr -d '"'
+        return
+    fi
+    uname -sr
+}
+
 get_metrics() {
     CPU=\$(top -bn1 | grep "Cpu(s)" | sed "s/.*, *\\([0-9.]*\\)%* id.*/\\1/" | awk '{print 100 - \$1}')
     if [ -z "\$CPU" ]; then CPU=0; fi
@@ -187,11 +206,12 @@ check_sentinel() {
 
 # --- INITIALIZATION ---
 HWID=\$(get_hwid)
-log "Agent Started. HWID: \$HWID"
+OS_NAME=\$(get_os_name)
+log "Agent Started. HWID: \$HWID OS: \$OS_NAME"
 
 # Validation
 CUR_VER=\$(cat "$AGENT_DIR/.version" 2>/dev/null || echo "1.0.0")
-INIT_RESP=\$(curl -s -G --data-urlencode "hwid=\$HWID" --data-urlencode "os=$(uname -r)" --data-urlencode "version=\$CUR_VER" "\$SERVER/api/agent/heartbeat")
+INIT_RESP=\$(curl -s -G --data-urlencode "hwid=\$HWID" --data-urlencode "os=\$OS_NAME" --data-urlencode "version=\$CUR_VER" "\$SERVER/api/agent/heartbeat")
 INIT_STATUS=\$(echo "\$INIT_RESP" | jq -r '.status')
 
 log "Server Response: \$INIT_STATUS"
@@ -207,7 +227,7 @@ fi
 # Enrollment Loop
 while [ ! -f "$AGENT_DIR/vpp-id" ]; do
     HWID=\$(get_hwid)
-    RESP=\$(curl -s -G --data-urlencode "hwid=\$HWID" --data-urlencode "os=$(uname -r)" --data-urlencode "version=\$CUR_VER" "\$SERVER/api/agent/heartbeat")
+    RESP=\$(curl -s -G --data-urlencode "hwid=\$HWID" --data-urlencode "os=\$OS_NAME" --data-urlencode "version=\$CUR_VER" "\$SERVER/api/agent/heartbeat")
     STATUS=\$(echo "\$RESP" | jq -r '.status')
     
     if [ "\$STATUS" == "APPROVED" ]; then 
