@@ -40,19 +40,50 @@ mkdir -p $AGENT_DIR
 echo "$SERVER_URL" > $AGENT_DIR/.server
 echo "$TOKEN" > $AGENT_DIR/.token
 echo "$VERSION" > $AGENT_DIR/.version
+echo "off" > $AGENT_DIR/.sentinel
+
+# Create Trap Relay Script
+cat <<'EOF_TRAP' > $AGENT_DIR/trap_relay.sh
+#!/bin/bash
+# Socat sets SOCAT_PEERADDR, SOCAT_PEERPORT
+AGENT_DIR="/opt/vpp-agent"
+SERVER=\$(cat "\$AGENT_DIR/.server")
+ACTOR_ID=\$(cat "\$AGENT_DIR/vpp-id")
+
+# Log to local
+echo "[TRAP] Connection from \$SOCAT_PEERADDR:\$SOCAT_PEERPORT" >> /var/log/vpp-agent.log
+
+# Send Alert
+PAYLOAD=\$(jq -n \\
+  --arg aid "\$ACTOR_ID" \\
+  --arg lvl "CRITICAL" \\
+  --arg proc "trap_relay" \\
+  --arg msg "Trap Triggered on Port \$SOCAT_SOCKPORT by \$SOCAT_PEERADDR" \\
+  --arg ip "\$SOCAT_PEERADDR" \\
+  '{actorId: \$aid, level: \$lvl, process: \$proc, message: \$msg, sourceIp: \$ip}')
+
+curl -s -X POST -H "Content-Type: application/json" -d "\$PAYLOAD" "\$SERVER/api/agent/log" &
+
+# Mock Interaction (Echo)
+echo "Connection Logged. Terminal Locked."
+while read line; do
+  echo "Access Denied."
+done
+EOF_TRAP
+chmod +x $AGENT_DIR/trap_relay.sh
 
 # Create Main Agent Script
 cat <<'EOF_SRV' > $AGENT_DIR/agent.sh
 #!/bin/bash
 export PATH=$PATH:/usr/sbin:/sbin:/usr/bin:/bin:/usr/local/bin
 AGENT_DIR="/opt/vpp-agent"
-SERVER=$(cat "$AGENT_DIR/.server")
+SERVER=\$(cat "\$AGENT_DIR/.server")
 LOG_FILE="/var/log/vpp-agent.log"
 ACTOR_NAME="Agent"
 
 # Function to log messages
 log() {
-    echo "[$(date)] $1" >> $LOG_FILE
+    echo "[$(date)] \$1" >> \$LOG_FILE
 }
 
 get_hwid() {
@@ -112,6 +143,37 @@ perform_recon() {
         if [ ! -z "\$WIFIDATA" ]; then
             JSON=\$(jq -n --arg aid "\$AID" --argjson d "[\$WIFIDATA]" '{actorId: \$aid, type: "WIFI", data: \$d}')
             curl -s -X POST -H "Content-Type: application/json" -d "\$JSON" "\$SERVER/api/agent/recon"
+        fi
+    fi
+}
+
+check_sentinel() {
+    local AID="\$1"
+    local MODE=\$(cat "\$AGENT_DIR/.sentinel" 2>/dev/null)
+    
+    if [ "\$MODE" == "on" ]; then
+        # Check for ESTABLISHED connections from non-local IPs
+        local SUSPECTS=""
+        if command -v ss &> /dev/null; then
+            SUSPECTS=\$(ss -ntu state established | grep -v "127.0.0.1" | grep -v "::1" | grep -v "\$SERVER_URL" | awk '{print \$5}' | cut -d: -f1)
+        else
+            SUSPECTS=\$(netstat -nt | grep ESTABLISHED | grep -v "127.0.0.1" | awk '{print \$5}' | cut -d: -f1)
+        fi
+
+        if [ ! -z "\$SUSPECTS" ]; then
+            for IP in \$SUSPECTS; do
+                # Ignore self/server IP if possible (simple filter)
+                if [[ "\$IP" != "0.0.0.0" && "\$IP" != "" ]]; then
+                   PAYLOAD=\$(jq -n \\
+                      --arg aid "\$AID" \\
+                      --arg lvl "CRITICAL" \\
+                      --arg proc "sentinel" \\
+                      --arg msg "Unauthorized connection detected from \$IP" \\
+                      --arg ip "\$IP" \\
+                      '{actorId: \$aid, level: \$lvl, process: \$proc, message: \$msg, sourceIp: \$ip}')
+                   curl -s -X POST -H "Content-Type: application/json" -d "\$PAYLOAD" "\$SERVER/api/agent/log"
+                fi
+            done
         fi
     fi
 }
@@ -192,6 +254,14 @@ while true; do
         elif [[ "\$CMD" == "vpp-agent --recon" ]]; then
             perform_recon "\$ACTOR_ID"
             RESULT="Recon data uploaded."
+        elif [[ "\$CMD" == *"vpp-agent --set-sentinel"* ]]; then
+            if [[ "\$CMD" == *"on"* ]]; then
+                echo "on" > "\$AGENT_DIR/.sentinel"
+                RESULT="Sentinel Mode ENABLED."
+            else
+                echo "off" > "\$AGENT_DIR/.sentinel"
+                RESULT="Sentinel Mode DISABLED."
+            fi
         else
             # Standard Shell Execution
             RESULT=\$(eval "\$CMD" 2>&1)
@@ -204,7 +274,10 @@ while true; do
         curl -s -X POST -H "Content-Type: application/json" -d "\$REPORT" "\$SERVER/api/agent/tasks/\$JOB_ID"
     done
 
-    # 4. Randomized Recon (every ~5 mins)
+    # 4. Security Checks
+    check_sentinel "\$ACTOR_ID"
+
+    # 5. Randomized Recon (every ~5 mins)
     if [ \$((RANDOM % 60)) -eq 0 ]; then
         perform_recon "\$ACTOR_ID"
     fi

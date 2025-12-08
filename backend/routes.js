@@ -316,6 +316,29 @@ router.post('/audit', async (req, res) => {
     res.json({success: true});
 });
 
+// --- AGENT LOG INGESTION (New) ---
+router.post('/agent/log', async (req, res) => {
+    const { actorId, level, process, message, sourceIp } = req.body;
+    const db = getDbPool();
+    if (!db) return res.status(503).json({});
+    
+    try {
+        const logId = `log-${Date.now()}-${Math.random().toString(36).substr(2,4)}`;
+        await db.request()
+            .input('lid', logId)
+            .input('aid', actorId)
+            .input('lvl', level || 'INFO')
+            .input('proc', process || 'agent')
+            .input('msg', message || '')
+            .input('ip', sourceIp || '0.0.0.0')
+            .query("INSERT INTO Logs (LogId, ActorId, Level, Process, Message, SourceIp, Timestamp) VALUES (@lid, @aid, @lvl, @proc, @msg, @ip, GETDATE())");
+        res.json({ status: 'ok' });
+    } catch (e) {
+        console.error("Agent Log Error", e);
+        res.status(500).json({});
+    }
+});
+
 // --- RECON DATA ---
 router.get('/recon/wifi', async (req, res) => {
     const db = getDbPool(); if(!db) return res.json([]);
@@ -532,7 +555,7 @@ router.post('/agent/recon', async (req, res) => {
 router.get('/setup', (req, res) => {
     const host = req.get('host');
     const protocol = req.protocol;
-    // Ensure no double slash issues or double /api
+    // Set serverUrl to base host only to avoid double /api in curl command
     const serverUrl = `${protocol}://${host}`; 
     const token = req.query.token || 'manual_install';
     
