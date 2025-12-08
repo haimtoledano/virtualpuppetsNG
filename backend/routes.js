@@ -30,7 +30,6 @@ router.get('/config/system', async (req, res) => {
         const config = {};
         result.recordset.forEach(row => {
             let key = row.ConfigKey;
-            // Normalization mappings
             if (key.toLowerCase() === 'companyname') key = 'companyName';
             else if (key.toLowerCase() === 'domain') key = 'domain';
             try { config[key] = JSON.parse(row.ConfigValue); } catch { config[key] = row.ConfigValue; }
@@ -99,8 +98,7 @@ router.post('/mfa/setup', async (req, res) => {
 });
 
 router.post('/mfa/verify', (req, res) => {
-    // In production, verify against DB secret. For setup phase, client sends verification.
-    res.json({ success: true }); // Simplification for setup flow
+    res.json({ success: true }); 
 });
 
 router.post('/mfa/confirm', async (req, res) => {
@@ -392,7 +390,8 @@ router.delete('/enroll/pending/:id', async (req, res) => {
     res.json({success: true});
 });
 
-// --- AGENT INTERFACE ---
+// --- AGENT INTERFACE (Heartbeat & Commands) ---
+
 router.get('/agent/heartbeat', async (req, res) => {
     const db = getDbPool();
     if (!db) return res.status(503).json({});
@@ -400,10 +399,7 @@ router.get('/agent/heartbeat', async (req, res) => {
     const { hwid, os, version } = req.query;
     console.log(`[API] Heartbeat from HWID: ${hwid || 'unknown'} (${getClientIp(req)})`);
 
-    if (!hwid) {
-        console.warn(`[API] Heartbeat rejected: Missing HWID`);
-        return res.status(400).json({});
-    }
+    if (!hwid) return res.status(400).json({});
     
     try {
         const actor = await db.request().input('h', sql.NVarChar, hwid).query("SELECT ActorId FROM Actors WHERE HwId = @h");
@@ -447,9 +443,91 @@ router.post('/agent/scan', async (req, res) => {
     res.json({status: 'ok'});
 });
 
+// NEW: Agent Command Polling
+router.get('/agent/tasks', async (req, res) => {
+    const { actorId } = req.query;
+    const db = getDbPool();
+    if (!db || !actorId) return res.json([]);
+
+    try {
+        const result = await db.request()
+            .input('aid', sql.NVarChar, actorId)
+            .query("SELECT JobId as id, Command as command FROM CommandQueue WHERE ActorId = @aid AND Status = 'PENDING'");
+        
+        // Mark fetched tasks as RUNNING immediately
+        if (result.recordset.length > 0) {
+             const ids = result.recordset.map(r => r.id);
+             // Note: In real app, consider transaction, but for now simple update
+             for(const id of ids) {
+                 await db.request().input('jid', id).query("UPDATE CommandQueue SET Status='RUNNING' WHERE JobId=@jid");
+             }
+        }
+        res.json(result.recordset);
+    } catch (e) { res.json([]); }
+});
+
+// NEW: Agent Command Result
+router.post('/agent/tasks/:jobId', async (req, res) => {
+    const { jobId } = req.params;
+    const { output, status } = req.body;
+    const db = getDbPool();
+    if (!db) return res.json({success: false});
+
+    try {
+        await db.request()
+            .input('jid', jobId)
+            .input('out', output)
+            .input('stat', status)
+            .query("UPDATE CommandQueue SET Output=@out, Status=@stat, UpdatedAt=GETDATE() WHERE JobId=@jid");
+        res.json({success: true});
+    } catch (e) { res.json({success: false}); }
+});
+
+// NEW: Agent Recon Data Upload (WiFi/BT)
+router.post('/agent/recon', async (req, res) => {
+    const { actorId, type, data } = req.body;
+    const db = getDbPool();
+    if (!db) return res.json({success: false});
+
+    try {
+        if (type === 'WIFI') {
+             for (const net of data) {
+                 await db.request()
+                    .input('id', `wifi-${actorId}-${net.bssid.replace(/:/g,'')}`)
+                    .input('ssid', net.ssid).input('bssid', net.bssid).input('sig', net.signal)
+                    .input('sec', net.security).input('ch', net.channel).input('aid', actorId)
+                    .input('aname', net.actorName || 'Agent')
+                    .query(`
+                        MERGE WifiNetworks AS target
+                        USING (SELECT @id AS Id) AS source ON (target.Id = source.Id)
+                        WHEN MATCHED THEN UPDATE SET SignalStrength=@sig, LastSeen=GETDATE()
+                        WHEN NOT MATCHED THEN INSERT (Id, Ssid, Bssid, SignalStrength, Security, Channel, ActorId, ActorName, LastSeen)
+                        VALUES (@id, @ssid, @bssid, @sig, @sec, @ch, @aid, @aname, GETDATE());
+                    `);
+             }
+        } else if (type === 'BLUETOOTH') {
+             for (const dev of data) {
+                  await db.request()
+                    .input('id', `bt-${actorId}-${dev.mac.replace(/:/g,'')}`)
+                    .input('name', dev.name).input('mac', dev.mac).input('rssi', dev.rssi)
+                    .input('type', dev.type).input('aid', actorId).input('aname', dev.actorName || 'Agent')
+                    .query(`
+                        MERGE BluetoothDevices AS target
+                        USING (SELECT @id AS Id) AS source ON (target.Id = source.Id)
+                        WHEN MATCHED THEN UPDATE SET Rssi=@rssi, LastSeen=GETDATE()
+                        WHEN NOT MATCHED THEN INSERT (Id, Name, Mac, Rssi, Type, ActorId, ActorName, LastSeen)
+                        VALUES (@id, @name, @mac, @rssi, @type, @aid, @aname, GETDATE());
+                    `);
+             }
+        }
+        res.json({success: true});
+    } catch (e) { res.json({success: false, error: e.message}); }
+});
+
 router.get('/setup', (req, res) => {
     const host = req.get('host');
     const protocol = req.protocol;
+    // Ensure no double slash issues or double /api
     const serverUrl = `${protocol}://${host}`; 
     const token = req.query.token || 'manual_install';
     

