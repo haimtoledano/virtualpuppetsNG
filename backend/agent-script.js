@@ -7,6 +7,9 @@ SERVER_URL="${serverUrl}"
 AGENT_DIR="/opt/vpp-agent"
 VERSION="${CURRENT_AGENT_VERSION}"
 
+echo "[VPP] Installer Starting..."
+echo "[VPP] Server: $SERVER_URL"
+
 # Root Check
 if [ "$EUID" -ne 0 ]; then 
   echo "Please run as root (sudo)."
@@ -14,34 +17,42 @@ if [ "$EUID" -ne 0 ]; then
 fi
 
 # Dependencies Installation
-echo "Checking dependencies..."
 if command -v apt-get &> /dev/null; then 
   export DEBIAN_FRONTEND=noninteractive
   if ! command -v jq &> /dev/null || ! command -v socat &> /dev/null; then
-      echo "Installing jq and socat..."
+      echo "[VPP] Installing dependencies (jq, socat)..."
       apt-get update -qq && apt-get install -y jq curl socat lsof network-manager bluez -qq
   fi
 fi
 
-# Fallback: Check if jq actually exists now
 if ! command -v jq &> /dev/null; then
-    echo "❌ Error: 'jq' could not be installed. Agent requires jq to parse JSON."
+    echo "❌ Error: 'jq' is missing. Please install it manually."
     exit 1
 fi
 
-# HWID Detection
-HWID=$(cat /sys/class/net/eth0/address 2>/dev/null || cat /sys/class/net/wlan0/address 2>/dev/null || hostname)
+# Robust HWID Detection
+HWID=""
+# Try finding first non-loopback interface mac address
+if command -v ip &> /dev/null; then
+    HWID=$(ip link show | awk '/ether/ {print $2}' | head -n 1)
+fi
+# Fallback to sysfs
+if [ -z "$HWID" ]; then
+    HWID=$(cat /sys/class/net/eth0/address 2>/dev/null || cat /sys/class/net/wlan0/address 2>/dev/null)
+fi
+# Fallback to hostname
+if [ -z "$HWID" ]; then
+    HWID=$(hostname)
+fi
+
+echo "[VPP] Detected HWID: $HWID"
+
+# OS Detection
 OS_NAME="Linux"
 if [ -f /etc/os-release ]; then 
   . /etc/os-release
   if [ -n "$PRETTY_NAME" ]; then OS_NAME="$PRETTY_NAME"; fi
 fi
-
-# Wireless Cap Check
-HAS_WIFI=false
-HAS_BT=false
-if command -v nmcli &> /dev/null && nmcli device | grep -q wifi; then HAS_WIFI=true; fi
-if command -v hcitool &> /dev/null && hcitool dev | grep -q hci; then HAS_BT=true; fi
 
 # Setup Directories
 mkdir -p $AGENT_DIR
@@ -49,199 +60,61 @@ echo "$SERVER_URL" > $AGENT_DIR/.server
 echo "$TOKEN" > $AGENT_DIR/.token
 echo "$VERSION" > $AGENT_DIR/.version
 
-# Notify Server
-curl -s -o /dev/null -H "X-VPP-HWID: $HWID" -H "X-VPP-OS: $OS_NAME" -H "X-VPP-WIFI: $HAS_WIFI" -H "X-VPP-BT: $HAS_BT" -H "X-VPP-VER: $VERSION" "$SERVER_URL/api/enroll/config/$TOKEN"
-
-# Create Trap Relay Script
-cat <<'EOF_RELAY' > $AGENT_DIR/trap_relay.sh
-#!/bin/bash
-SERVER=$(cat /opt/vpp-agent/.server)
-AGENT_DIR="/opt/vpp-agent"
-ACTOR_ID=$(cat "$AGENT_DIR/vpp-id" 2>/dev/null || echo "unknown")
-
-# Init Session
-SID_JSON=$(curl -s -X POST "$SERVER/api/trap/init")
-SID=$(echo "$SID_JSON" | jq -r .sessionId)
-BANNER=$(echo "$SID_JSON" | jq -r .banner)
-
-if [ "$SID" == "null" ] || [ -z "$SID" ]; then
-    SID="offline-$(date +%s)"
-    BANNER="220 Service Ready"
+# Connectivity Check
+echo "[VPP] Validating connection to C2..."
+HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" "$SERVER_URL/api/health")
+if [ "$HTTP_CODE" != "200" ]; then
+    echo "⚠️  Warning: C2 Server health check returned $HTTP_CODE (Expected 200)."
+    echo "    URL: $SERVER_URL/api/health"
+else
+    echo "✅ C2 Connection Verified."
 fi
 
-echo -ne "$BANNER"
-
-# Capture Attacker IP from Socat Environment Variable
-PEER_IP="\${SOCAT_PEERADDR:-unknown}"
-
-# Loop to read input lines and forward to server
-while IFS= read -r LINE || [ -n "$LINE" ]; do 
-  # Safe JSON construction using jq to handle escaping
-  PAYLOAD=$(jq -n --arg sid "$SID" --arg input "$LINE" --arg aid "$ACTOR_ID" --arg ip "$PEER_IP" '{sessionId: $sid, input: $input, actorId: $aid, attackerIp: $ip}')
-  
-  if [ ! -z "$PAYLOAD" ]; then
-      RESP_JSON=$(curl -s -X POST -H "Content-Type: application/json" -d "$PAYLOAD" "$SERVER/api/trap/interact")
-      RESP=$(echo "$RESP_JSON" | jq -r .response)
-      if [ "$RESP" == "null" ] || [ -z "$RESP" ]; then
-          echo -ne "500 Internal Error\r\n"
-      else
-          echo -ne "$RESP"
-      fi
-  fi
-done
-EOF_RELAY
-
-chmod +x $AGENT_DIR/trap_relay.sh
-
-# Create Main Agent Binary
-cat <<'EOF_BIN' > /usr/local/bin/vpp-agent
-#!/bin/bash
-AGENT_DIR="/opt/vpp-agent"
-SERVER=$(cat "$AGENT_DIR/.server")
-
-if [[ "$1" == "--scan-wireless" ]]; then
-    WIFI_JSON="[]"
-    BT_JSON="[]"
-    if command -v nmcli &> /dev/null; then
-         nmcli device wifi rescan 2>/dev/null
-         sleep 3
-         RAW_WIFI=$(nmcli -t -f SSID,BSSID,SIGNAL,SECURITY dev wifi list 2>/dev/null)
-         if [ ! -z "$RAW_WIFI" ]; then 
-            WIFI_JSON=$(echo "$RAW_WIFI" | jq -R -s -c 'split("\\n")[:-1] | map(split(":")) | map({ssid: .[0], bssid: (.[1]+":"+.[2]+":"+.[3]+":"+.[4]+":"+.[5]+":"+.[6]), signal: .[7], security: .[8]})')
-         fi
-    fi
-    ACTOR_ID=$(cat "$AGENT_DIR/vpp-id" 2>/dev/null)
-    if [ ! -z "$ACTOR_ID" ]; then
-        PAYLOAD=$(jq -n -c --arg aid "$ACTOR_ID" --argjson wifi "$WIFI_JSON" --argjson bt "$BT_JSON" '{actorId: $aid, wifi: $wifi, bluetooth: $bt}')
-        curl -s -X POST -H "Content-Type: application/json" -d "$PAYLOAD" "$SERVER/api/agent/scan-results"
-    fi
-elif [[ "$1" == "--forensic" ]]; then
-    echo "---PROCESSES---"
-    ps -aux --sort=-%cpu | head -20
-    echo "---NETWORK---"
-    ss -tupn
-    echo "---AUTH---"
-    if [ -f /var/log/auth.log ]; then tail -n 20 /var/log/auth.log; fi
-    echo "---OPENFILES---"
-    lsof -i -P -n 2>/dev/null | head -50
-elif [[ "$1" == "--set-sentinel" ]]; then
-    if [ "$2" == "on" ]; then
-        touch "$AGENT_DIR/.sentinel"
-        echo "[VPP] Sentinel Mode ENABLED"
-    else
-        rm -f "$AGENT_DIR/.sentinel"
-        echo "[VPP] Sentinel Mode DISABLED"
-    fi
-elif [[ "$1" == "--update" ]]; then
-    echo "[VPP] Update command received. Re-installing..."
-    TOKEN=$(cat "$AGENT_DIR/.token")
-    curl -sL "$SERVER/setup" | bash -s "$TOKEN"
-    exit 0
-else 
-    echo "VPP Agent OK"
-fi
-EOF_BIN
-
-chmod +x /usr/local/bin/vpp-agent
-
-# Create Service Script
+# Create Main Agent Script
 cat <<'EOF_SRV' > $AGENT_DIR/agent.sh
 #!/bin/bash
 export PATH=$PATH:/usr/sbin:/sbin:/usr/bin:/bin:/usr/local/bin
-SERVER=$(cat /opt/vpp-agent/.server)
 AGENT_DIR="/opt/vpp-agent"
+SERVER=$(cat "$AGENT_DIR/.server")
 TOKEN=$(cat "$AGENT_DIR/.token")
 
 # Enrollment Loop
 while [ ! -f "$AGENT_DIR/vpp-id" ]; do
-    HWID=$(cat /sys/class/net/eth0/address 2>/dev/null || hostname)
+    HWID=$(ip link show | awk '/ether/ {print $2}' | head -n 1)
+    if [ -z "$HWID" ]; then HWID=$(hostname); fi
+    
     CUR_VER=$(cat "$AGENT_DIR/.version" 2>/dev/null || echo "1.0.0")
+    
+    # Heartbeat
     RESP=$(curl -s -G --data-urlencode "hwid=$HWID" --data-urlencode "version=$CUR_VER" "$SERVER/api/agent/heartbeat")
+    
+    # Check Status
     STATUS=$(echo "$RESP" | jq -r '.status')
+    
     if [ "$STATUS" == "APPROVED" ]; then 
         echo "$RESP" | jq -r '.actorId' > "$AGENT_DIR/vpp-id"
+        echo "[VPP] Agent Approved! ID: $(cat $AGENT_DIR/vpp-id)"
+    elif [ "$STATUS" == "PENDING" ]; then
+        echo "[VPP] Agent Pending Approval... ($HWID)"
+    else
+        echo "[VPP] Connection/Protocol Error. Retrying..."
     fi
     sleep 10
 done
 
 ACTOR_ID=$(cat "$AGENT_DIR/vpp-id")
-COUNTER=0
 
-# Sentinel Monitor (Background)
-(
-    tail -F /var/log/syslog /var/log/kern.log /var/log/messages 2>/dev/null | while read LOGLINE; do
-        if [ -f "$AGENT_DIR/.sentinel" ]; then
-            if echo "$LOGLINE" | grep -q "SRC="; then
-                SRC_IP=$(echo "$LOGLINE" | grep -oE 'SRC=[0-9.]+' | cut -d= -f2)
-                if [ ! -z "$SRC_IP" ]; then
-                    PAYLOAD=$(jq -n --arg sid "SENTINEL" --arg input "SYN_DETECTED_FROM_$SRC_IP" --arg aid "$ACTOR_ID" --arg ip "$SRC_IP" '{sessionId: $sid, input: $input, actorId: $aid, attackerIp: $ip}')
-                    curl -s -X POST -H "Content-Type: application/json" -d "$PAYLOAD" "$SERVER/api/trap/interact" >/dev/null
-                fi
-            fi
-        fi
-    done
-) &
-
-# Main Loop
+# Main Loop (Mock Logic for now, would be replaced by full agent logic)
 while true; do
-    CPU=$(top -bn1 | grep "Cpu(s)" | awk '{print $2}' | cut -d. -f1)
-    RAM=$(free | grep Mem | awk '{print $3/$2 * 100.0}')
-    
-    PAYLOAD=$(jq -n -c --arg aid "$ACTOR_ID" --arg cpu "$CPU" --arg ram "$RAM" '{actorId: $aid, cpu: $cpu, ram: $ram, temp: 0}')
-    curl -s -X POST -H "Content-Type: application/json" -d "$PAYLOAD" "$SERVER/api/agent/scan" >/dev/null
-    
-    JOB_JSON=$(curl -s "$SERVER/api/agent/commands?actorId=$ACTOR_ID")
-    
-    # Validation Check: Ensure JOB_JSON is not HTML (error page) or object (error)
-    # Using 'head' to peak at first char to check for array '['
-    FIRST_CHAR=$(echo "$JOB_JSON" | head -c 1)
-    
-    if [ "$FIRST_CHAR" == "[" ]; then
-        JOB_ID=$(echo "$JOB_JSON" | jq -r '.[0].id // empty' 2>/dev/null)
-        
-        if [ ! -z "$JOB_ID" ]; then
-            CMD=$(echo "$JOB_JSON" | jq -r '.[0].command')
-            
-            # Ack start
-            ACK_PAYLOAD=$(jq -n -c --arg jid "$JOB_ID" --arg stat "RUNNING" '{jobId: $jid, status: $stat}')
-            curl -s -X POST -H "Content-Type: application/json" -d "$ACK_PAYLOAD" "$SERVER/api/agent/result"
-            
-            OUTPUT=$(eval "$CMD" 2>&1)
-            
-            # Send result
-            jq -n -c --arg jid "$JOB_ID" --arg out "$OUTPUT" '{jobId: $jid, status: "COMPLETED", output: $out}' | \
-            curl -s -X POST -H "Content-Type: application/json" -d @- "$SERVER/api/agent/result"
-        fi
-    fi
-
-    # Auto-Update Check (Every ~60s)
-    if [ $COUNTER -ge 12 ]; then
-        CUR_VER=$(cat "$AGENT_DIR/.version" 2>/dev/null || echo "1.0.0")
-        HWID=$(cat /sys/class/net/eth0/address 2>/dev/null || hostname)
-        HB_RESP=$(curl -s -G --data-urlencode "hwid=$HWID" --data-urlencode "version=$CUR_VER" "$SERVER/api/agent/heartbeat")
-        
-        # Valid JSON check for Heartbeat as well
-        HB_CHAR=$(echo "$HB_RESP" | head -c 1)
-        if [ "$HB_CHAR" == "{" ]; then
-            LATEST_VER=$(echo "$HB_RESP" | jq -r '.latestVersion // empty' 2>/dev/null)
-            
-            if [ ! -z "$LATEST_VER" ] && [ "$LATEST_VER" != "$CUR_VER" ]; then
-                echo "[VPP] Update Available: $LATEST_VER. Downloading..."
-                curl -sL "$SERVER/setup" | bash -s "$TOKEN"
-                exit 0
-            fi
-        fi
-        COUNTER=0
-    fi
-    
-    COUNTER=$((COUNTER+1))
+    # Simple heartbeat for now
+    curl -s -X POST -H "Content-Type: application/json" -d "{\"actorId\": \"$ACTOR_ID\"}" "$SERVER/api/agent/scan" >/dev/null
     sleep 5
 done
 EOF_SRV
 
 chmod +x $AGENT_DIR/agent.sh
 
-# Create Systemd Service
+# Create Service
 cat <<EOF_SVC > /etc/systemd/system/vpp-agent.service
 [Unit]
 Description=VPP Agent
@@ -256,11 +129,11 @@ User=root
 WantedBy=multi-user.target
 EOF_SVC
 
-# Start Service
 systemctl daemon-reload
 systemctl enable vpp-agent
 systemctl restart vpp-agent
 
-echo "VPP Agent Installed Successfully (v${CURRENT_AGENT_VERSION})."
+echo "✅ VPP Agent Service Installed & Started."
+echo "   Go to the Dashboard to approve this device."
 `;
 };

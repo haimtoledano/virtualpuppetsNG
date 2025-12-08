@@ -18,6 +18,9 @@ export const getDbConfig = () => {
     return null;
 };
 
+// Safe Accessor
+export const getDbPool = () => dbPool;
+
 export const connectToDb = async (config) => {
     try {
         if(dbPool) await dbPool.close();
@@ -57,7 +60,7 @@ export const runSchemaMigrations = async () => {
     if (!dbPool) return;
     const req = new sql.Request(dbPool);
     try {
-        // Create Tables if not exist
+        // Core Tables
         await req.query(`IF OBJECT_ID('SystemConfig','U') IS NULL CREATE TABLE SystemConfig (ConfigKey NVARCHAR(50) PRIMARY KEY, ConfigValue NVARCHAR(MAX))`);
         await req.query(`IF OBJECT_ID('Users','U') IS NULL CREATE TABLE Users (UserId NVARCHAR(50) PRIMARY KEY, Username NVARCHAR(100), PasswordHash NVARCHAR(255), Role NVARCHAR(20), MfaEnabled BIT DEFAULT 0, MfaSecret NVARCHAR(100), LastLogin DATETIME, Preferences NVARCHAR(MAX))`);
         await req.query(`IF OBJECT_ID('Actors','U') IS NULL CREATE TABLE Actors (ActorId NVARCHAR(50) PRIMARY KEY, HwId NVARCHAR(100), GatewayId NVARCHAR(50), Name NVARCHAR(100), Status NVARCHAR(20), LocalIp NVARCHAR(50), LastSeen DATETIME, Config NVARCHAR(MAX), OsVersion NVARCHAR(100), TunnelsJson NVARCHAR(MAX), Persona NVARCHAR(MAX), HoneyFilesJson NVARCHAR(MAX), HasWifi BIT DEFAULT 0, HasBluetooth BIT DEFAULT 0, WifiScanningEnabled BIT DEFAULT 0, BluetoothScanningEnabled BIT DEFAULT 0, CpuLoad FLOAT DEFAULT 0, MemoryUsage FLOAT DEFAULT 0, Temperature FLOAT DEFAULT 0, TcpSentinelEnabled BIT DEFAULT 0, AgentVersion NVARCHAR(50))`);
@@ -66,29 +69,20 @@ export const runSchemaMigrations = async () => {
         await req.query(`IF OBJECT_ID('CommandQueue','U') IS NULL CREATE TABLE CommandQueue (JobId NVARCHAR(50) PRIMARY KEY, ActorId NVARCHAR(50), Command NVARCHAR(MAX), Status NVARCHAR(20), Output NVARCHAR(MAX), CreatedAt DATETIME, UpdatedAt DATETIME)`);
         await req.query(`IF OBJECT_ID('Reports','U') IS NULL CREATE TABLE Reports (ReportId NVARCHAR(50) PRIMARY KEY, Title NVARCHAR(100), GeneratedBy NVARCHAR(100), Type NVARCHAR(50), CreatedAt DATETIME, ContentJson NVARCHAR(MAX))`);
         await req.query(`IF OBJECT_ID('EnrollmentTokens','U') IS NULL CREATE TABLE EnrollmentTokens (Token NVARCHAR(50) PRIMARY KEY, Type NVARCHAR(20), TargetId NVARCHAR(50), ConfigJson NVARCHAR(MAX), CreatedAt DATETIME, IsUsed BIT)`);
+        
+        // Ensure PendingActors has all columns
         await req.query(`IF OBJECT_ID('PendingActors','U') IS NULL CREATE TABLE PendingActors (Id NVARCHAR(50) PRIMARY KEY, HwId NVARCHAR(100), DetectedIp NVARCHAR(50), TargetGatewayId NVARCHAR(50), DetectedAt DATETIME, OsVersion NVARCHAR(100))`);
+        
         await req.query(`IF OBJECT_ID('WifiNetworks','U') IS NULL CREATE TABLE WifiNetworks (Id NVARCHAR(50) PRIMARY KEY, Ssid NVARCHAR(100), Bssid NVARCHAR(50), SignalStrength INT, Security NVARCHAR(20), Channel INT, ActorId NVARCHAR(50), ActorName NVARCHAR(100), LastSeen DATETIME)`);
         await req.query(`IF OBJECT_ID('BluetoothDevices','U') IS NULL CREATE TABLE BluetoothDevices (Id NVARCHAR(50) PRIMARY KEY, Name NVARCHAR(100), Mac NVARCHAR(50), Rssi INT, Type NVARCHAR(20), ActorId NVARCHAR(50), ActorName NVARCHAR(100), LastSeen DATETIME)`);
         
-        // --- EVOLUTION MIGRATIONS (Fixes for missing columns on existing tables) ---
-        
-        // 1. Add AgentVersion to Actors if missing
-        try {
-            await req.query("IF NOT EXISTS (SELECT * FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME = 'Actors' AND COLUMN_NAME = 'AgentVersion') ALTER TABLE Actors ADD AgentVersion NVARCHAR(50)");
-        } catch(e) { console.log("Migration warning (AgentVersion):", e.message); }
+        // Migrations for missing columns
+        try { await req.query("IF NOT EXISTS (SELECT * FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME = 'Actors' AND COLUMN_NAME = 'AgentVersion') ALTER TABLE Actors ADD AgentVersion NVARCHAR(50)"); } catch(e) {}
+        try { await req.query("IF NOT EXISTS (SELECT * FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME = 'PendingActors' AND COLUMN_NAME = 'OsVersion') ALTER TABLE PendingActors ADD OsVersion NVARCHAR(100)"); } catch(e) {}
+        try { await req.query("IF NOT EXISTS (SELECT * FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME = 'Gateways' AND COLUMN_NAME = 'Lat') ALTER TABLE Gateways ADD Lat FLOAT"); } catch(e) {}
+        try { await req.query("IF NOT EXISTS (SELECT * FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME = 'Gateways' AND COLUMN_NAME = 'Lng') ALTER TABLE Gateways ADD Lng FLOAT"); } catch(e) {}
 
-        // 2. Add OsVersion to PendingActors if missing
-        try {
-            await req.query("IF NOT EXISTS (SELECT * FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME = 'PendingActors' AND COLUMN_NAME = 'OsVersion') ALTER TABLE PendingActors ADD OsVersion NVARCHAR(100)");
-        } catch(e) { console.log("Migration warning (PendingActors OsVersion):", e.message); }
-
-        // 3. Add Lat/Lng to Gateways if missing
-        try {
-            await req.query("IF NOT EXISTS (SELECT * FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME = 'Gateways' AND COLUMN_NAME = 'Lat') ALTER TABLE Gateways ADD Lat FLOAT");
-            await req.query("IF NOT EXISTS (SELECT * FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME = 'Gateways' AND COLUMN_NAME = 'Lng') ALTER TABLE Gateways ADD Lng FLOAT");
-        } catch(e) { console.log("Migration warning (Gateways Lat/Lng):", e.message); }
-
-        // SuperAdmin check
+        // SuperAdmin
         const uCheck = await req.query("SELECT * FROM Users WHERE Username = 'superadmin'");
         if (uCheck.recordset.length === 0) {
             await req.query("INSERT INTO Users (UserId, Username, PasswordHash, Role) VALUES ('usr-super-01', 'superadmin', 'btoa_hash_123qweASDF!!@!', 'SUPERADMIN')");
