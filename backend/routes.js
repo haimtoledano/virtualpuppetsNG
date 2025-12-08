@@ -1,3 +1,4 @@
+
 import express from 'express';
 import { authenticator } from 'otplib';
 import QRCode from 'qrcode';
@@ -397,7 +398,10 @@ router.get('/agent/heartbeat', async (req, res) => {
     if (!db) return res.status(503).json({});
 
     const { hwid, os, version } = req.query;
+    console.log(`[API] Heartbeat from HWID: ${hwid || 'unknown'} (${getClientIp(req)})`);
+
     if (!hwid) {
+        console.warn(`[API] Heartbeat rejected: Missing HWID`);
         return res.status(400).json({});
     }
     
@@ -427,14 +431,12 @@ router.get('/agent/heartbeat', async (req, res) => {
         }
         res.json({ status: 'PENDING' });
     } catch(e) { 
+        console.error('[API] Heartbeat DB Error:', e);
         res.status(500).json({}); 
     }
 });
 
-// The missing route causing agent script failures
 router.post('/agent/scan', async (req, res) => {
-    // This endpoint accepts the heartbeat scan from the agent script loop
-    // Currently acting as a Keep-Alive or data ingress point
     const { actorId } = req.body;
     if(actorId) {
         const db = getDbPool();
