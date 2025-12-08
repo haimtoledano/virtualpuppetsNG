@@ -72,7 +72,8 @@ get_hwid() {
 
 get_metrics() {
     # CPU Usage (100 - idle)
-    CPU=\$(top -bn1 | grep "Cpu(s)" | sed "s/.*, *\([0-9.]*\)%* id.*/\1/" | awk '{print 100 - \$1}')
+    # Escaped backslashes for capture group and backreference
+    CPU=\$(top -bn1 | grep "Cpu(s)" | sed "s/.*, *\\([0-9.]*\\)%* id.*/\\1/" | awk '{print 100 - \$1}')
     if [ -z "\$CPU" ]; then CPU=0; fi
     
     # RAM Usage %
