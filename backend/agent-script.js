@@ -1,5 +1,5 @@
 
-export const CURRENT_AGENT_VERSION = "2.3.1";
+export const CURRENT_AGENT_VERSION = "2.3.2";
 
 export const generateAgentScript = (serverUrl, token) => {
   return `#!/bin/bash
@@ -70,6 +70,26 @@ get_hwid() {
     echo "\$HID"
 }
 
+get_metrics() {
+    # CPU Usage (100 - idle)
+    CPU=\$(top -bn1 | grep "Cpu(s)" | sed "s/.*, *\([0-9.]*\)%* id.*/\1/" | awk '{print 100 - \$1}')
+    if [ -z "\$CPU" ]; then CPU=0; fi
+    
+    # RAM Usage %
+    RAM=\$(free -m | awk '/Mem:/ { printf("%.1f", \$3/\$2 * 100.0) }')
+    if [ -z "\$RAM" ]; then RAM=0; fi
+
+    # Temperature (Standard Thermal Zone)
+    TEMP=\$(cat /sys/class/thermal/thermal_zone0/temp 2>/dev/null | awk '{print \$1/1000}')
+    if [ -z "\$TEMP" ]; then 
+        # Fallback for some Pis
+        TEMP=\$(vcgencmd measure_temp 2>/dev/null | egrep -o '[0-9]*\.[0-9]*')
+    fi
+    if [ -z "\$TEMP" ]; then TEMP=0; fi
+
+    echo "\$CPU \$RAM \$TEMP"
+}
+
 # --- SPECIAL CAPABILITIES ---
 
 perform_forensics() {
@@ -134,8 +154,17 @@ log "Entering Main Loop for Actor: \$ACTOR_ID"
 
 # --- MAIN EVENT LOOP ---
 while true; do
-    # 1. Heartbeat
-    PAYLOAD=\$(jq -n --arg id "\$ACTOR_ID" '{actorId: $id}')
+    # 1. Gather Metrics
+    read CPU RAM TEMP <<< \$(get_metrics)
+    
+    # 2. Heartbeat with Metrics
+    PAYLOAD=\$(jq -n \
+        --arg id "\$ACTOR_ID" \
+        --arg cpu "\$CPU" \
+        --arg ram "\$RAM" \
+        --arg temp "\$TEMP" \
+        '{actorId: $id, cpu: $cpu, ram: $ram, temp: $temp}')
+        
     OUT=\$(curl -s -X POST -H "Content-Type: application/json" -d "\$PAYLOAD" "\$SERVER/api/agent/scan")
     
     if [[ "\$OUT" == *"RESET"* ]]; then
@@ -143,7 +172,7 @@ while true; do
         exit 0
     fi
 
-    # 2. Check Tasks
+    # 3. Check Tasks
     TASKS=\$(curl -s -G --data-urlencode "actorId=\$ACTOR_ID" "\$SERVER/api/agent/tasks")
     
     # Process tasks if array is not empty
@@ -174,7 +203,7 @@ while true; do
         curl -s -X POST -H "Content-Type: application/json" -d "\$REPORT" "\$SERVER/api/agent/tasks/\$JOB_ID"
     done
 
-    # 3. Randomized Recon (every ~5 mins)
+    # 4. Randomized Recon (every ~5 mins)
     if [ \$((RANDOM % 60)) -eq 0 ]; then
         perform_recon "\$ACTOR_ID"
     fi

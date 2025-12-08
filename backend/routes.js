@@ -433,11 +433,16 @@ router.get('/agent/heartbeat', async (req, res) => {
 });
 
 router.post('/agent/scan', async (req, res) => {
-    const { actorId } = req.body;
+    const { actorId, cpu, ram, temp } = req.body;
     if(actorId) {
         const db = getDbPool();
         if(db) {
-            await db.request().input('aid', actorId).query("UPDATE Actors SET LastSeen=GETDATE() WHERE ActorId=@aid");
+            await db.request()
+                .input('aid', actorId)
+                .input('cpu', sql.Float, parseFloat(cpu) || 0)
+                .input('ram', sql.Float, parseFloat(ram) || 0)
+                .input('temp', sql.Float, parseFloat(temp) || 0)
+                .query("UPDATE Actors SET LastSeen=GETDATE(), CpuLoad=@cpu, MemoryUsage=@ram, Temperature=@temp WHERE ActorId=@aid");
         }
     }
     res.json({status: 'ok'});
