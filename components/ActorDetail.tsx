@@ -1,6 +1,3 @@
-
-
-
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { Actor, LogEntry, ActorStatus, AiAnalysis, ProxyGateway, HoneyFile, ActiveTunnel, DevicePersona, CommandJob, LogLevel, User, UserPreferences, ForensicSnapshot, ForensicProcess, AttackSession } from '../types';
 import { executeRemoteCommand, getAvailableCloudTraps, toggleTunnelMock, AVAILABLE_PERSONAS, generateRandomLog, performForensicScan, getAttackSessions, deleteAttackSession } from '../services/mockService';
@@ -388,9 +385,8 @@ const ActorDetail: React.FC<ActorDetailProps> = ({ actor, gateway, logs: initial
 
   const parsePortScan = (output: string) => {
       const lines = output.split('\n');
-      const system: any[] = [];
-      const application: any[] = [];
-      const seen = new Set<string>();
+      const systemMap = new Map<number, any>();
+      const applicationMap = new Map<number, any>();
 
       const getServiceName = (p: number) => {
           if (p === 21) return 'FTP';
@@ -404,36 +400,59 @@ const ActorDetail: React.FC<ActorDetailProps> = ({ actor, gateway, logs: initial
           if (p === 5432) return 'PostgreSQL';
           if (p === 6379) return 'Redis';
           if (p === 8080) return 'HTTP-Alt';
-          return 'TCP';
+          return 'Unknown';
       };
 
       lines.forEach(line => {
-          const match = line.match(/^(udp|tcp)\s+\w+\s+\d+\s+\d+\s+([^\s:]+|\[.*?\]):(\d+)\s+.*users:\(\("([^"]+)"/);
+          // Robust regex to capture protocol, bindIP, port, and process name (quoted or unquoted)
+          const match = line.match(/^(udp|tcp)\s+\w+\s+\d+\s+\d+\s+([^\s:]+|\[.*?\]|.*?):(\d+)\s+.*users:\(\("?([^",]+)"?/);
+          
           if (match) {
               const proto = match[1].toUpperCase();
               let bindIp = match[2];
               const port = parseInt(match[3]);
-              const process = match[4];
+              let process = match[4];
+              
               bindIp = bindIp.replace('[', '').replace(']', '');
+              
+              // Clean process name if regex caught trailing quote
+              if (process.endsWith('"')) process = process.slice(0, -1);
 
               if (bindIp.startsWith('127.') || bindIp === '::1') return;
 
-              const key = `${proto}:${port}`;
-              if (seen.has(key)) return;
-              seen.add(key);
+              const isApp = process.includes('socat') || process.includes('vpp-agent') || process.includes('python');
+              const targetMap = isApp ? applicationMap : systemMap;
 
-              const item = { port, proto, service: getServiceName(port), source: process };
+              // Service Name Logic
+              let service = getServiceName(port);
+              if (isApp) {
+                   service = process.includes('socat') ? 'Tunnel' : 'Persona';
+              } else if (service === 'Unknown') {
+                   service = 'TCP/UDP Service';
+              }
 
-              if (process.includes('socat') || process.includes('vpp-agent') || process.includes('python')) {
-                   item.service = process.includes('socat') ? 'Tunnel' : 'Persona';
-                   application.push(item);
+              let source = process;
+              if (isApp) {
+                   source = process.includes('socat') ? 'Tunnel' : 'Persona';
+              }
+
+              // Deduplication & Merging Logic
+              if (targetMap.has(port)) {
+                  const existing = targetMap.get(port);
+                  // Merge Protocol if different (e.g. TCP + UDP -> TCP/UDP)
+                  if (!existing.proto.includes(proto)) {
+                      existing.proto += `/${proto}`;
+                  }
               } else {
-                   system.push(item);
+                  targetMap.set(port, { port, proto, service, source });
               }
           }
       });
 
-      setScannedPorts({ system: system.sort((a,b) => a.port - b.port), application: application.sort((a,b) => a.port - b.port) });
+      setScannedPorts({ 
+          system: Array.from(systemMap.values()).sort((a,b) => a.port - b.port), 
+          application: Array.from(applicationMap.values()).sort((a,b) => a.port - b.port) 
+      });
   };
 
   const handleSaveName = async () => {
