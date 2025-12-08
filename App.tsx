@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect, useCallback, Suspense } from 'react';
 import { generateInitialActors, generateRandomLog, generateGateways } from './services/mockService';
 import { dbQuery, getSystemConfig, getPendingActors, approvePendingActor, rejectPendingActor, getSystemLogs, sendAuditLog, triggerFleetUpdate } from './services/dbService';
@@ -238,12 +239,13 @@ const App: React.FC = () => {
   };
 
   const handleRestoreState = (snapshot: any) => {
-      if (snapshot.actors) setActors(snapshot.actors);
-      if (snapshot.gateways) setGateways(snapshot.gateways);
+      // Defensive checks to ensure state remains valid even if snapshot is partial/corrupt
+      if (snapshot.actors && Array.isArray(snapshot.actors)) setActors(snapshot.actors);
+      if (snapshot.gateways && Array.isArray(snapshot.gateways)) setGateways(snapshot.gateways);
       if (snapshot.systemConfig) setSystemConfig(snapshot.systemConfig);
       
       // If we restore logs, that's optional, but helpful
-      if (snapshot.logs) setLogs(snapshot.logs);
+      if (snapshot.logs && Array.isArray(snapshot.logs)) setLogs(snapshot.logs);
 
       if (isProduction) {
           alert("State loaded into Dashboard view. \n\nNOTE: In Production mode, this only affects your current session view. Persistent database state requires manual re-seeding or will be overwritten by the next polling cycle.");

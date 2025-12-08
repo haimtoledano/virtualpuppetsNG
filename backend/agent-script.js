@@ -1,3 +1,4 @@
+
 export const CURRENT_AGENT_VERSION = "2.3.3";
 
 export const generateAgentScript = (serverUrl, token) => {
@@ -55,7 +56,7 @@ echo "[TRAP] Connection from \$SOCAT_PEERADDR:\$SOCAT_PEERPORT -> :\$SOCAT_SOCKP
 
 # Send Alert
 PAYLOAD=\$(jq -n \\
-  --arg aid "\$ACTOR_ID" \\
+  --arg aid "\$AID" \\
   --arg lvl "CRITICAL" \\
   --arg proc "trap_relay" \\
   --arg msg "[TRAP] Connection from \$SOCAT_PEERADDR:\$SOCAT_PEERPORT -> :\$SOCAT_SOCKPORT" \\
@@ -146,29 +147,38 @@ check_sentinel() {
         # Filter out localhost and the C2 server itself to avoid feedback loops
         SERVER_HOST=\$(echo "\$SERVER" | awk -F/ '{print \$3}' | cut -d: -f1)
         
-        local SUSPECTS=""
+        local CONNS=""
         if command -v ss &> /dev/null; then
-            # Get peer IP (column 5)
-            SUSPECTS=\$(ss -ntu state established | grep -v "127.0.0.1" | grep -v "::1" | grep -v "\$SERVER_HOST" | awk '{print \$5}' | cut -d: -f1 | sort | uniq)
+            # Get Local:Port (col 4) and Peer:Port (col 5)
+            CONNS=\$(ss -ntH state established | grep -v "127.0.0.1" | grep -v "::1" | grep -v "\$SERVER_HOST" | awk '{print \$4, \$5}')
         else
-            SUSPECTS=\$(netstat -nt 2>/dev/null | grep ESTABLISHED | grep -v "127.0.0.1" | grep -v "\$SERVER_HOST" | awk '{print \$5}' | cut -d: -f1 | sort | uniq)
+            CONNS=\$(netstat -nt 2>/dev/null | grep ESTABLISHED | grep -v "127.0.0.1" | grep -v "\$SERVER_HOST" | awk '{print \$4, \$5}')
         fi
 
-        if [ ! -z "\$SUSPECTS" ]; then
-            for IP in \$SUSPECTS; do
-                if [[ "\$IP" != "0.0.0.0" && "\$IP" != "" ]]; then
-                   # LOG LOCAL
-                   log "[SENTINEL] 🚨 Unauthorized connection detected from \$IP"
+        if [ ! -z "\$CONNS" ]; then
+            echo "\$CONNS" | while read LOCAL REMOTE; do
+                if [[ -n "\$LOCAL" && -n "\$REMOTE" ]]; then
+                   # Extract LPORT (Destination Port)
+                   LPORT=\$(echo "\$LOCAL" | rev | cut -d: -f1 | rev)
+                   # Extract RIP (Source IP)
+                   RIP=\$(echo "\$REMOTE" | rev | cut -d: -f2- | rev | sed 's/\\[//g' | sed 's/\\]//g')
                    
-                   # SEND ALERT
-                   PAYLOAD=\$(jq -n \\
-                      --arg aid "\$AID" \\
-                      --arg lvl "CRITICAL" \\
-                      --arg proc "sentinel" \\
-                      --arg msg "Unauthorized connection detected from \$IP" \\
-                      --arg ip "\$IP" \\
-                      '{actorId: \$aid, level: \$lvl, process: \$proc, message: \$msg, sourceIp: \$ip}')
-                   curl -s -X POST -H "Content-Type: application/json" -d "\$PAYLOAD" "\$SERVER/api/agent/log"
+                   if [[ "\$RIP" != "0.0.0.0" && "\$RIP" != "" ]]; then
+                      MSG="Unauthorized connection detected from \$RIP -> :\$LPORT"
+                      
+                      # LOG LOCAL
+                      log "[SENTINEL] 🚨 \$MSG"
+                      
+                      # SEND ALERT
+                      PAYLOAD=\$(jq -n \\
+                          --arg aid "\$AID" \\
+                          --arg lvl "CRITICAL" \\
+                          --arg proc "sentinel" \\
+                          --arg msg "\$MSG" \\
+                          --arg ip "\$RIP" \\
+                          '{actorId: \$aid, level: \$lvl, process: \$proc, message: \$msg, sourceIp: \$ip}')
+                      curl -s -X POST -H "Content-Type: application/json" -d "\$PAYLOAD" "\$SERVER/api/agent/log"
+                   fi
                 fi
             done
         fi

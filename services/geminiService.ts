@@ -1,14 +1,16 @@
+
 import { GoogleGenAI, Type } from "@google/genai";
 import { LogEntry, AiAnalysis, HoneyFile } from '../types';
 
 const getAiClient = () => {
   // Safely check for process.env to avoid ReferenceError in pure browser environments
-  let apiKey;
+  let apiKey = '';
   try {
-    apiKey = process.env.API_KEY;
+     if (typeof process !== 'undefined' && process.env) {
+        apiKey = process.env.API_KEY || '';
+     }
   } catch (e) {
-    // process is not defined
-    return null;
+    // process is not defined or other error
   }
   
   if (!apiKey) return null;
