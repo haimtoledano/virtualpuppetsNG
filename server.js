@@ -20,6 +20,15 @@ app.use(cors());
 app.use(bodyParser.json({ limit: '10mb' }));
 app.use(bodyParser.urlencoded({ extended: true }));
 
+// Global JSON Error Handler to prevent crashes on malformed requests
+app.use((err, req, res, next) => {
+    if (err instanceof SyntaxError && err.status === 400 && 'body' in err) {
+        console.error(`[API] JSON Parse Error from ${req.ip}: ${err.message}`);
+        return res.status(400).json({ error: 'Malformed JSON payload' });
+    }
+    next();
+});
+
 // Initialize Backend Services
 console.log('--- STARTING VIRTUAL PUPPETS C2 ---');
 initDb().then(() => {
