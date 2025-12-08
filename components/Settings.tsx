@@ -1,20 +1,29 @@
-
 import React, { useState, useEffect } from 'react';
-import { User, DbConfig, UserRole, SystemConfig, AiConfig, AiProvider, SyslogConfig } from '../types';
+import { User, DbConfig, UserRole, SystemConfig, AiConfig, AiProvider, SyslogConfig, Actor, ProxyGateway } from '../types';
 import { dbQuery, getSystemConfig, updateSystemConfig, connectToDatabase } from '../services/dbService';
 import { createUser, deleteUser, hashPassword, updateUser, resetUserMfa } from '../services/authService';
 import { testAiConnection } from '../services/aiService';
-import { Settings as SettingsIcon, Database, Users, Shield, Trash2, AlertTriangle, Plus, Lock, Bot, Cloud, Server, Building, Globe, Save, RefreshCw, Edit, ShieldAlert, X, Check, ShieldCheck, FileText, Key, Activity } from 'lucide-react';
+import { Settings as SettingsIcon, Database, Users, Shield, Trash2, AlertTriangle, Plus, Lock, Bot, Cloud, Server, Building, Globe, Save, RefreshCw, Edit, ShieldAlert, X, Check, ShieldCheck, FileText, Key, Activity, HardDrive, Download, Upload, Clock } from 'lucide-react';
 
 interface SettingsProps {
   isProduction: boolean;
   onToggleProduction: () => void;
   currentUser: User | null;
   onConfigUpdate?: () => void;
+  actors: Actor[];
+  gateways: ProxyGateway[];
+  onRestore: (data: any) => void;
 }
 
-const Settings: React.FC<SettingsProps> = ({ isProduction, onToggleProduction, currentUser, onConfigUpdate }) => {
-  const [activeTab, setActiveTab] = useState<'GENERAL' | 'DATABASE' | 'USERS' | 'AI' | 'AUDIT' | 'CORE'>('GENERAL');
+interface Snapshot {
+    id: string;
+    timestamp: number;
+    description: string;
+    data: any;
+}
+
+const Settings: React.FC<SettingsProps> = ({ isProduction, onToggleProduction, currentUser, onConfigUpdate, actors, gateways, onRestore }) => {
+  const [activeTab, setActiveTab] = useState<'GENERAL' | 'SNAPSHOTS' | 'DATABASE' | 'USERS' | 'AI' | 'AUDIT' | 'CORE'>('GENERAL');
   
   const [users, setUsers] = useState<User[]>([]);
   const [newUser, setNewUser] = useState({ username: '', password: '', role: 'VIEWER' as UserRole });
@@ -23,6 +32,9 @@ const Settings: React.FC<SettingsProps> = ({ isProduction, onToggleProduction, c
   
   const [sysConfig, setSysConfig] = useState<SystemConfig | null>(null);
   const [isTestingAi, setIsTestingAi] = useState(false);
+
+  // Snapshot State
+  const [snapshots, setSnapshots] = useState<Snapshot[]>([]);
   
   // AI Form State
   const [aiForm, setAiForm] = useState<AiConfig>({
@@ -54,7 +66,7 @@ const Settings: React.FC<SettingsProps> = ({ isProduction, onToggleProduction, c
                 setUsers(data);
             }
             // Load System Config for AI & Core
-            if (activeTab === 'AI' || activeTab === 'CORE' || activeTab === 'AUDIT') {
+            if (activeTab === 'AI' || activeTab === 'CORE' || activeTab === 'AUDIT' || activeTab === 'SNAPSHOTS') {
                 const cfg = await getSystemConfig();
                 if (cfg) {
                     setSysConfig(cfg);
@@ -76,7 +88,17 @@ const Settings: React.FC<SettingsProps> = ({ isProduction, onToggleProduction, c
         }
     };
     loadData();
+    loadSnapshots();
   }, [isProduction, activeTab]);
+
+  const loadSnapshots = () => {
+      try {
+          const raw = localStorage.getItem('vpp_snapshots');
+          if (raw) {
+              setSnapshots(JSON.parse(raw));
+          }
+      } catch (e) { console.error("Failed to load snapshots", e); }
+  };
 
   const handleAddUser = async () => {
       if (!newUser.username || !newUser.password) return;
@@ -225,6 +247,79 @@ const Settings: React.FC<SettingsProps> = ({ isProduction, onToggleProduction, c
       setIsSavingCore(false);
   };
 
+  const handleCreateSnapshot = () => {
+      const snap: Snapshot = {
+          id: `snap-${Date.now()}`,
+          timestamp: Date.now(),
+          description: `Backup - ${new Date().toLocaleString()}`,
+          data: {
+              actors,
+              gateways,
+              systemConfig: sysConfig,
+              users: isProduction ? [] : [{id:'mock-admin', role: 'SUPERADMIN'}] // Don't backup prod users here for security
+          }
+      };
+      
+      const newSnaps = [snap, ...snapshots];
+      setSnapshots(newSnaps);
+      localStorage.setItem('vpp_snapshots', JSON.stringify(newSnaps));
+  };
+
+  const handleRestoreSnapshot = (snap: Snapshot) => {
+      if (confirm(`Restore system state to ${new Date(snap.timestamp).toLocaleString()}? Current unsaved changes will be lost.`)) {
+          onRestore(snap.data);
+      }
+  };
+
+  const handleDeleteSnapshot = (id: string) => {
+      const newSnaps = snapshots.filter(s => s.id !== id);
+      setSnapshots(newSnaps);
+      localStorage.setItem('vpp_snapshots', JSON.stringify(newSnaps));
+  };
+
+  const handleDownloadSnapshot = (snap: Snapshot) => {
+      const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(snap));
+      const downloadAnchorNode = document.createElement('a');
+      downloadAnchorNode.setAttribute("href", dataStr);
+      downloadAnchorNode.setAttribute("download", `vpp_backup_${snap.id}.json`);
+      document.body.appendChild(downloadAnchorNode);
+      downloadAnchorNode.click();
+      downloadAnchorNode.remove();
+  };
+
+  const handleFileUpload = (event: React.ChangeEvent<HTMLInputElement>) => {
+      const file = event.target.files?.[0];
+      if (!file) return;
+
+      const reader = new FileReader();
+      reader.onload = (e) => {
+          try {
+              const content = e.target?.result as string;
+              const parsed = JSON.parse(content);
+              
+              // Validate minimal structure
+              if (parsed.data && parsed.timestamp) {
+                  // Add to local snapshots list first
+                  const importedSnap = { ...parsed, id: `import-${Date.now()}`, description: `Imported: ${parsed.description || 'Unknown'}` };
+                  const newSnaps = [importedSnap, ...snapshots];
+                  setSnapshots(newSnaps);
+                  localStorage.setItem('vpp_snapshots', JSON.stringify(newSnaps));
+                  
+                  // Ask to restore immediately
+                  if (confirm("Snapshot imported successfully. Do you want to restore it now?")) {
+                      onRestore(importedSnap.data);
+                  }
+              } else {
+                  alert("Invalid Snapshot File Format");
+              }
+          } catch (error) {
+              alert("Failed to parse file");
+          }
+      };
+      reader.readAsText(file);
+      event.target.value = ''; // Reset
+  };
+
   const canSwitchMode = !isProduction || (currentUser?.role === 'SUPERADMIN');
   const isSuperAdmin = currentUser?.role === 'SUPERADMIN';
 
@@ -241,6 +336,12 @@ const Settings: React.FC<SettingsProps> = ({ isProduction, onToggleProduction, c
                 className={`px-4 py-2 text-sm font-bold border-b-2 transition-colors whitespace-nowrap ${activeTab === 'GENERAL' ? 'border-blue-500 text-blue-400' : 'border-transparent text-slate-500 hover:text-white'}`}
             >
                 General
+            </button>
+            <button 
+                onClick={() => setActiveTab('SNAPSHOTS')}
+                className={`px-4 py-2 text-sm font-bold border-b-2 transition-colors whitespace-nowrap ${activeTab === 'SNAPSHOTS' ? 'border-emerald-500 text-emerald-400' : 'border-transparent text-slate-500 hover:text-white'}`}
+            >
+                Restore Points
             </button>
             {isSuperAdmin && (
                 <>
@@ -308,6 +409,88 @@ const Settings: React.FC<SettingsProps> = ({ isProduction, onToggleProduction, c
                          )}
                     </div>
                 </div>
+            </div>
+        )}
+
+        {/* Snapshots / Restore Points Tab */}
+        {activeTab === 'SNAPSHOTS' && (
+            <div className="bg-slate-800 rounded-xl border border-slate-700 p-6 shadow-lg space-y-6">
+                 <div className="flex items-start mb-6">
+                     <HardDrive className="w-10 h-10 text-emerald-500 mr-4" />
+                     <div>
+                         <h3 className="text-xl font-bold text-white">System Restore Points</h3>
+                         <p className="text-slate-400 text-sm">Create backups of your fleet configuration and restore from previous states.</p>
+                     </div>
+                 </div>
+
+                 <div className="flex gap-4 mb-6">
+                     <button 
+                        onClick={handleCreateSnapshot}
+                        className="bg-emerald-600 hover:bg-emerald-500 text-white px-4 py-2 rounded font-bold shadow-lg flex items-center"
+                     >
+                         <Plus className="w-4 h-4 mr-2" /> Create Restore Point
+                     </button>
+                     <div className="relative">
+                         <input type="file" id="uploadSnap" className="hidden" accept=".json" onChange={handleFileUpload} />
+                         <label 
+                            htmlFor="uploadSnap"
+                            className="bg-slate-700 hover:bg-slate-600 text-white px-4 py-2 rounded font-bold shadow-lg flex items-center cursor-pointer"
+                         >
+                             <Upload className="w-4 h-4 mr-2" /> Import File
+                         </label>
+                     </div>
+                 </div>
+
+                 <div className="border border-slate-700 rounded-lg overflow-hidden">
+                     <table className="w-full text-left text-sm">
+                         <thead className="bg-slate-900 text-slate-400 font-bold uppercase text-xs">
+                             <tr>
+                                 <th className="p-3">Timestamp</th>
+                                 <th className="p-3">Description</th>
+                                 <th className="p-3">Data Size</th>
+                                 <th className="p-3 text-right">Actions</th>
+                             </tr>
+                         </thead>
+                         <tbody className="divide-y divide-slate-700 bg-slate-800/50">
+                             {snapshots.length === 0 && (
+                                 <tr><td colSpan={4} className="p-8 text-center text-slate-500 italic">No restore points available.</td></tr>
+                             )}
+                             {snapshots.map(snap => (
+                                 <tr key={snap.id} className="hover:bg-slate-700/50">
+                                     <td className="p-3 font-mono text-slate-300 flex items-center">
+                                         <Clock className="w-3 h-3 mr-2 text-slate-500" />
+                                         {new Date(snap.timestamp).toLocaleString()}
+                                     </td>
+                                     <td className="p-3 text-white">{snap.description}</td>
+                                     <td className="p-3 text-slate-500 text-xs">{(JSON.stringify(snap.data).length / 1024).toFixed(1)} KB</td>
+                                     <td className="p-3 flex justify-end space-x-2">
+                                         <button 
+                                            onClick={() => handleRestoreSnapshot(snap)}
+                                            className="px-3 py-1 bg-blue-600 hover:bg-blue-500 text-white rounded text-xs font-bold"
+                                            title="Restore this state"
+                                         >
+                                             Restore
+                                         </button>
+                                         <button 
+                                            onClick={() => handleDownloadSnapshot(snap)}
+                                            className="p-1.5 text-slate-400 hover:text-white bg-slate-700 hover:bg-slate-600 rounded"
+                                            title="Download JSON"
+                                         >
+                                             <Download className="w-4 h-4" />
+                                         </button>
+                                         <button 
+                                            onClick={() => handleDeleteSnapshot(snap.id)}
+                                            className="p-1.5 text-slate-400 hover:text-red-400 bg-slate-700 hover:bg-slate-600 rounded"
+                                            title="Delete Snapshot"
+                                         >
+                                             <Trash2 className="w-4 h-4" />
+                                         </button>
+                                     </td>
+                                 </tr>
+                             ))}
+                         </tbody>
+                     </table>
+                 </div>
             </div>
         )}
 

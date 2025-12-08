@@ -236,6 +236,21 @@ const App: React.FC = () => {
       }
       setIsUpdatingFleet(false);
   };
+
+  const handleRestoreState = (snapshot: any) => {
+      if (snapshot.actors) setActors(snapshot.actors);
+      if (snapshot.gateways) setGateways(snapshot.gateways);
+      if (snapshot.systemConfig) setSystemConfig(snapshot.systemConfig);
+      
+      // If we restore logs, that's optional, but helpful
+      if (snapshot.logs) setLogs(snapshot.logs);
+
+      if (isProduction) {
+          alert("State loaded into Dashboard view. \n\nNOTE: In Production mode, this only affects your current session view. Persistent database state requires manual re-seeding or will be overwritten by the next polling cycle.");
+      } else {
+          alert("System Restore Completed Successfully.");
+      }
+  };
   
   const handleQuickForensic = (actorId: string) => {
       setSelectedActorId(actorId);
@@ -272,7 +287,17 @@ const App: React.FC = () => {
                     {activeTab === 'reports' && <Reports currentUser={currentUser} logs={logs} actors={actors} />}
                     {activeTab === 'gateways' && <GatewayManager gateways={gateways} onRefresh={loadProductionData} domain={systemConfig?.domain || 'vpp.io'} isProduction={isProduction} />}
                     {activeTab === 'wireless' && <WirelessRecon isProduction={isProduction} actors={actors} />}
-                    {activeTab === 'settings' && <Settings isProduction={isProduction} onToggleProduction={toggleProductionMode} currentUser={currentUser} onConfigUpdate={loadProductionData} />}
+                    {activeTab === 'settings' && (
+                        <Settings 
+                            isProduction={isProduction} 
+                            onToggleProduction={toggleProductionMode} 
+                            currentUser={currentUser} 
+                            onConfigUpdate={loadProductionData}
+                            actors={actors}
+                            gateways={gateways}
+                            onRestore={handleRestoreState}
+                        />
+                    )}
                     {activeTab === 'actors' && (
                         <div className="space-y-6 animate-fade-in pb-10">
                             <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
