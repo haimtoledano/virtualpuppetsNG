@@ -1,8 +1,8 @@
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { User, AuthState, DbConfig, SystemConfig } from '../types';
 import { loginUser, setupMfa, verifyMfaCode, commitMfaSetup } from '../services/authService';
-import { connectToDatabase, runProvisioningScript, saveDbConfig, generateProductionSql } from '../services/dbService';
+import { connectToDatabase, runProvisioningScript, saveDbConfig, generateProductionSql, getSystemConfig } from '../services/dbService';
 import { Lock, ShieldCheck, Database, Server, Smartphone, Loader, AlertTriangle, Building, Globe, Download, CheckCircle, Copy } from 'lucide-react';
 
 interface LoginScreenProps {
@@ -36,6 +36,22 @@ const LoginScreen: React.FC<LoginScreenProps> = ({ onLoginSuccess }) => {
   });
   const [provLogs, setProvLogs] = useState<string[]>([]);
   const [generatedSql, setGeneratedSql] = useState<string | null>(null);
+
+  // Branding State
+  const [branding, setBranding] = useState<{name: string, logo: string} | null>(null);
+
+  useEffect(() => {
+      const loadBranding = async () => {
+          const cfg = await getSystemConfig();
+          if (cfg) {
+              setBranding({
+                  name: cfg.companyName || (cfg as any).CompanyName || 'Virtual Puppets',
+                  logo: cfg.logoUrl || (cfg as any).LogoUrl || ''
+              });
+          }
+      };
+      loadBranding();
+  }, []);
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -148,11 +164,17 @@ const LoginScreen: React.FC<LoginScreenProps> = ({ onLoginSuccess }) => {
     <div className="min-h-screen bg-cyber-900 flex items-center justify-center p-4">
         <div className="bg-slate-800 border border-slate-700 w-full max-w-md rounded-2xl shadow-2xl overflow-hidden">
             <div className="bg-slate-900 p-6 text-center border-b border-slate-700">
-                <div className="inline-flex items-center justify-center w-12 h-12 bg-blue-600 rounded-lg mb-4 shadow-lg shadow-blue-600/20">
-                    <Lock className="w-6 h-6 text-white" />
-                </div>
+                {branding?.logo ? (
+                    <div className="flex justify-center mb-4">
+                        <img src={branding.logo} alt="Company Logo" className="h-16 object-contain" />
+                    </div>
+                ) : (
+                    <div className="inline-flex items-center justify-center w-12 h-12 bg-blue-600 rounded-lg mb-4 shadow-lg shadow-blue-600/20">
+                        <Lock className="w-6 h-6 text-white" />
+                    </div>
+                )}
                 <h1 className="text-xl font-bold text-white tracking-wider">SECURE ACCESS</h1>
-                <p className="text-slate-500 text-sm mt-1">Virtual Puppets Enterprise</p>
+                <p className="text-slate-500 text-sm mt-1">{branding?.name || 'Virtual Puppets Enterprise'}</p>
             </div>
 
             <div className="p-8">
