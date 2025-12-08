@@ -56,7 +56,7 @@ echo "[TRAP] Connection from \$SOCAT_PEERADDR:\$SOCAT_PEERPORT -> :\$SOCAT_SOCKP
 
 # Send Alert
 PAYLOAD=\$(jq -n \\
-  --arg aid "\$AID" \\
+  --arg aid "\$ACTOR_ID" \\
   --arg lvl "CRITICAL" \\
   --arg proc "trap_relay" \\
   --arg msg "[TRAP] Connection from \$SOCAT_PEERADDR:\$SOCAT_PEERPORT -> :\$SOCAT_SOCKPORT" \\
