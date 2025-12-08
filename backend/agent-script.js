@@ -1,4 +1,5 @@
 
+
 export const CURRENT_AGENT_VERSION = "2.3.2";
 
 export const generateAgentScript = (serverUrl, token) => {
@@ -45,20 +46,20 @@ echo "off" > $AGENT_DIR/.sentinel
 # Create Trap Relay Script
 cat <<'EOF_TRAP' > $AGENT_DIR/trap_relay.sh
 #!/bin/bash
-# Socat sets SOCAT_PEERADDR, SOCAT_PEERPORT
+# Socat sets SOCAT_PEERADDR, SOCAT_PEERPORT, SOCAT_SOCKPORT
 AGENT_DIR="/opt/vpp-agent"
 SERVER=\$(cat "\$AGENT_DIR/.server")
 ACTOR_ID=\$(cat "\$AGENT_DIR/vpp-id")
 
 # Log to local
-echo "[TRAP] Connection from \$SOCAT_PEERADDR:\$SOCAT_PEERPORT" >> /var/log/vpp-agent.log
+echo "[TRAP] Connection from \$SOCAT_PEERADDR:\$SOCAT_PEERPORT -> :\$SOCAT_SOCKPORT" >> /var/log/vpp-agent.log
 
 # Send Alert
 PAYLOAD=\$(jq -n \\
   --arg aid "\$ACTOR_ID" \\
   --arg lvl "CRITICAL" \\
   --arg proc "trap_relay" \\
-  --arg msg "Trap Triggered on Port \$SOCAT_SOCKPORT by \$SOCAT_PEERADDR" \\
+  --arg msg "[TRAP] Connection from \$SOCAT_PEERADDR:\$SOCAT_PEERPORT -> :\$SOCAT_SOCKPORT" \\
   --arg ip "\$SOCAT_PEERADDR" \\
   '{actorId: \$aid, level: \$lvl, process: \$proc, message: \$msg, sourceIp: \$ip}')
 

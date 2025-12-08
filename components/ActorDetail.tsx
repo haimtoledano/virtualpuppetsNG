@@ -1,4 +1,6 @@
 
+
+
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { Actor, LogEntry, ActorStatus, AiAnalysis, ProxyGateway, HoneyFile, ActiveTunnel, DevicePersona, CommandJob, LogLevel, User, UserPreferences, ForensicSnapshot, ForensicProcess, AttackSession } from '../types';
 import { executeRemoteCommand, getAvailableCloudTraps, toggleTunnelMock, AVAILABLE_PERSONAS, generateRandomLog, performForensicScan, getAttackSessions, deleteAttackSession } from '../services/mockService';
@@ -750,7 +752,12 @@ const ActorDetail: React.FC<ActorDetailProps> = ({ actor, gateway, logs: initial
           let attackerIp = log.sourceIp;
           let destPort = undefined;
 
+          // 1. Generic Complex Match (Existing)
           const complexMatch = log.message.match(/from\s+(?:[0-9a-f.:]+|\[.*?\]):(\d+)\s+(?:to|->)\s+(?:[0-9a-f.:]+|\[.*?\])?:(\d+)/i);
+          
+          // 2. Specific Trap Match (New robust format)
+          const trapMatch = log.message.match(/->\s+:(\d+)/); 
+
           if (complexMatch) {
               const p1 = parseInt(complexMatch[1]);
               const p2 = parseInt(complexMatch[2]);
@@ -759,6 +766,8 @@ const ActorDetail: React.FC<ActorDetailProps> = ({ actor, gateway, logs: initial
               } else {
                   destPort = p2.toString();
               }
+          } else if (trapMatch) {
+              destPort = trapMatch[1];
           } else {
               const portMatch = log.message.match(/to\s+(?:[0-9.]+|\[.*?\]):(\d+)/);
               if (portMatch) destPort = portMatch[1];

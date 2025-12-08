@@ -332,6 +332,14 @@ router.post('/agent/log', async (req, res) => {
             .input('msg', message || '')
             .input('ip', sourceIp || '0.0.0.0')
             .query("INSERT INTO Logs (LogId, ActorId, Level, Process, Message, SourceIp, Timestamp) VALUES (@lid, @aid, @lvl, @proc, @msg, @ip, GETDATE())");
+        
+        // --- CRITICAL: AUTO-COMPROMISE LOGIC ---
+        if (level === 'CRITICAL') {
+            await db.request()
+                .input('aid', actorId)
+                .query("UPDATE Actors SET Status='COMPROMISED' WHERE ActorId=@aid");
+        }
+
         res.json({ status: 'ok' });
     } catch (e) {
         console.error("Agent Log Error", e);
