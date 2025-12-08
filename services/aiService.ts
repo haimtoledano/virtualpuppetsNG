@@ -25,11 +25,11 @@ const getAiConfig = async (): Promise<AiConfig> => {
 // --- GEMINI IMPLEMENTATION ---
 
 const callGemini = async (config: AiConfig, prompt: string, responseSchema?: any): Promise<any> => {
-    // Strictly use environment variable as per security guidelines
-    const apiKey = process.env.API_KEY;
+    // Prefer config key, fallback to env
+    const apiKey = config.apiKey || process.env.API_KEY;
 
     if (!apiKey) {
-        console.warn("Gemini API Key is missing from environment variables.");
+        console.warn("Gemini API Key is missing (checked config and environment).");
         return null;
     }
 

@@ -601,13 +601,18 @@ const Settings: React.FC<SettingsProps> = ({ isProduction, onToggleProduction, c
 
                     {aiForm.provider === 'GEMINI' && (
                         <div>
-                            <div className="bg-purple-900/20 border border-purple-500/30 p-3 rounded text-sm text-purple-200 mb-4">
-                                <p>Gemini API Key is managed securely via environment variables.</p>
-                            </div>
-                            <div className="flex items-center space-x-2 text-emerald-400 text-sm font-bold bg-slate-900 p-3 rounded border border-slate-700">
-                                <ShieldCheck className="w-4 h-4" />
-                                <span>API Key Configured (Environment)</span>
-                            </div>
+                             <label className="block text-slate-500 text-xs font-bold uppercase mb-1">Gemini API Key</label>
+                             <div className="relative">
+                                 <input 
+                                     type="password"
+                                     value={aiForm.apiKey || ''}
+                                     onChange={e => setAiForm({...aiForm, apiKey: e.target.value})}
+                                     className="w-full bg-slate-900 border border-slate-600 rounded p-3 text-white focus:border-purple-500 outline-none pr-10" 
+                                     placeholder="AIza..."
+                                 />
+                                 <Lock className="w-4 h-4 text-slate-500 absolute right-3 top-3.5" />
+                             </div>
+                             <p className="text-[10px] text-slate-500 mt-1">Leave empty to use process.env.API_KEY if available.</p>
                         </div>
                     )}
 
