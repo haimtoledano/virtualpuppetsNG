@@ -1,6 +1,4 @@
-
-
-export const CURRENT_AGENT_VERSION = "2.3.2";
+export const CURRENT_AGENT_VERSION = "2.3.3";
 
 export const generateAgentScript = (serverUrl, token) => {
   return `#!/bin/bash
@@ -50,9 +48,10 @@ cat <<'EOF_TRAP' > $AGENT_DIR/trap_relay.sh
 AGENT_DIR="/opt/vpp-agent"
 SERVER=\$(cat "\$AGENT_DIR/.server")
 ACTOR_ID=\$(cat "\$AGENT_DIR/vpp-id")
+LOG_FILE="/var/log/vpp-agent.log"
 
-# Log to local
-echo "[TRAP] Connection from \$SOCAT_PEERADDR:\$SOCAT_PEERPORT -> :\$SOCAT_SOCKPORT" >> /var/log/vpp-agent.log
+# Log to local file explicitly
+echo "[TRAP] Connection from \$SOCAT_PEERADDR:\$SOCAT_PEERPORT -> :\$SOCAT_SOCKPORT" >> \$LOG_FILE
 
 # Send Alert
 PAYLOAD=\$(jq -n \\
@@ -88,7 +87,6 @@ log() {
 }
 
 get_hwid() {
-    # Robust HWID Detection
     local HID=""
     if command -v ip &> /dev/null; then
         HID=\$(ip link show | awk '/ether/ {print \$2}' | head -n 1)
@@ -103,27 +101,20 @@ get_hwid() {
 }
 
 get_metrics() {
-    # CPU Usage (100 - idle)
-    # Escaped backslashes for capture group and backreference
     CPU=\$(top -bn1 | grep "Cpu(s)" | sed "s/.*, *\\([0-9.]*\\)%* id.*/\\1/" | awk '{print 100 - \$1}')
     if [ -z "\$CPU" ]; then CPU=0; fi
     
-    # RAM Usage %
     RAM=\$(free -m | awk '/Mem:/ { printf("%.1f", \$3/\$2 * 100.0) }')
     if [ -z "\$RAM" ]; then RAM=0; fi
 
-    # Temperature (Standard Thermal Zone)
     TEMP=\$(cat /sys/class/thermal/thermal_zone0/temp 2>/dev/null | awk '{print \$1/1000}')
     if [ -z "\$TEMP" ]; then 
-        # Fallback for some Pis
         TEMP=\$(vcgencmd measure_temp 2>/dev/null | egrep -o '[0-9]*\.[0-9]*')
     fi
     if [ -z "\$TEMP" ]; then TEMP=0; fi
 
     echo "\$CPU \$RAM \$TEMP"
 }
-
-# --- SPECIAL CAPABILITIES ---
 
 perform_forensics() {
     echo "---PROCESSES---"
@@ -138,7 +129,6 @@ perform_forensics() {
 
 perform_recon() {
     local AID="\$1"
-    # WIFI
     if command -v nmcli &> /dev/null; then
         local WIFIDATA=\$(nmcli -t -f SSID,BSSID,SIGNAL,SECURITY,CHAN dev wifi list | head -n 10 | awk -F: '{ printf "{\\"ssid\\":\\"%s\\",\\"bssid\\":\\"%s\\",\\"signal\\":%s,\\"security\\":\\"%s\\",\\"channel\\":%s,\\"actorName\\":\\"'$ACTOR_NAME'\\"},", \$1, \$2, \$3, \$4, \$5 }' | sed 's/,\$//')
         if [ ! -z "\$WIFIDATA" ]; then
@@ -153,18 +143,24 @@ check_sentinel() {
     local MODE=\$(cat "\$AGENT_DIR/.sentinel" 2>/dev/null)
     
     if [ "\$MODE" == "on" ]; then
-        # Check for ESTABLISHED connections from non-local IPs
+        # Filter out localhost and the C2 server itself to avoid feedback loops
+        SERVER_HOST=\$(echo "\$SERVER" | awk -F/ '{print \$3}' | cut -d: -f1)
+        
         local SUSPECTS=""
         if command -v ss &> /dev/null; then
-            SUSPECTS=\$(ss -ntu state established | grep -v "127.0.0.1" | grep -v "::1" | grep -v "\$SERVER_URL" | awk '{print \$5}' | cut -d: -f1)
+            # Get peer IP (column 5)
+            SUSPECTS=\$(ss -ntu state established | grep -v "127.0.0.1" | grep -v "::1" | grep -v "\$SERVER_HOST" | awk '{print \$5}' | cut -d: -f1 | sort | uniq)
         else
-            SUSPECTS=\$(netstat -nt | grep ESTABLISHED | grep -v "127.0.0.1" | awk '{print \$5}' | cut -d: -f1)
+            SUSPECTS=\$(netstat -nt 2>/dev/null | grep ESTABLISHED | grep -v "127.0.0.1" | grep -v "\$SERVER_HOST" | awk '{print \$5}' | cut -d: -f1 | sort | uniq)
         fi
 
         if [ ! -z "\$SUSPECTS" ]; then
             for IP in \$SUSPECTS; do
-                # Ignore self/server IP if possible (simple filter)
                 if [[ "\$IP" != "0.0.0.0" && "\$IP" != "" ]]; then
+                   # LOG LOCAL
+                   log "[SENTINEL] 🚨 Unauthorized connection detected from \$IP"
+                   
+                   # SEND ALERT
                    PAYLOAD=\$(jq -n \\
                       --arg aid "\$AID" \\
                       --arg lvl "CRITICAL" \\
@@ -239,14 +235,13 @@ while true; do
     # 3. Check Tasks
     TASKS=\$(curl -s -G --data-urlencode "actorId=\$ACTOR_ID" "\$SERVER/api/agent/tasks")
     
-    # Process tasks if array is not empty
+    # Process tasks
     echo "\$TASKS" | jq -c '.[]' 2>/dev/null | while read -r task; do
         JOB_ID=\$(echo "\$task" | jq -r '.id')
         CMD=\$(echo "\$task" | jq -r '.command')
         
         log "Executing Job \$JOB_ID: \$CMD"
         
-        # SPECIAL COMMANDS
         RESULT=""
         STATUS="COMPLETED"
         
@@ -259,18 +254,18 @@ while true; do
             if [[ "\$CMD" == *"on"* ]]; then
                 echo "on" > "\$AGENT_DIR/.sentinel"
                 RESULT="Sentinel Mode ENABLED."
+                log "Sentinel Mode ENABLED by server command."
             else
                 echo "off" > "\$AGENT_DIR/.sentinel"
                 RESULT="Sentinel Mode DISABLED."
+                log "Sentinel Mode DISABLED by server command."
             fi
         else
-            # Standard Shell Execution
             RESULT=\$(eval "\$CMD" 2>&1)
             EXIT_CODE=\$?
             if [ \$EXIT_CODE -ne 0 ]; then STATUS="FAILED"; fi
         fi
         
-        # Report Result safely using jq to encode JSON
         REPORT=\$(jq -n --arg out "\$RESULT" --arg stat "\$STATUS" '{output: \$out, status: \$stat}')
         curl -s -X POST -H "Content-Type: application/json" -d "\$REPORT" "\$SERVER/api/agent/tasks/\$JOB_ID"
     done
