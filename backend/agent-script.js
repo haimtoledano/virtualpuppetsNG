@@ -104,10 +104,12 @@ done
 
 ACTOR_ID=$(cat "$AGENT_DIR/vpp-id")
 
-# Main Loop (Mock Logic for now, would be replaced by full agent logic)
+# Main Loop
 while true; do
-    # Simple heartbeat for now
-    curl -s -X POST -H "Content-Type: application/json" -d "{\"actorId\": \"$ACTOR_ID\"}" "$SERVER/api/agent/scan" >/dev/null
+    # Scan/Heartbeat to C2
+    # Use jq to construct valid JSON safely to prevent syntax errors on server
+    PAYLOAD=$(jq -n --arg id "$ACTOR_ID" '{actorId: $id}')
+    curl -s -X POST -H "Content-Type: application/json" -d "$PAYLOAD" "$SERVER/api/agent/scan" >/dev/null
     sleep 5
 done
 EOF_SRV

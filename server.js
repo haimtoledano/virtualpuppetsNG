@@ -20,7 +20,7 @@ app.use(cors());
 app.use(bodyParser.json({ limit: '10mb' }));
 app.use(bodyParser.urlencoded({ extended: true }));
 
-// Global JSON Error Handler to prevent crashes on malformed requests
+// Global JSON Error Handler to prevent crashes on malformed requests from agents
 app.use((err, req, res, next) => {
     if (err instanceof SyntaxError && err.status === 400 && 'body' in err) {
         console.error(`[API] JSON Parse Error from ${req.ip}: ${err.message}`);
