@@ -4,7 +4,7 @@ import QRCode from 'qrcode';
 import sql from 'mssql';
 import { dbPool, connectToDb, saveDbConfigLocal, runSchemaMigrations, refreshSyslogConfig, sendToSyslog, getDbConfig } from './database.js';
 import { getSessions, deleteSession, initTrap, interactTrap } from './honeypot.js';
-import { CURRENT_AGENT_VERSION } from './agent-script.js';
+import { CURRENT_AGENT_VERSION, generateAgentScript } from './agent-script.js';
 
 const router = express.Router();
 
@@ -20,10 +20,8 @@ router.get('/health', (req, res) => {
 });
 
 router.get('/config/system', async (req, res) => {
-    console.log(`[API] GET /config/system - Request received from ${req.ip}`);
     res.set('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
     if (!dbPool) {
-        console.warn('[API] GET /config/system - DB Pool not ready');
         return res.status(503).json({});
     }
     try {
@@ -43,7 +41,6 @@ router.get('/config/system', async (req, res) => {
             
             try { config[key] = JSON.parse(row.ConfigValue); } catch { config[key] = row.ConfigValue; }
         });
-        console.log(`[API] GET /config/system - Returning config:`, JSON.stringify(config));
         res.json(config);
     } catch (e) { 
         console.error('[API] GET /config/system - Error fetching config:', e);
@@ -52,14 +49,10 @@ router.get('/config/system', async (req, res) => {
 });
 
 router.post('/config/system', async (req, res) => {
-    console.log(`[API] POST /config/system - Received payload:`, JSON.stringify(req.body));
-    
     if (!dbPool) return res.json({success: false, error: "Database not connected"});
     try {
         for (const [key, value] of Object.entries(req.body)) {
             const valStr = typeof value === 'object' ? JSON.stringify(value) : String(value);
-            
-            console.log(`[API] Processing config key: ${key}`);
             
             // Explicit UPSERT to avoid MERGE issues
             const countRes = await dbPool.request()
@@ -67,13 +60,11 @@ router.post('/config/system', async (req, res) => {
                 .query("SELECT COUNT(*) as count FROM SystemConfig WHERE ConfigKey = @k");
             
             if (countRes.recordset[0].count > 0) {
-                 console.log(`[API] Updating existing key: ${key}`);
                  await dbPool.request()
                     .input('k', sql.NVarChar, key)
                     .input('v', sql.NVarChar, valStr)
                     .query("UPDATE SystemConfig SET ConfigValue = @v WHERE ConfigKey = @k");
             } else {
-                 console.log(`[API] Inserting new key: ${key}`);
                  await dbPool.request()
                     .input('k', sql.NVarChar, key)
                     .input('v', sql.NVarChar, valStr)
@@ -81,7 +72,6 @@ router.post('/config/system', async (req, res) => {
             }
         }
         await refreshSyslogConfig();
-        console.log(`[API] POST /config/system - Save operation completed successfully`);
         res.json({success: true});
     } catch(e) { 
         console.error("[API] POST /config/system - Config Save Error:", e);
@@ -233,7 +223,7 @@ router.put('/actors/:id/sentinel', async (req, res) => {
 });
 router.put('/actors/:id/acknowledge', async (req, res) => {
     if (!dbPool) return res.json({success: false});
-    try { await dbPool.request().input('id', sql.NVarChar, req.params.id).query("UPDATE Actors SET Status = 'ONLINE' WHERE ActorId = @id"); res.json({success: true}); } catch(e) { res.json({success: false}); }
+    try { await dbPool.request().input('id', sql.NVarChar, req.params.id).query("UPDATE Actors SET Status = 'ONLINE' WHERE ActorId = @id"); res.json({success: false}); } catch(e) { res.json({success: false}); }
 });
 router.put('/actors/:id/scanning', async (req, res) => { 
     if (!dbPool) return res.json({success: false}); 
@@ -257,13 +247,11 @@ router.get('/commands/:actorId', async (req, res) => {
     try { const r = await dbPool.request().input('aid', sql.NVarChar, req.params.actorId).query("SELECT JobId as id, Command as command, Status as status, Output as output, CreatedAt as createdAt FROM CommandQueue WHERE ActorId = @aid ORDER BY CreatedAt DESC"); res.json(r.recordset); } catch(e) { res.json([]); }
 });
 
-// FIXED: Add missing route for agent polling that caused jq errors
 router.get('/agent/commands', async (req, res) => {
     if (!dbPool) return res.json([]);
     const actorId = req.query.actorId;
     if (!actorId) return res.json([]);
     try { 
-        // Return only PENDING commands for execution
         const r = await dbPool.request()
             .input('aid', sql.NVarChar, actorId)
             .query("SELECT TOP 1 JobId as id, Command as command FROM CommandQueue WHERE ActorId = @aid AND Status = 'PENDING' ORDER BY CreatedAt ASC"); 
@@ -349,7 +337,6 @@ router.post('/enroll/approve', async (req, res) => {
         
         const actorId = `puppet-${Math.random().toString(36).substr(2,6)}`;
         
-        // FIXED: Swapped @ip and GETDATE() to match LocalIp (string) and LastSeen (datetime)
         await dbPool.request()
             .input('aid', sql.NVarChar, actorId)
             .input('hwid', sql.NVarChar, pending.HwId)
@@ -419,7 +406,6 @@ router.get('/reports', async (req, res) => {
     } catch(e) { res.json([]); }
 });
 
-// NEW: Missing route fixed
 router.get('/reports/filters', async (req, res) => {
     if (!dbPool) return res.json({attackers: [], protocols: []});
     try {
@@ -579,6 +565,20 @@ router.get('/agent/heartbeat', async (req, res) => {
         }
         res.json({ status: 'PENDING' });
     } catch(e) { res.status(500).json({}); }
+});
+
+// --- SETUP SCRIPT GEN ROUTE ---
+router.get('/setup', (req, res) => {
+    const host = req.get('host');
+    const protocol = req.protocol;
+    const serverUrl = `${protocol}://${host}/api`; // Correct API base URL
+    
+    // Default token for generic installs if none provided (won't auto-enroll, but installs agent)
+    const token = req.query.token || 'manual_install';
+    
+    const script = generateAgentScript(serverUrl, token);
+    res.setHeader('Content-Type', 'text/plain');
+    res.send(script);
 });
 
 export default router;

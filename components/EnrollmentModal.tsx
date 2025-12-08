@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect } from 'react';
 import { PendingActor, ProxyGateway, ProvisioningStatus } from '../types';
 import { generateEnrollmentToken as mockGenerateToken, simulateDeviceCallHome } from '../services/mockService';
@@ -134,8 +133,9 @@ const EnrollmentModal: React.FC<EnrollmentModalProps> = ({
   };
 
   const handleCopy = () => {
-      const proxyFlag = (!isProduction && selectedProxyId !== 'DIRECT') ? ` --proxy ${selectedProxyId}` : '';
-      const cmd = `curl -sL http://${domain}/setup | sudo bash -s ${token}${proxyFlag}`;
+      // NOTE: Using /api/setup route directly
+      const setupUrl = `http://${domain}/api/setup`;
+      const cmd = `curl -sL ${setupUrl}?token=${token} | sudo bash`;
       
       if (navigator.clipboard && navigator.clipboard.writeText) {
           navigator.clipboard.writeText(cmd);
@@ -182,11 +182,13 @@ const EnrollmentModal: React.FC<EnrollmentModalProps> = ({
               onGatewayRegistered();
           }
           const t = await generateEnrollmentToken('SITE', newGw.id);
-          const cmd = `curl -sL http://${domain}/setup | sudo bash -s ${t}`;
+          const setupUrl = `http://${domain}/api/setup`;
+          const cmd = `curl -sL ${setupUrl}?token=${t} | sudo bash`;
           setSiteToken(cmd);
       } else {
           alert("Site created (Simulation). In production, this would register the gateway in DB.");
-          setSiteToken(`curl -sL http://${domain}/setup | sudo bash -s ${newGw.id}`);
+          const setupUrl = `http://${domain}/api/setup`;
+          setSiteToken(`curl -sL ${setupUrl}?token=${newGw.id} | sudo bash`);
       }
   };
 
@@ -263,7 +265,7 @@ const EnrollmentModal: React.FC<EnrollmentModalProps> = ({
                                     </div>
                                 ) : (
                                     <code className="font-mono text-emerald-400 text-xs md:text-sm break-all mr-4">
-                                        curl -sL {domain.startsWith('http') ? domain : `http://${domain}`}/setup | sudo bash -s {token} {(!isProduction && selectedProxyId !== 'DIRECT') ? `--proxy ${selectedProxyId}` : ''}
+                                        curl -sL http://{domain}/api/setup?token={token} | sudo bash
                                     </code>
                                 )}
                                 
