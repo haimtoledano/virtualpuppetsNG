@@ -42,6 +42,13 @@ startHoneypots();
 // Mount API Routes
 app.use('/api', apiRoutes);
 
+// Compatibility Redirect: Handle agents requesting legacy /setup path
+// This fixes the "syntax error near unexpected token newline" issue during updates
+app.get('/setup', (req, res) => {
+    const query = req._parsedUrl.search || '';
+    res.redirect(`/api/setup${query}`);
+});
+
 // Serve Frontend Static Files
 if (fs.existsSync(distPath)) {
     app.use(express.static(distPath));
