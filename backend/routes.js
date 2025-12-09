@@ -361,6 +361,63 @@ router.get('/recon/bluetooth', async (req, res) => {
     res.json(r.recordset.map(b => ({id: b.Id, name: b.Name, mac: b.Mac, rssi: b.Rssi, type: b.Type, actorId: b.ActorId, actorName: b.ActorName, lastSeen: b.LastSeen})));
 });
 
+// NEW: Agent Recon Data Upload (WiFi/BT)
+router.post('/agent/recon', async (req, res) => {
+    const { actorId, type, data } = req.body;
+    const db = getDbPool();
+    
+    // Debug Log
+    console.log(`[API] Recon received for ${actorId} (${type}): ${data?.length} items`);
+    
+    if (!db) return res.json({success: false});
+
+    try {
+        if (type === 'WIFI') {
+             // Use loop with individual try/catch to ensure one bad record doesn't fail the whole batch
+             for (const net of data) {
+                 try {
+                     await db.request()
+                        .input('id', `wifi-${actorId}-${net.bssid.replace(/:/g,'')}`)
+                        .input('ssid', net.ssid).input('bssid', net.bssid).input('sig', net.signal)
+                        .input('sec', net.security).input('ch', net.channel).input('aid', actorId)
+                        .input('aname', net.actorName || 'Agent')
+                        .query(`
+                            MERGE WifiNetworks AS target
+                            USING (SELECT @id AS Id) AS source ON (target.Id = source.Id)
+                            WHEN MATCHED THEN UPDATE SET SignalStrength=@sig, LastSeen=GETDATE()
+                            WHEN NOT MATCHED THEN INSERT (Id, Ssid, Bssid, SignalStrength, Security, Channel, ActorId, ActorName, LastSeen)
+                            VALUES (@id, @ssid, @bssid, @sig, @sec, @ch, @aid, @aname, GETDATE());
+                        `);
+                 } catch (innerErr) {
+                     console.error(`[API] WiFi Recon Row Error (${net.ssid}):`, innerErr.message);
+                 }
+             }
+        } else if (type === 'BLUETOOTH') {
+             for (const dev of data) {
+                  try {
+                      await db.request()
+                        .input('id', `bt-${actorId}-${dev.mac.replace(/:/g,'')}`)
+                        .input('name', dev.name).input('mac', dev.mac).input('rssi', dev.rssi)
+                        .input('type', dev.type).input('aid', actorId).input('aname', dev.actorName || 'Agent')
+                        .query(`
+                            MERGE BluetoothDevices AS target
+                            USING (SELECT @id AS Id) AS source ON (target.Id = source.Id)
+                            WHEN MATCHED THEN UPDATE SET Rssi=@rssi, LastSeen=GETDATE()
+                            WHEN NOT MATCHED THEN INSERT (Id, Name, Mac, Rssi, Type, ActorId, ActorName, LastSeen)
+                            VALUES (@id, @name, @mac, @rssi, @type, @aid, @aname, GETDATE());
+                        `);
+                  } catch (innerErr) {
+                      console.error(`[API] BT Recon Row Error (${dev.name}):`, innerErr.message);
+                  }
+             }
+        }
+        res.json({success: true});
+    } catch (e) { 
+        console.error("[API] Recon Upload Global Error:", e);
+        res.json({success: false, error: e.message}); 
+    }
+});
+
 // --- SESSIONS (Honeypot In-Memory Bridge) ---
 router.get('/sessions', (req, res) => {
     res.json(getSessions());
@@ -530,59 +587,6 @@ router.post('/agent/tasks/:jobId', async (req, res) => {
             .query("UPDATE CommandQueue SET Output=@out, Status=@stat, UpdatedAt=GETDATE() WHERE JobId=@jid");
         res.json({success: true});
     } catch (e) { res.json({success: false}); }
-});
-
-// NEW: Agent Recon Data Upload (WiFi/BT)
-router.post('/agent/recon', async (req, res) => {
-    const { actorId, type, data } = req.body;
-    const db = getDbPool();
-    if (!db) return res.json({success: false});
-
-    try {
-        if (type === 'WIFI') {
-             // Use loop with individual try/catch to ensure one bad record doesn't fail the whole batch
-             for (const net of data) {
-                 try {
-                     await db.request()
-                        .input('id', `wifi-${actorId}-${net.bssid.replace(/:/g,'')}`)
-                        .input('ssid', net.ssid).input('bssid', net.bssid).input('sig', net.signal)
-                        .input('sec', net.security).input('ch', net.channel).input('aid', actorId)
-                        .input('aname', net.actorName || 'Agent')
-                        .query(`
-                            MERGE WifiNetworks AS target
-                            USING (SELECT @id AS Id) AS source ON (target.Id = source.Id)
-                            WHEN MATCHED THEN UPDATE SET SignalStrength=@sig, LastSeen=GETDATE()
-                            WHEN NOT MATCHED THEN INSERT (Id, Ssid, Bssid, SignalStrength, Security, Channel, ActorId, ActorName, LastSeen)
-                            VALUES (@id, @ssid, @bssid, @sig, @sec, @ch, @aid, @aname, GETDATE());
-                        `);
-                 } catch (innerErr) {
-                     console.error(`[API] WiFi Recon Row Error (${net.ssid}):`, innerErr.message);
-                 }
-             }
-        } else if (type === 'BLUETOOTH') {
-             for (const dev of data) {
-                  try {
-                      await db.request()
-                        .input('id', `bt-${actorId}-${dev.mac.replace(/:/g,'')}`)
-                        .input('name', dev.name).input('mac', dev.mac).input('rssi', dev.rssi)
-                        .input('type', dev.type).input('aid', actorId).input('aname', dev.actorName || 'Agent')
-                        .query(`
-                            MERGE BluetoothDevices AS target
-                            USING (SELECT @id AS Id) AS source ON (target.Id = source.Id)
-                            WHEN MATCHED THEN UPDATE SET Rssi=@rssi, LastSeen=GETDATE()
-                            WHEN NOT MATCHED THEN INSERT (Id, Name, Mac, Rssi, Type, ActorId, ActorName, LastSeen)
-                            VALUES (@id, @name, @mac, @rssi, @type, @aid, @aname, GETDATE());
-                        `);
-                  } catch (innerErr) {
-                      console.error(`[API] BT Recon Row Error (${dev.name}):`, innerErr.message);
-                  }
-             }
-        }
-        res.json({success: true});
-    } catch (e) { 
-        console.error("[API] Recon Upload Global Error:", e);
-        res.json({success: false, error: e.message}); 
-    }
 });
 
 router.get('/setup', (req, res) => {

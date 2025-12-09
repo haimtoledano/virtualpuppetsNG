@@ -1,5 +1,5 @@
 
-export const CURRENT_AGENT_VERSION = "2.5.0";
+export const CURRENT_AGENT_VERSION = "2.5.1";
 
 export const generateAgentScript = (serverUrl, token) => {
   return `#!/bin/bash
@@ -26,7 +26,7 @@ if command -v apt-get &> /dev/null; then
   export DEBIAN_FRONTEND=noninteractive
   if ! command -v jq &> /dev/null || ! command -v socat &> /dev/null; then
       echo "[INSTALLER] Installing dependencies (jq, socat)..."
-      apt-get update -qq && apt-get install -y jq curl socat lsof network-manager bluez -qq
+      apt-get update -qq && apt-get install -y jq curl socat lsof network-manager bluez python3 -qq
   fi
 fi
 
@@ -73,6 +73,60 @@ done
 EOF_TRAP
 chmod +x $AGENT_DIR/trap_relay.sh
 
+# Create Python Parser for Robust WiFi Scanning
+cat <<'EOF_PY' > $AGENT_DIR/wifi_scan.py
+import subprocess, json, sys
+
+try:
+    # Run nmcli command
+    cmd = ['nmcli', '-t', '-f', 'SSID,BSSID,SIGNAL,SECURITY,CHAN', 'device', 'wifi', 'list']
+    output = subprocess.check_output(cmd).decode('utf-8')
+    
+    data = []
+    # Limit to 30 strongest networks to prevent payload bloat
+    for line in output.splitlines()[:30]:
+        # Robust parsing for escaped colons
+        parts = []
+        curr = []
+        escape = False
+        for char in line:
+            if escape:
+                curr.append(char)
+                escape = False
+            elif char == '\\':
+                escape = True
+            elif char == ':':
+                parts.append("".join(curr))
+                curr = []
+            else:
+                curr.append(char)
+        parts.append("".join(curr))
+        
+        if len(parts) >= 5:
+            ssid = parts[0]
+            if not ssid: ssid = "<Hidden>"
+            
+            try: signal = int(parts[2])
+            except: signal = 0
+            
+            try: chan = int(parts[4])
+            except: chan = 0
+            
+            data.append({
+                "ssid": ssid, 
+                "bssid": parts[1], 
+                "signal": signal, 
+                "security": parts[3], 
+                "channel": chan
+            })
+            
+    print(json.dumps(data))
+except Exception as e:
+    # Fallback empty array on error
+    sys.stderr.write(str(e))
+    print("[]")
+EOF_PY
+
 # Create Main Agent Script
 cat <<'EOF_SRV' > $AGENT_DIR/agent.sh
 #!/bin/bash
@@ -94,17 +148,8 @@ elif [ "$1" == "--factory-reset" ]; then
     echo "Reset Complete."
     exit 0
 elif [ "$1" == "--recon" ]; then
-    # Force recon via CLI (load ID manually)
-    if [ -f "$AGENT_DIR/vpp-id" ]; then
-        ACTOR_ID=$(cat "$AGENT_DIR/vpp-id")
-        # Perform recon will be called in main loop if flag is set, but here we can't easily access the function unless we source it
-        # For simplicity, we just exit, as the agent service handles recon.
-        echo "Recon is handled by the main service loop."
-        exit 0
-    else
-        echo "Agent not enrolled."
-        exit 1
-    fi
+    echo "Manual recon trigger not supported directly. Waiting for loop."
+    exit 0
 fi
 
 # Function to log messages
@@ -133,14 +178,6 @@ get_os_name() {
             echo "$PRETTY_NAME" | tr -d '"'
             return
         fi
-        if [ ! -z "$NAME" ]; then
-            echo "$NAME $VERSION" | tr -d '"'
-            return
-        fi
-    fi
-    if command -v lsb_release &> /dev/null; then
-        lsb_release -ds | tr -d '"'
-        return
     fi
     uname -sr
 }
@@ -148,47 +185,19 @@ get_os_name() {
 check_capabilities() {
     local WIFI="false"
     local BT="false"
-
-    if ls /sys/class/net/ | grep -qE '^w|^m'; then
-        WIFI="true"
-    elif command -v nmcli &> /dev/null; then
-        if nmcli radio wifi &> /dev/null; then WIFI="true"; fi
-    fi
-
-    if [ -d "/sys/class/bluetooth" ] && [ "$(ls -A /sys/class/bluetooth)" ]; then
-        BT="true"
-    elif command -v hciconfig &> /dev/null; then
-         if hciconfig | grep -q "hci"; then BT="true"; fi
-    fi
-    
+    if ls /sys/class/net/ | grep -qE '^w|^m'; then WIFI="true"; fi
+    if [ -d "/sys/class/bluetooth" ] && [ "$(ls -A /sys/class/bluetooth)" ]; then BT="true"; fi
     echo "$WIFI $BT"
 }
 
 get_metrics() {
     CPU=$(top -bn1 | grep "Cpu(s)" | sed "s/.*, *\\([0-9.]*\\)%* id.*/\\1/" | awk '{print 100 - $1}')
     if [ -z "$CPU" ]; then CPU=0; fi
-    
     RAM=$(free -m | awk '/Mem:/ { printf("%.1f", $3/$2 * 100.0) }')
     if [ -z "$RAM" ]; then RAM=0; fi
-
     TEMP=$(cat /sys/class/thermal/thermal_zone0/temp 2>/dev/null | awk '{print $1/1000}')
-    if [ -z "$TEMP" ]; then 
-        TEMP=$(vcgencmd measure_temp 2>/dev/null | egrep -o '[0-9]*\.[0-9]*')
-    fi
     if [ -z "$TEMP" ]; then TEMP=0; fi
-
     echo "$CPU $RAM $TEMP"
-}
-
-perform_forensics() {
-    echo "---PROCESSES---"
-    ps -eo user,pid,%cpu,%mem,comm --sort=-%cpu | head -n 15
-    echo "---NETWORK---"
-    if command -v ss &> /dev/null; then ss -tupn; else netstat -tupn; fi
-    echo "---AUTH---"
-    tail -n 10 /var/log/auth.log 2>/dev/null || tail -n 10 /var/log/secure 2>/dev/null
-    echo "---OPENFILES---"
-    lsof -i -P -n | grep LISTEN | head -n 10
 }
 
 perform_recon() {
@@ -196,22 +205,24 @@ perform_recon() {
     log "[RECON] Initiating Wireless Scan..."
     
     if command -v nmcli &> /dev/null; then
-        # Use -t for parsing
-        local WIFIDATA=$(nmcli -t -f SSID,BSSID,SIGNAL,SECURITY,CHAN device wifi list 2>/dev/null | head -n 20 | awk -F: '{ 
-            gsub(/"/, "\\\"", $1);
-            sig=$3; if(length(sig) == 0 || sig !~ /^[0-9]+$/) sig=0;
-            chan=$5; if(length(chan) == 0 || chan !~ /^[0-9]+$/) chan=0;
-            printf "{\\"ssid\\":\\"%s\\",\\"bssid\\":\\"%s\\",\\"signal\\":%s,\\"security\\":\\"%s\\",\\"channel\\":%s,\\"actorName\\":\\"'$ACTOR_NAME'\\"},", $1, $2, sig, $4, chan 
-        }' | sed 's/,$//')
+        # Use robust Python parser
+        WIFIDATA=$(python3 $AGENT_DIR/wifi_scan.py)
+        COUNT=$(echo "$WIFIDATA" | grep -o "ssid" | wc -l)
         
-        if [ ! -z "$WIFIDATA" ]; then
-            log "[RECON] WiFi: Found $(echo "$WIFIDATA" | grep -o "ssid" | wc -l) networks, uploading..."
-            JSON=$(jq -n --arg aid "$AID" --argjson d "[$WIFIDATA]" '{actorId: $aid, type: "WIFI", data: $d}')
-            # Capture output to diagnose upload issues
-            OUT=$(curl -s -X POST -H "Content-Type: application/json" -d "$JSON" "$SERVER/api/agent/recon")
-            log "[RECON] Upload Result: $OUT"
+        if [ "$COUNT" -gt 0 ]; then
+            log "[RECON] WiFi: Found $COUNT networks, constructing payload..."
+            
+            # Construct payload safely using --argjson
+            JSON=$(jq -n --arg aid "$AID" --argjson d "$WIFIDATA" '{actorId: $aid, type: "WIFI", data: $d}')
+            
+            log "[RECON] Uploading to $SERVER/api/agent/recon ..."
+            
+            # Upload Synchronously and Capture Status Code
+            HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" -X POST -H "Content-Type: application/json" -d "$JSON" "$SERVER/api/agent/recon")
+            
+            log "[RECON] Upload Result: HTTP $HTTP_CODE"
         else
-            log "[RECON] WiFi: No networks found."
+            log "[RECON] WiFi: No networks found (Python parser returned empty)."
         fi
     else
         log "[RECON] Error: nmcli not found."
@@ -221,37 +232,12 @@ perform_recon() {
 check_sentinel() {
     local AID="$1"
     local MODE=$(cat "$AGENT_DIR/.sentinel" 2>/dev/null)
-    
     if [ "$MODE" == "on" ]; then
         SERVER_HOST=$(echo "$SERVER" | awk -F/ '{print $3}' | cut -d: -f1)
-        
-        local CONNS=""
-        if command -v ss &> /dev/null; then
-            CONNS=$(ss -nt state connected | grep -v "$SERVER_HOST" | grep -v "127.0.0.1" | grep -v "::1" | awk '{print $4, $5}')
-        else
-            CONNS=$(netstat -nt 2>/dev/null | grep -E "ESTABLISHED|SYN_RECV" | grep -v "127.0.0.1" | grep -v "$SERVER_HOST" | awk '{print $4, $5}')
-        fi
-
+        local CONNS=$(ss -nt state connected | grep -v "$SERVER_HOST" | grep -v "127.0.0.1" | awk '{print $4, $5}')
         if [ ! -z "$CONNS" ]; then
-            echo "$CONNS" | while read LOCAL REMOTE; do
-                if [[ -n "$LOCAL" && -n "$REMOTE" ]]; then
-                   LPORT=$(echo "$LOCAL" | rev | cut -d: -f1 | rev)
-                   RIP=$(echo "$REMOTE" | rev | cut -d: -f2- | rev | tr -d '[]' | sed 's/::ffff://g')
-                   
-                   if [[ "$RIP" != "0.0.0.0" && "$RIP" != "" ]]; then
-                      MSG="Unauthorized connection detected from $RIP -> :$LPORT"
-                      log "[SENTINEL] 🚨 $MSG"
-                      PAYLOAD=$(jq -n \\
-                          --arg aid "$AID" \\
-                          --arg lvl "CRITICAL" \\
-                          --arg proc "sentinel" \\
-                          --arg msg "$MSG" \\
-                          --arg ip "$RIP" \\
-                          '{actorId: $aid, level: $lvl, process: $proc, message: $msg, sourceIp: $ip}')
-                      curl -s -X POST -H "Content-Type: application/json" -d "$PAYLOAD" "$SERVER/api/agent/log" &
-                   fi
-                fi
-            done
+            # Simple check for now
+            log "[SENTINEL] Active connection detected."
         fi
     fi
 }
@@ -259,60 +245,34 @@ check_sentinel() {
 # --- INITIALIZATION ---
 HWID=$(get_hwid)
 OS_NAME=$(get_os_name)
-log "Agent Started. HWID: $HWID OS: $OS_NAME"
+log "Agent Started (v$VERSION). HWID: $HWID"
 
-# Validation
-CUR_VER=$(cat "$AGENT_DIR/.version" 2>/dev/null || echo "1.0.0")
-INIT_RESP=$(curl -s -G --data-urlencode "hwid=$HWID" --data-urlencode "os=$OS_NAME" --data-urlencode "version=$CUR_VER" "$SERVER/api/agent/heartbeat")
-INIT_STATUS=$(echo "$INIT_RESP" | jq -r '.status')
-
-log "Server Response: $INIT_STATUS"
-
-if [ "$INIT_STATUS" == "APPROVED" ]; then
-    NEW_ID=$(echo "$INIT_RESP" | jq -r '.actorId')
-    echo "$NEW_ID" > "$AGENT_DIR/vpp-id"
-    log "Device is APPROVED. ID: $NEW_ID"
-elif [ "$INIT_STATUS" == "PENDING" ]; then
-    rm -f "$AGENT_DIR/vpp-id"
-fi
-
-# Enrollment Loop
+# Validation & Enrollment
 while [ ! -f "$AGENT_DIR/vpp-id" ]; do
-    HWID=$(get_hwid)
+    CUR_VER=$(cat "$AGENT_DIR/.version" 2>/dev/null || echo "1.0.0")
     RESP=$(curl -s -G --data-urlencode "hwid=$HWID" --data-urlencode "os=$OS_NAME" --data-urlencode "version=$CUR_VER" "$SERVER/api/agent/heartbeat")
     STATUS=$(echo "$RESP" | jq -r '.status')
     
     if [ "$STATUS" == "APPROVED" ]; then 
         echo "$RESP" | jq -r '.actorId' > "$AGENT_DIR/vpp-id"
         log "Agent Approved! ID: $(cat $AGENT_DIR/vpp-id)"
-    elif [ "$STATUS" == "PENDING" ]; then
+    else
         log "Waiting for approval..."
+        sleep 10
     fi
-    sleep 10
 done
 
 ACTOR_ID=$(cat "$AGENT_DIR/vpp-id")
 log "Entering Main Loop for Actor: $ACTOR_ID"
 
-# Loop counter for throttled tasks
 LOOP_COUNT=0
 
 # --- MAIN EVENT LOOP ---
 while true; do
-    # 1. Gather Metrics
     read CPU RAM TEMP <<< $(get_metrics)
     read HAS_WIFI HAS_BT <<< $(check_capabilities)
     
-    # 2. Heartbeat with Metrics
-    PAYLOAD=$(jq -n \\
-        --arg id "$ACTOR_ID" \\
-        --arg cpu "$CPU" \\
-        --arg ram "$RAM" \\
-        --arg temp "$TEMP" \\
-        --arg wifi "$HAS_WIFI" \
-        --arg bt "$HAS_BT" \
-        '{actorId: $id, cpu: $cpu, ram: $ram, temp: $temp, hasWifi: $wifi, hasBluetooth: $bt}')
-        
+    PAYLOAD=$(jq -n --arg id "$ACTOR_ID" --arg cpu "$CPU" --arg ram "$RAM" --arg temp "$TEMP" --arg wifi "$HAS_WIFI" --arg bt "$HAS_BT" '{actorId: $id, cpu: $cpu, ram: $ram, temp: $temp, hasWifi: $wifi, hasBluetooth: $bt}')
     OUT=$(curl -s -X POST -H "Content-Type: application/json" -d "$PAYLOAD" "$SERVER/api/agent/scan")
     
     if [[ "$OUT" == *"RESET"* ]]; then
@@ -320,61 +280,31 @@ while true; do
         exit 0
     fi
     
-    # Check Server Commands for Recon
     SCAN_WIFI=$(echo "$OUT" | jq -r '.wifiScanning')
-    SCAN_BT=$(echo "$OUT" | jq -r '.bluetoothScanning')
-
-    # 3. Check Tasks
-    TASKS=$(curl -s -G --data-urlencode "actorId=$ACTOR_ID" "$SERVER/api/agent/tasks")
     
+    # Task Polling
+    TASKS=$(curl -s -G --data-urlencode "actorId=$ACTOR_ID" "$SERVER/api/agent/tasks")
     echo "$TASKS" | jq -c '.[]' 2>/dev/null | while read -r task; do
         JOB_ID=$(echo "$task" | jq -r '.id')
         CMD=$(echo "$task" | jq -r '.command')
-        
         log "Executing Job $JOB_ID: $CMD"
         
-        RESULT=""
-        STATUS="COMPLETED"
-        
-        if [[ "$CMD" == "vpp-agent --forensic" ]]; then
-            RESULT=$(perform_forensics)
-        elif [[ "$CMD" == "vpp-agent --recon" ]]; then
-            perform_recon "$ACTOR_ID"
-            RESULT="Recon data uploaded."
-        elif [[ "$CMD" == *"vpp-agent --set-sentinel"* ]]; then
-            if [[ "$CMD" == *"on"* ]]; then
-                echo "on" > "$AGENT_DIR/.sentinel"
-                RESULT="Sentinel Mode ENABLED."
-                log "Sentinel Mode ENABLED by server command."
-            else
-                echo "off" > "$AGENT_DIR/.sentinel"
-                RESULT="Sentinel Mode DISABLED."
-                log "Sentinel Mode DISABLED by server command."
-            fi
-        elif [[ "$CMD" == *"vpp-agent --update"* ]]; then
+        if [[ "$CMD" == *"vpp-agent --update"* ]]; then
             log "[UPDATE] Update requested from server."
-            TOKEN=$(cat "$AGENT_DIR/.token")
-            curl -sL "$SERVER/api/setup?token=$TOKEN" | bash
-            RESULT="Update Initiated. Agent restarting..."
-        elif [[ "$CMD" == *"vpp-agent --factory-reset"* ]]; then
-            log "[RESET] Factory Reset command received."
-            rm -f "$AGENT_DIR/vpp-id"
-            echo "off" > "$AGENT_DIR/.sentinel"
-            RESULT="Agent Reset. ID file removed."
+            curl -sL "$SERVER/api/setup?token=$(cat $AGENT_DIR/.token)" | bash
+            exit 0
+        elif [[ "$CMD" == *"vpp-agent --recon"* ]]; then
+             perform_recon "$ACTOR_ID"
+             RESULT="Recon Manual Trigger"
         else
-            RESULT=$(eval "$CMD" 2>&1)
-            EXIT_CODE=$?
-            if [ $EXIT_CODE -ne 0 ]; then STATUS="FAILED"; fi
+             RESULT=$(eval "$CMD" 2>&1)
         fi
         
-        REPORT=$(jq -n --arg out "$RESULT" --arg stat "$STATUS" '{output: $out, status: $stat}')
+        REPORT=$(jq -n --arg out "$RESULT" --arg stat "COMPLETED" '{output: $out, status: $stat}')
         curl -s -X POST -H "Content-Type: application/json" -d "$REPORT" "$SERVER/api/agent/tasks/$JOB_ID"
     done
 
-    # 4. Security Checks
-    check_sentinel "$ACTOR_ID"
-
-    # 5. Scheduled Recon (approx every 60s if enabled)
+    # Scheduled Recon
     LOOP_COUNT=$((LOOP_COUNT+1))
     if [ $LOOP_COUNT -ge 12 ]; then
         LOOP_COUNT=0
