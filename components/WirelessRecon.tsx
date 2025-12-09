@@ -67,12 +67,13 @@ const WirelessRecon: React.FC<WirelessReconProps> = ({ isProduction, actors }) =
 
     // React to Actors loading (Race Condition Fix)
     useEffect(() => {
-        if (actors.length > 0 && prevActorsLen.current === 0) {
-            // Actors just loaded, force data generation if empty
-            loadData(true);
+        if (actors.length > 0) {
+            // If we have actors but no data, likely a race condition occurred. Force load.
+            if ((activeTab === 'WIFI' && wifiList.length === 0) || (activeTab === 'BLUETOOTH' && btList.length === 0)) {
+                loadData(true);
+            }
         }
-        prevActorsLen.current = actors.length;
-    }, [actors]);
+    }, [actors, activeTab]);
 
     const getSignalColor = (dbm: number) => {
         if (dbm > -50) return 'text-emerald-400';

