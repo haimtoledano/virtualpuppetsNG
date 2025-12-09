@@ -260,7 +260,8 @@ router.put('/actors/:id/scanning', async (req, res) => {
 // --- COMMAND QUEUE ---
 router.post('/commands/queue', async (req, res) => {
     const db = getDbPool(); if(!db) return res.json({jobId: null});
-    const jobId = `job-${Date.now()}`;
+    // Fix: Add random suffix to JobId to prevent collisions on parallel inserts (like fleet updates)
+    const jobId = `job-${Date.now()}-${Math.random().toString(36).substr(2,6)}`;
     await db.request().input('jid', jobId).input('aid', req.body.actorId).input('cmd', req.body.command).query("INSERT INTO CommandQueue (JobId, ActorId, Command, Status, CreatedAt) VALUES (@jid, @aid, @cmd, 'PENDING', GETDATE())");
     res.json({jobId});
 });
