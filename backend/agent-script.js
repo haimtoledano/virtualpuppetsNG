@@ -1,5 +1,5 @@
 
-export const CURRENT_AGENT_VERSION = "2.3.3";
+export const CURRENT_AGENT_VERSION = "2.3.4";
 
 export const generateAgentScript = (serverUrl, token) => {
   return `#!/bin/bash
@@ -163,33 +163,31 @@ check_sentinel() {
     local MODE=$(cat "$AGENT_DIR/.sentinel" 2>/dev/null)
     
     if [ "$MODE" == "on" ]; then
-        # Filter out localhost and the C2 server itself to avoid feedback loops
         SERVER_HOST=$(echo "$SERVER" | awk -F/ '{print $3}' | cut -d: -f1)
         
         local CONNS=""
         if command -v ss &> /dev/null; then
-            # Using ss -nt and grep ESTAB to ensure consistent 5-column output: State, Recv-Q, Send-Q, Local, Peer
-            # Col 4 = Local, Col 5 = Peer
-            CONNS=$(ss -nt | grep "ESTAB" | grep -v "127.0.0.1" | grep -v "::1" | grep -v "$SERVER_HOST" | awk '{print $4, $5}')
+            # -n: numeric, -t: tcp
+            # state connected: includes ESTAB, SYN-SENT, SYN-RECV, FIN-WAIT, etc.
+            # We filter out header lines and loopback/server traffic
+            CONNS=$(ss -nt state connected | grep -v "^State" | grep -v "Recv-Q" | grep -v "127.0.0.1" | grep -v "::1" | grep -v "$SERVER_HOST" | awk '{print $4, $5}')
         else
-            CONNS=$(netstat -nt 2>/dev/null | grep "ESTABLISHED" | grep -v "127.0.0.1" | grep -v "$SERVER_HOST" | awk '{print $4, $5}')
+            CONNS=$(netstat -nt 2>/dev/null | grep -E "ESTABLISHED|SYN_RECV" | grep -v "127.0.0.1" | grep -v "$SERVER_HOST" | awk '{print $4, $5}')
         fi
 
         if [ ! -z "$CONNS" ]; then
             echo "$CONNS" | while read LOCAL REMOTE; do
                 if [[ -n "$LOCAL" && -n "$REMOTE" ]]; then
-                   # Extract LPORT (Destination Port)
+                   # Extract LPORT
                    LPORT=$(echo "$LOCAL" | rev | cut -d: -f1 | rev)
                    # Extract RIP (Source IP)
-                   RIP=$(echo "$REMOTE" | rev | cut -d: -f2- | rev | sed 's/\\[//g' | sed 's/\\]//g')
+                   RIP=$(echo "$REMOTE" | rev | cut -d: -f2- | rev | tr -d '[]' | sed 's/::ffff://g')
                    
                    if [[ "$RIP" != "0.0.0.0" && "$RIP" != "" ]]; then
                       MSG="Unauthorized connection detected from $RIP -> :$LPORT"
                       
-                      # LOG LOCAL
                       log "[SENTINEL] 🚨 $MSG"
                       
-                      # SEND ALERT
                       PAYLOAD=$(jq -n \\
                           --arg aid "$AID" \\
                           --arg lvl "CRITICAL" \\
@@ -197,7 +195,9 @@ check_sentinel() {
                           --arg msg "$MSG" \\
                           --arg ip "$RIP" \\
                           '{actorId: $aid, level: $lvl, process: $proc, message: $msg, sourceIp: $ip}')
-                      curl -s -X POST -H "Content-Type: application/json" -d "$PAYLOAD" "$SERVER/api/agent/log"
+                      
+                      # Async curl to avoid blocking the loop
+                      curl -s -X POST -H "Content-Type: application/json" -d "$PAYLOAD" "$SERVER/api/agent/log" &
                    fi
                 fi
             done
