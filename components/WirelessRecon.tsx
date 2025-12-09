@@ -1,9 +1,9 @@
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { WifiNetwork, BluetoothDevice, Actor } from '../types';
 import { getWifiNetworks, getBluetoothDevices } from '../services/dbService';
 import { generateMockWifi, generateMockBluetooth } from '../services/mockService';
-import { Wifi, Bluetooth, Search, Lock, Monitor, Radio, RefreshCw } from 'lucide-react';
+import { Wifi, Bluetooth, Search, Lock, Monitor, Radio, RefreshCw, AlertTriangle } from 'lucide-react';
 
 interface WirelessReconProps {
     isProduction: boolean;
@@ -16,41 +16,63 @@ const WirelessRecon: React.FC<WirelessReconProps> = ({ isProduction, actors }) =
     const [btList, setBtList] = useState<BluetoothDevice[]>([]);
     const [search, setSearch] = useState('');
     const [isLoading, setIsLoading] = useState(false);
+    const [lastFetchError, setLastFetchError] = useState(false);
+
+    // Track previous actors length to detect initialization
+    const prevActorsLen = useRef(0);
 
     const loadData = async (force = false) => {
         setIsLoading(true);
-        if (isProduction) {
-            if (activeTab === 'WIFI') {
-                const data = await getWifiNetworks();
-                setWifiList(data);
-            } else {
-                const data = await getBluetoothDevices();
-                setBtList(data);
-            }
-        } else {
-            // Mock Mode
-            // Only generate if list is empty OR force refresh is requested
-            if (activeTab === 'WIFI') {
-                if(wifiList.length === 0 || force) {
-                    const mockData = generateMockWifi(actors);
-                    if (mockData.length > 0) setWifiList(mockData);
+        setLastFetchError(false);
+        try {
+            if (isProduction) {
+                if (activeTab === 'WIFI') {
+                    const data = await getWifiNetworks();
+                    if (data.length === 0 && !force) {
+                         // potential connection issue or just empty
+                    }
+                    setWifiList(data);
+                } else {
+                    const data = await getBluetoothDevices();
+                    setBtList(data);
                 }
             } else {
-                if(btList.length === 0 || force) {
-                    const mockData = generateMockBluetooth(actors);
-                    if (mockData.length > 0) setBtList(mockData);
+                // Mock Mode
+                // Generate if list is empty OR force refresh is requested
+                // Also ensure we have actors to generate from
+                if (activeTab === 'WIFI') {
+                    if(wifiList.length === 0 || force) {
+                        const mockData = generateMockWifi(actors);
+                        if (mockData.length > 0) setWifiList(mockData);
+                    }
+                } else {
+                    if(btList.length === 0 || force) {
+                        const mockData = generateMockBluetooth(actors);
+                        if (mockData.length > 0) setBtList(mockData);
+                    }
                 }
             }
+        } catch (e) {
+            setLastFetchError(true);
         }
         setIsLoading(false);
     };
 
-    // Add actors to dependency to ensure we attempt generation once actors are loaded from parent
+    // Auto-refresh and Init
     useEffect(() => {
         loadData();
         const interval = setInterval(() => loadData(), 15000); // Auto refresh every 15s
         return () => clearInterval(interval);
-    }, [activeTab, isProduction, actors]);
+    }, [activeTab, isProduction]);
+
+    // React to Actors loading (Race Condition Fix)
+    useEffect(() => {
+        if (actors.length > 0 && prevActorsLen.current === 0) {
+            // Actors just loaded, force data generation if empty
+            loadData(true);
+        }
+        prevActorsLen.current = actors.length;
+    }, [actors]);
 
     const getSignalColor = (dbm: number) => {
         if (dbm > -50) return 'text-emerald-400';
@@ -141,6 +163,17 @@ const WirelessRecon: React.FC<WirelessReconProps> = ({ isProduction, actors }) =
                     </button>
                 </div>
             </div>
+
+            {/* Production Error Warning */}
+            {isProduction && (wifiList.length === 0 && btList.length === 0) && (
+                <div className="bg-yellow-500/10 border border-yellow-500/30 p-4 rounded-lg flex items-center text-yellow-200 text-sm">
+                    <AlertTriangle className="w-5 h-5 mr-3 text-yellow-500" />
+                    <div>
+                        <span className="font-bold">No Data Available.</span> If scanning is enabled, ensure Agents are online and VPP-Server is reachable.
+                        <br/><span className="text-xs opacity-70">Check /var/log/vpp-agent.log on devices for upload errors.</span>
+                    </div>
+                </div>
+            )}
 
             {/* Data Grid */}
             <div className="bg-slate-800 rounded-xl border border-slate-700 overflow-hidden shadow-lg">
@@ -234,4 +267,3 @@ const WirelessRecon: React.FC<WirelessReconProps> = ({ isProduction, actors }) =
 };
 
 export default WirelessRecon;
-    
