@@ -464,7 +464,7 @@ router.get('/agent/heartbeat', async (req, res) => {
 });
 
 router.post('/agent/scan', async (req, res) => {
-    const { actorId, cpu, ram, temp } = req.body;
+    const { actorId, cpu, ram, temp, hasWifi, hasBluetooth } = req.body;
     if(actorId) {
         const db = getDbPool();
         if(db) {
@@ -473,7 +473,9 @@ router.post('/agent/scan', async (req, res) => {
                 .input('cpu', sql.Float, parseFloat(cpu) || 0)
                 .input('ram', sql.Float, parseFloat(ram) || 0)
                 .input('temp', sql.Float, parseFloat(temp) || 0)
-                .query("UPDATE Actors SET LastSeen=GETDATE(), CpuLoad=@cpu, MemoryUsage=@ram, Temperature=@temp WHERE ActorId=@aid");
+                .input('wifi', sql.Bit, hasWifi === 'true' ? 1 : 0)
+                .input('bt', sql.Bit, hasBluetooth === 'true' ? 1 : 0)
+                .query("UPDATE Actors SET LastSeen=GETDATE(), CpuLoad=@cpu, MemoryUsage=@ram, Temperature=@temp, HasWifi=@wifi, HasBluetooth=@bt WHERE ActorId=@aid");
         }
     }
     res.json({status: 'ok'});

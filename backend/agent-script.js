@@ -82,6 +82,19 @@ SERVER=$(cat "$AGENT_DIR/.server")
 LOG_FILE="/var/log/vpp-agent.log"
 ACTOR_NAME="Agent"
 
+# Handle CLI arguments
+if [ "$1" == "--update" ]; then
+    echo "[VPP-AGENT] Triggering Self-Update..."
+    curl -sL "$SERVER/api/setup?token=$(cat $AGENT_DIR/.token)" | bash
+    exit 0
+elif [ "$1" == "--factory-reset" ]; then
+    echo "[VPP-AGENT] Factory Reset Initiated..."
+    rm -f "$AGENT_DIR/vpp-id"
+    echo "off" > "$AGENT_DIR/.sentinel"
+    echo "Reset Complete."
+    exit 0
+fi
+
 # Function to log messages
 log() {
     echo "[$(date)] $1" >> $LOG_FILE
@@ -118,6 +131,28 @@ get_os_name() {
         return
     fi
     uname -sr
+}
+
+check_capabilities() {
+    local WIFI="false"
+    local BT="false"
+
+    # Check for WiFi interfaces (wlan0, mlan0, etc)
+    if ls /sys/class/net/ | grep -qE '^w|^m'; then
+        WIFI="true"
+    elif command -v nmcli &> /dev/null; then
+        # Fallback to nmcli
+        if nmcli radio wifi &> /dev/null; then WIFI="true"; fi
+    fi
+
+    # Check for Bluetooth
+    if [ -d "/sys/class/bluetooth" ] && [ "$(ls -A /sys/class/bluetooth)" ]; then
+        BT="true"
+    elif command -v hciconfig &> /dev/null; then
+         if hciconfig | grep -q "hci"; then BT="true"; fi
+    fi
+    
+    echo "$WIFI $BT"
 }
 
 get_metrics() {
@@ -169,8 +204,7 @@ check_sentinel() {
         if command -v ss &> /dev/null; then
             # -n: numeric, -t: tcp
             # state connected: includes ESTAB, SYN-SENT, SYN-RECV, FIN-WAIT, etc.
-            # We filter out header lines and loopback/server traffic
-            CONNS=$(ss -nt state connected | grep -v "^State" | grep -v "Recv-Q" | grep -v "127.0.0.1" | grep -v "::1" | grep -v "$SERVER_HOST" | awk '{print $4, $5}')
+            CONNS=$(ss -nt state connected | grep -v "$SERVER_HOST" | grep -v "127.0.0.1" | grep -v "::1" | awk '{print $4, $5}')
         else
             CONNS=$(netstat -nt 2>/dev/null | grep -E "ESTABLISHED|SYN_RECV" | grep -v "127.0.0.1" | grep -v "$SERVER_HOST" | awk '{print $4, $5}')
         fi
@@ -180,7 +214,7 @@ check_sentinel() {
                 if [[ -n "$LOCAL" && -n "$REMOTE" ]]; then
                    # Extract LPORT
                    LPORT=$(echo "$LOCAL" | rev | cut -d: -f1 | rev)
-                   # Extract RIP (Source IP)
+                   # Extract RIP (Source IP) - Handle IPv6 brackets and ::ffff:
                    RIP=$(echo "$REMOTE" | rev | cut -d: -f2- | rev | tr -d '[]' | sed 's/::ffff://g')
                    
                    if [[ "$RIP" != "0.0.0.0" && "$RIP" != "" ]]; then
@@ -247,6 +281,7 @@ log "Entering Main Loop for Actor: $ACTOR_ID"
 while true; do
     # 1. Gather Metrics
     read CPU RAM TEMP <<< $(get_metrics)
+    read HAS_WIFI HAS_BT <<< $(check_capabilities)
     
     # 2. Heartbeat with Metrics
     PAYLOAD=$(jq -n \\
@@ -254,7 +289,9 @@ while true; do
         --arg cpu "$CPU" \\
         --arg ram "$RAM" \\
         --arg temp "$TEMP" \\
-        '{actorId: $id, cpu: $cpu, ram: $ram, temp: $temp}')
+        --arg wifi "$HAS_WIFI" \
+        --arg bt "$HAS_BT" \
+        '{actorId: $id, cpu: $cpu, ram: $ram, temp: $temp, hasWifi: $wifi, hasBluetooth: $bt}')
         
     OUT=$(curl -s -X POST -H "Content-Type: application/json" -d "$PAYLOAD" "$SERVER/api/agent/scan")
     
