@@ -1,6 +1,8 @@
 
 
 
+
+
 import React, { useState, useEffect, useCallback, Suspense } from 'react';
 import { generateInitialActors, generateRandomLog, generateGateways } from './services/mockService';
 import { dbQuery, getSystemConfig, getPendingActors, approvePendingActor, rejectPendingActor, getSystemLogs, sendAuditLog, triggerFleetUpdate } from './services/dbService';
@@ -166,7 +168,7 @@ const App: React.FC = () => {
       if (!isProduction) {
            const pending = pendingActors.find(p => p.id === pendingId);
            if (!pending) return;
-           const newActor: Actor = { id: `real-${Math.random().toString(36).substr(2,6)}`, proxyId: proxyId, name: name, localIp: pending.detectedIp, status: ActorStatus.ONLINE, lastSeen: new Date(), osVersion: 'Raspbian', cpuLoad: 5, memoryUsage: 15, activeTools: ['vpp-agent'], protocolVersion: 'VPP-1.2.1', activeTunnels: [] };
+           const newActor: Actor = { id: `real-${Math.random().toString(36).substr(2,6)}`, proxyId: proxyId, name: name, localIp: pending.detectedIp, status: ActorStatus.ONLINE, lastSeen: new Date(), osVersion: 'Raspbian', cpuLoad: 5, memoryUsage: 15, activeTools: ['vpp-agent'], agentVersion: '2.5.0', activeTunnels: [] };
            setActors([...actors, newActor]);
            setPendingActors(prev => prev.filter(p => p.id !== pendingId));
            if (activeTab !== 'dashboard') setActiveTab('actors');
@@ -332,7 +334,7 @@ const App: React.FC = () => {
                                     <span>Latest Stable: <span className="text-white font-mono">v2.5.0</span></span>
                                 </div>
                                 <div className="flex items-center text-xs text-slate-400">
-                                    <span className="mr-3">{actors.filter(a => a.protocolVersion !== 'VPP-2.5').length} agents outdated</span>
+                                    <span className="mr-3">{actors.filter(a => a.agentVersion !== '2.5.0').length} agents outdated</span>
                                     {actors.length > 0 && <span className="bg-emerald-500/20 text-emerald-400 px-2 py-0.5 rounded">System Healthy</span>}
                                 </div>
                             </div>
@@ -342,8 +344,8 @@ const App: React.FC = () => {
                                     <div key={actor.id} onClick={() => setSelectedActorId(actor.id)} className={`cursor-pointer bg-slate-800 p-6 rounded-xl border hover:border-blue-500 transition-all shadow-lg ${actor.status === 'COMPROMISED' ? 'border-red-500 shadow-red-500/20' : 'border-slate-700'}`}>
                                         <div className="flex justify-between items-start mb-2">
                                             <h3 className="text-lg font-bold text-slate-200">{actor.name}</h3>
-                                            <span className={`text-[10px] px-1.5 py-0.5 rounded ${actor.protocolVersion === 'VPP-1.2' ? 'bg-yellow-500/10 text-yellow-500' : 'bg-slate-700 text-slate-400'}`}>
-                                                {actor.protocolVersion || 'v1.0'}
+                                            <span className={`text-[10px] px-1.5 py-0.5 rounded ${actor.agentVersion !== '2.5.0' ? 'bg-yellow-500/10 text-yellow-500' : 'bg-slate-700 text-slate-400'}`}>
+                                                v{actor.agentVersion || '1.0.0'}
                                             </span>
                                         </div>
                                         <p className="text-sm text-slate-500 font-mono mb-4">{actor.localIp}</p>

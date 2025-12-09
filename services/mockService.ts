@@ -5,6 +5,8 @@
 
 
 
+
+
 import { Actor, ActorStatus, LogEntry, LogLevel, ProxyGateway, CloudTrap, ActiveTunnel, PendingActor, ProvisioningStatus, DevicePersona, WifiNetwork, BluetoothDevice, ForensicSnapshot, ForensicProcess, AttackSession } from '../types';
 
 const LOCATIONS = ['Tel Aviv HQ', 'New York Branch', 'London DC', 'Frankfurt AWS'];
@@ -183,7 +185,7 @@ export const generateInitialActors = (gateways: ProxyGateway[]): Actor[] => {
         cpuLoad: Math.floor(Math.random() * 30) + 5,
         memoryUsage: Math.floor(Math.random() * 40) + 20,
         activeTools: ['vpp-agent', 'tcpdump'],
-        protocolVersion: 'VPP-1.2',
+        agentVersion: Math.random() > 0.8 ? '2.4.0' : '2.5.0', // Mix versions to show updates
         activeTunnels: [],
         deployedHoneyFiles: [],
         persona: AVAILABLE_PERSONAS[0],

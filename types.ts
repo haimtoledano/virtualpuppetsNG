@@ -1,4 +1,5 @@
 
+
 export enum ActorStatus {
   ONLINE = 'ONLINE',
   OFFLINE = 'OFFLINE',
@@ -67,7 +68,7 @@ export interface Actor {
   memoryUsage: number;
   temperature?: number; // New field for real device temp
   activeTools: string[]; // e.g., 'tcpdump', 'cowrie'
-  protocolVersion: string; // e.g., 'VPP-1.2'
+  agentVersion: string; // Renamed from protocolVersion to match backend
   deployedHoneyFiles?: HoneyFile[]; // New field for deception
   activeTunnels?: ActiveTunnel[]; // Socat tunnels to cloud
   persona?: DevicePersona; // The active "mask"
