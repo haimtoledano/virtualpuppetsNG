@@ -168,10 +168,11 @@ check_sentinel() {
         
         local CONNS=""
         if command -v ss &> /dev/null; then
-            # Get Local:Port (col 4) and Peer:Port (col 5)
-            CONNS=$(ss -ntH state established | grep -v "127.0.0.1" | grep -v "::1" | grep -v "$SERVER_HOST" | awk '{print $4, $5}')
+            # Using ss -nt and grep ESTAB to ensure consistent 5-column output: State, Recv-Q, Send-Q, Local, Peer
+            # Col 4 = Local, Col 5 = Peer
+            CONNS=$(ss -nt | grep "ESTAB" | grep -v "127.0.0.1" | grep -v "::1" | grep -v "$SERVER_HOST" | awk '{print $4, $5}')
         else
-            CONNS=$(netstat -nt 2>/dev/null | grep ESTABLISHED | grep -v "127.0.0.1" | grep -v "$SERVER_HOST" | awk '{print $4, $5}')
+            CONNS=$(netstat -nt 2>/dev/null | grep "ESTABLISHED" | grep -v "127.0.0.1" | grep -v "$SERVER_HOST" | awk '{print $4, $5}')
         fi
 
         if [ ! -z "$CONNS" ]; then
