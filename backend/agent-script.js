@@ -185,7 +185,18 @@ perform_forensics() {
 perform_recon() {
     local AID="$1"
     if command -v nmcli &> /dev/null; then
-        local WIFIDATA=$(nmcli -t -f SSID,BSSID,SIGNAL,SECURITY,CHAN dev wifi list | head -n 10 | awk -F: '{ printf "{\\"ssid\\":\\"%s\\",\\"bssid\\":\\"%s\\",\\"signal\\":%s,\\"security\\":\\"%s\\",\\"channel\\":%s,\\"actorName\\":\\"'$ACTOR_NAME'\\"},", $1, $2, $3, $4, $5 }' | sed 's/,$//')
+        # Use -t for parsing, but handle potential empty fields or bad numbers
+        local WIFIDATA=$(nmcli -t -f SSID,BSSID,SIGNAL,SECURITY,CHAN device wifi list 2>/dev/null | head -n 20 | awk -F: '{ 
+            # Escape double quotes in SSID
+            gsub(/"/, "\\\"", $1);
+            
+            # Default Signal and Channel to 0 if missing/invalid
+            sig=$3; if(length(sig) == 0 || sig !~ /^[0-9]+$/) sig=0;
+            chan=$5; if(length(chan) == 0 || chan !~ /^[0-9]+$/) chan=0;
+            
+            printf "{\\"ssid\\":\\"%s\\",\\"bssid\\":\\"%s\\",\\"signal\\":%s,\\"security\\":\\"%s\\",\\"channel\\":%s,\\"actorName\\":\\"'$ACTOR_NAME'\\"},", $1, $2, sig, $4, chan 
+        }' | sed 's/,$//')
+        
         if [ ! -z "$WIFIDATA" ]; then
             JSON=$(jq -n --arg aid "$AID" --argjson d "[$WIFIDATA]" '{actorId: $aid, type: "WIFI", data: $d}')
             curl -s -X POST -H "Content-Type: application/json" -d "$JSON" "$SERVER/api/agent/recon"
