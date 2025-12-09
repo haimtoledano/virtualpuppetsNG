@@ -1,13 +1,13 @@
 
 import React, { useState, useEffect } from 'react';
-import { WifiNetwork, BluetoothDevice } from '../types';
+import { WifiNetwork, BluetoothDevice, Actor } from '../types';
 import { getWifiNetworks, getBluetoothDevices } from '../services/dbService';
 import { generateMockWifi, generateMockBluetooth } from '../services/mockService';
 import { Wifi, Bluetooth, Search, Lock, Monitor, Radio, RefreshCw } from 'lucide-react';
 
 interface WirelessReconProps {
     isProduction: boolean;
-    actors: any[]; // Used for mock generation source
+    actors: Actor[]; // Used for mock generation source
 }
 
 const WirelessRecon: React.FC<WirelessReconProps> = ({ isProduction, actors }) => {
@@ -17,7 +17,7 @@ const WirelessRecon: React.FC<WirelessReconProps> = ({ isProduction, actors }) =
     const [search, setSearch] = useState('');
     const [isLoading, setIsLoading] = useState(false);
 
-    const loadData = async () => {
+    const loadData = async (force = false) => {
         setIsLoading(true);
         if (isProduction) {
             if (activeTab === 'WIFI') {
@@ -29,20 +29,28 @@ const WirelessRecon: React.FC<WirelessReconProps> = ({ isProduction, actors }) =
             }
         } else {
             // Mock Mode
+            // Only generate if list is empty OR force refresh is requested
             if (activeTab === 'WIFI') {
-                if(wifiList.length === 0) setWifiList(generateMockWifi(actors));
+                if(wifiList.length === 0 || force) {
+                    const mockData = generateMockWifi(actors);
+                    if (mockData.length > 0) setWifiList(mockData);
+                }
             } else {
-                if(btList.length === 0) setBtList(generateMockBluetooth(actors));
+                if(btList.length === 0 || force) {
+                    const mockData = generateMockBluetooth(actors);
+                    if (mockData.length > 0) setBtList(mockData);
+                }
             }
         }
         setIsLoading(false);
     };
 
+    // Add actors to dependency to ensure we attempt generation once actors are loaded from parent
     useEffect(() => {
         loadData();
-        const interval = setInterval(loadData, 15000); // Auto refresh every 15s
+        const interval = setInterval(() => loadData(), 15000); // Auto refresh every 15s
         return () => clearInterval(interval);
-    }, [activeTab, isProduction]);
+    }, [activeTab, isProduction, actors]);
 
     const getSignalColor = (dbm: number) => {
         if (dbm > -50) return 'text-emerald-400';
@@ -128,7 +136,7 @@ const WirelessRecon: React.FC<WirelessReconProps> = ({ isProduction, actors }) =
                         </span>
                         Targets Found
                     </div>
-                    <button onClick={loadData} className="p-2 bg-slate-700 hover:bg-slate-600 rounded-full text-white transition-colors" title="Refresh">
+                    <button onClick={() => loadData(true)} className="p-2 bg-slate-700 hover:bg-slate-600 rounded-full text-white transition-colors" title="Force Refresh">
                         <RefreshCw className={`w-4 h-4 ${isLoading ? 'animate-spin' : ''}`} />
                     </button>
                 </div>
@@ -226,3 +234,4 @@ const WirelessRecon: React.FC<WirelessReconProps> = ({ isProduction, actors }) =
 };
 
 export default WirelessRecon;
+    
