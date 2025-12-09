@@ -1,6 +1,8 @@
 
 
 
+
+
 import { Actor, ActorStatus, LogEntry, LogLevel, ProxyGateway, CloudTrap, ActiveTunnel, PendingActor, ProvisioningStatus, DevicePersona, WifiNetwork, BluetoothDevice, ForensicSnapshot, ForensicProcess, AttackSession } from '../types';
 
 const LOCATIONS = ['Tel Aviv HQ', 'New York Branch', 'London DC', 'Frankfurt AWS'];
@@ -353,13 +355,13 @@ CONFIGURATION UPDATED
       } else if (command.includes('vpp-agent --update')) {
           resolve(`
 [VPP-UPDATER] Checking for updates...
-[INFO] Found version: v2.2.0-stable
+[INFO] Found version: v2.4.0-stable
 [INFO] Downloading package (4.2MB)... [====================] 100%
 [INFO] Verifying signature... OK
 [INFO] Stopping vpp-agent service...
 [INFO] Installing new binaries...
 [INFO] Restarting service...
-[VPP-AGENT] Update Successful. Running version v2.2.0.
+[VPP-AGENT] Update Successful. Running version v2.4.0.
           `);
       } else if (command.includes('apt-get update')) {
         resolve(`
