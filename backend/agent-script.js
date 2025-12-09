@@ -76,7 +76,7 @@ chmod +x $AGENT_DIR/trap_relay.sh
 # Create Main Agent Script
 cat <<'EOF_SRV' > $AGENT_DIR/agent.sh
 #!/bin/bash
-export PATH=$PATH:/usr/sbin:/sbin:/usr/bin:/bin:/usr/local/bin
+export PATH=$PATH:/usr/sbin:/sbin:/usr/bin:/usr/local/bin
 AGENT_DIR="/opt/vpp-agent"
 SERVER=$(cat "$AGENT_DIR/.server")
 LOG_FILE="/var/log/vpp-agent.log"
@@ -93,6 +93,17 @@ elif [ "$1" == "--factory-reset" ]; then
     echo "off" > "$AGENT_DIR/.sentinel"
     echo "Reset Complete."
     exit 0
+elif [ "$1" == "--recon" ]; then
+    # Force recon via CLI (load ID manually)
+    if [ -f "$AGENT_DIR/vpp-id" ]; then
+        ACTOR_ID=$(cat "$AGENT_DIR/vpp-id")
+        # Source the function below by continuing execution? 
+        # Easier to just let main loop handle it, but for simplicity we duplicate call here or shift logic structure.
+        # Ideally functions are defined before usage.
+    else
+        echo "Agent not enrolled."
+        exit 1
+    fi
 fi
 
 # Function to log messages
@@ -137,15 +148,12 @@ check_capabilities() {
     local WIFI="false"
     local BT="false"
 
-    # Check for WiFi interfaces (wlan0, mlan0, etc)
     if ls /sys/class/net/ | grep -qE '^w|^m'; then
         WIFI="true"
     elif command -v nmcli &> /dev/null; then
-        # Fallback to nmcli
         if nmcli radio wifi &> /dev/null; then WIFI="true"; fi
     fi
 
-    # Check for Bluetooth
     if [ -d "/sys/class/bluetooth" ] && [ "$(ls -A /sys/class/bluetooth)" ]; then
         BT="true"
     elif command -v hciconfig &> /dev/null; then
@@ -184,23 +192,26 @@ perform_forensics() {
 
 perform_recon() {
     local AID="$1"
+    log "[RECON] Initiating Wireless Scan..."
+    
     if command -v nmcli &> /dev/null; then
-        # Use -t for parsing, but handle potential empty fields or bad numbers
+        # Use -t for parsing
         local WIFIDATA=$(nmcli -t -f SSID,BSSID,SIGNAL,SECURITY,CHAN device wifi list 2>/dev/null | head -n 20 | awk -F: '{ 
-            # Escape double quotes in SSID
             gsub(/"/, "\\\"", $1);
-            
-            # Default Signal and Channel to 0 if missing/invalid
             sig=$3; if(length(sig) == 0 || sig !~ /^[0-9]+$/) sig=0;
             chan=$5; if(length(chan) == 0 || chan !~ /^[0-9]+$/) chan=0;
-            
             printf "{\\"ssid\\":\\"%s\\",\\"bssid\\":\\"%s\\",\\"signal\\":%s,\\"security\\":\\"%s\\",\\"channel\\":%s,\\"actorName\\":\\"'$ACTOR_NAME'\\"},", $1, $2, sig, $4, chan 
         }' | sed 's/,$//')
         
         if [ ! -z "$WIFIDATA" ]; then
+            log "[RECON] WiFi: Found $(echo "$WIFIDATA" | grep -o "ssid" | wc -l) networks, uploading..."
             JSON=$(jq -n --arg aid "$AID" --argjson d "[$WIFIDATA]" '{actorId: $aid, type: "WIFI", data: $d}')
             curl -s -X POST -H "Content-Type: application/json" -d "$JSON" "$SERVER/api/agent/recon"
+        else
+            log "[RECON] WiFi: No networks found."
         fi
+    else
+        log "[RECON] Error: nmcli not found."
     fi
 }
 
@@ -213,8 +224,6 @@ check_sentinel() {
         
         local CONNS=""
         if command -v ss &> /dev/null; then
-            # -n: numeric, -t: tcp
-            # state connected: includes ESTAB, SYN-SENT, SYN-RECV, FIN-WAIT, etc.
             CONNS=$(ss -nt state connected | grep -v "$SERVER_HOST" | grep -v "127.0.0.1" | grep -v "::1" | awk '{print $4, $5}')
         else
             CONNS=$(netstat -nt 2>/dev/null | grep -E "ESTABLISHED|SYN_RECV" | grep -v "127.0.0.1" | grep -v "$SERVER_HOST" | awk '{print $4, $5}')
@@ -223,16 +232,12 @@ check_sentinel() {
         if [ ! -z "$CONNS" ]; then
             echo "$CONNS" | while read LOCAL REMOTE; do
                 if [[ -n "$LOCAL" && -n "$REMOTE" ]]; then
-                   # Extract LPORT
                    LPORT=$(echo "$LOCAL" | rev | cut -d: -f1 | rev)
-                   # Extract RIP (Source IP) - Handle IPv6 brackets and ::ffff:
                    RIP=$(echo "$REMOTE" | rev | cut -d: -f2- | rev | tr -d '[]' | sed 's/::ffff://g')
                    
                    if [[ "$RIP" != "0.0.0.0" && "$RIP" != "" ]]; then
                       MSG="Unauthorized connection detected from $RIP -> :$LPORT"
-                      
                       log "[SENTINEL] 🚨 $MSG"
-                      
                       PAYLOAD=$(jq -n \\
                           --arg aid "$AID" \\
                           --arg lvl "CRITICAL" \\
@@ -240,8 +245,6 @@ check_sentinel() {
                           --arg msg "$MSG" \\
                           --arg ip "$RIP" \\
                           '{actorId: $aid, level: $lvl, process: $proc, message: $msg, sourceIp: $ip}')
-                      
-                      # Async curl to avoid blocking the loop
                       curl -s -X POST -H "Content-Type: application/json" -d "$PAYLOAD" "$SERVER/api/agent/log" &
                    fi
                 fi
@@ -288,6 +291,9 @@ done
 ACTOR_ID=$(cat "$AGENT_DIR/vpp-id")
 log "Entering Main Loop for Actor: $ACTOR_ID"
 
+# Loop counter for throttled tasks
+LOOP_COUNT=0
+
 # --- MAIN EVENT LOOP ---
 while true; do
     # 1. Gather Metrics
@@ -310,11 +316,14 @@ while true; do
         rm -f "$AGENT_DIR/vpp-id"
         exit 0
     fi
+    
+    # Check Server Commands for Recon
+    SCAN_WIFI=$(echo "$OUT" | jq -r '.wifiScanning')
+    SCAN_BT=$(echo "$OUT" | jq -r '.bluetoothScanning')
 
     # 3. Check Tasks
     TASKS=$(curl -s -G --data-urlencode "actorId=$ACTOR_ID" "$SERVER/api/agent/tasks")
     
-    # Process tasks
     echo "$TASKS" | jq -c '.[]' 2>/dev/null | while read -r task; do
         JOB_ID=$(echo "$task" | jq -r '.id')
         CMD=$(echo "$task" | jq -r '.command')
@@ -342,7 +351,6 @@ while true; do
         elif [[ "$CMD" == *"vpp-agent --update"* ]]; then
             log "[UPDATE] Update requested from server."
             TOKEN=$(cat "$AGENT_DIR/.token")
-            # Ensure we hit the API endpoint, not the frontend 404
             curl -sL "$SERVER/api/setup?token=$TOKEN" | bash
             RESULT="Update Initiated. Agent restarting..."
         elif [[ "$CMD" == *"vpp-agent --factory-reset"* ]]; then
@@ -363,9 +371,13 @@ while true; do
     # 4. Security Checks
     check_sentinel "$ACTOR_ID"
 
-    # 5. Randomized Recon (every ~5 mins)
-    if [ $((RANDOM % 60)) -eq 0 ]; then
-        perform_recon "$ACTOR_ID"
+    # 5. Scheduled Recon (approx every 60s if enabled)
+    LOOP_COUNT=$((LOOP_COUNT+1))
+    if [ $LOOP_COUNT -ge 12 ]; then
+        LOOP_COUNT=0
+        if [ "$SCAN_WIFI" == "true" ]; then
+             perform_recon "$ACTOR_ID"
+        fi
     fi
 
     sleep 5

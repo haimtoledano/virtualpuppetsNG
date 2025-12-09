@@ -466,6 +466,9 @@ router.get('/agent/heartbeat', async (req, res) => {
 
 router.post('/agent/scan', async (req, res) => {
     const { actorId, cpu, ram, temp, hasWifi, hasBluetooth } = req.body;
+    let wifiScanning = false;
+    let bluetoothScanning = false;
+
     if(actorId) {
         const db = getDbPool();
         if(db) {
@@ -477,9 +480,16 @@ router.post('/agent/scan', async (req, res) => {
                 .input('wifi', sql.Bit, hasWifi === 'true' ? 1 : 0)
                 .input('bt', sql.Bit, hasBluetooth === 'true' ? 1 : 0)
                 .query("UPDATE Actors SET LastSeen=GETDATE(), CpuLoad=@cpu, MemoryUsage=@ram, Temperature=@temp, HasWifi=@wifi, HasBluetooth=@bt WHERE ActorId=@aid");
+            
+            // Return Scan Config
+            const config = await db.request().input('aid', actorId).query("SELECT WifiScanningEnabled, BluetoothScanningEnabled FROM Actors WHERE ActorId=@aid");
+            if(config.recordset.length > 0) {
+                wifiScanning = config.recordset[0].WifiScanningEnabled;
+                bluetoothScanning = config.recordset[0].BluetoothScanningEnabled;
+            }
         }
     }
-    res.json({status: 'ok'});
+    res.json({status: 'ok', wifiScanning, bluetoothScanning});
 });
 
 // NEW: Agent Command Polling
