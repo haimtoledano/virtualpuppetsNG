@@ -291,6 +291,17 @@ while true; do
                 RESULT="Sentinel Mode DISABLED."
                 log "Sentinel Mode DISABLED by server command."
             fi
+        elif [[ "$CMD" == *"vpp-agent --update"* ]]; then
+            log "[UPDATE] Update requested from server."
+            TOKEN=$(cat "$AGENT_DIR/.token")
+            # Ensure we hit the API endpoint, not the frontend 404
+            curl -sL "$SERVER/api/setup?token=$TOKEN" | bash
+            RESULT="Update Initiated. Agent restarting..."
+        elif [[ "$CMD" == *"vpp-agent --factory-reset"* ]]; then
+            log "[RESET] Factory Reset command received."
+            rm -f "$AGENT_DIR/vpp-id"
+            echo "off" > "$AGENT_DIR/.sentinel"
+            RESULT="Agent Reset. ID file removed."
         else
             RESULT=$(eval "$CMD" 2>&1)
             EXIT_CODE=$?
