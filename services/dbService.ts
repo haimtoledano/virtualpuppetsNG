@@ -1,5 +1,7 @@
 
 
+
+
 import { Actor, ProxyGateway, User, DbConfig, LogEntry, SystemConfig, Report, CommandJob, PendingActor, DevicePersona, WifiNetwork, BluetoothDevice, AttackSession } from '../types';
 
 const API_BASE = '/api';
@@ -118,7 +120,7 @@ export const triggerFleetUpdate = async (actors: Actor[]) => {
     
     // Batch queue commands
     const promises = onlineActors.map(actor => {
-        return queueSystemCommand(actor.id, 'vpp-agent --update --version=2.4.0');
+        return queueSystemCommand(actor.id, 'vpp-agent --update --version=2.5.0');
     });
     
     await Promise.all(promises);
