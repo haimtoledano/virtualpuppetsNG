@@ -1,5 +1,5 @@
 
-export const CURRENT_AGENT_VERSION = "2.5.3";
+export const CURRENT_AGENT_VERSION = "2.5.4";
 
 export const generateAgentScript = (serverUrl, token) => {
   return `#!/bin/bash
@@ -87,7 +87,7 @@ def get_nmcli_output():
     
     for cmd in commands:
         try:
-            # Run and capture stdout, ignore stderr
+            # Run and capture stdout
             return subprocess.check_output(cmd, stderr=subprocess.DEVNULL).decode('utf-8', 'ignore')
         except:
             continue
@@ -97,65 +97,57 @@ try:
     output = get_nmcli_output()
     
     if output is None:
-        sys.stderr.write("[DEBUG] Error: nmcli command failed to execute in any path.\\n")
         print("[]")
-        sys.exit(0)
-    
-    if not output.strip():
-        sys.stderr.write("[DEBUG] Warning: nmcli executed but returned blank output.\\n")
+    elif not output.strip():
         print("[]")
-        sys.exit(0)
-
-    # Log the first line for debugging format
-    first_line = output.splitlines()[0]
-    sys.stderr.write(f"[DEBUG] Scan success. First line raw: {first_line}\\n")
-    
-    data = []
-    # Limit to 40 strongest networks
-    for line in output.splitlines()[:40]:
-        # Robust parsing for escaped colons (nmcli -t escapes colons as \:)
-        parts = []
-        curr = []
-        escape = False
-        for char in line:
-            if escape:
-                curr.append(char)
-                escape = False
-            elif char == '\\':
-                escape = True
-            elif char == ':':
-                parts.append("".join(curr))
-                curr = []
-            else:
-                curr.append(char)
-        parts.append("".join(curr))
+    else:
+        data = []
+        # Limit to 40 strongest networks
+        for line in output.splitlines()[:40]:
+            # Robust parsing for escaped colons (nmcli -t escapes colons as \:)
+            parts = []
+            curr = []
+            escape = False
+            for char in line:
+                if escape:
+                    curr.append(char)
+                    escape = False
+                elif char == '\\':
+                    escape = True
+                elif char == ':':
+                    parts.append("".join(curr))
+                    curr = []
+                else:
+                    curr.append(char)
+            parts.append("".join(curr))
+            
+            if len(parts) >= 5:
+                ssid = parts[0]
+                if not ssid or ssid.strip() == "": 
+                    ssid = "<Hidden>"
+                
+                try: signal = int(parts[2])
+                except: signal = -99
+                
+                try: chan = int(parts[4])
+                except: chan = 0
+                
+                data.append({
+                    "ssid": ssid, 
+                    "bssid": parts[1], 
+                    "signal": signal, 
+                    "security": parts[3], 
+                    "channel": chan
+                })
         
-        if len(parts) >= 5:
-            ssid = parts[0]
-            # Replace empty SSID with Hidden tag
-            if not ssid or ssid.strip() == "": 
-                ssid = "<Hidden>"
-            
-            try: signal = int(parts[2])
-            except: signal = -99
-            
-            try: chan = int(parts[4])
-            except: chan = 0
-            
-            data.append({
-                "ssid": ssid, 
-                "bssid": parts[1], 
-                "signal": signal, 
-                "security": parts[3], 
-                "channel": chan
-            })
-            
-    print(json.dumps(data))
+        print(json.dumps(data))
 
 except Exception as e:
     # Fallback empty array on crash
-    sys.stderr.write(f"[DEBUG] Python Script Crash: {str(e)}\\n")
+    sys.stderr.write(f"Python Error: {str(e)}\\n")
     print("[]")
+
+sys.stdout.flush()
 EOF_PY
 
 # Create Main Agent Script
@@ -236,8 +228,8 @@ perform_recon() {
     log "[RECON] Initiating Wireless Scan..."
     
     if command -v nmcli &> /dev/null; then
-        # Use robust Python parser
-        WIFIDATA=$(python3 $AGENT_DIR/wifi_scan.py)
+        # Capture stderr (2>&1) so we see errors in the variable if python fails
+        WIFIDATA=$(python3 $AGENT_DIR/wifi_scan.py 2>&1)
         
         # Check if valid JSON array
         if [[ "$WIFIDATA" == "["* ]]; then
@@ -261,7 +253,12 @@ perform_recon() {
                 log "[RECON] WiFi: No networks found (Python parser returned empty list)."
             fi
         else
-             log "[RECON] Critical: Python script output invalid JSON: $WIFIDATA"
+             log "[RECON] Critical: Python script failed or output invalid JSON."
+             log "[RECON] Raw Output was: $WIFIDATA"
+             
+             # Fallback Debug: Run raw nmcli to see what's happening
+             log "[RECON] DEBUG: Running raw 'nmcli dev wifi list' to check hardware..."
+             nmcli device wifi list >> $LOG_FILE 2>&1
         fi
     else
         log "[RECON] Error: nmcli not found."
