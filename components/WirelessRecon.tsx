@@ -3,7 +3,7 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { WifiNetwork, BluetoothDevice, Actor } from '../types';
 import { getWifiNetworks, getBluetoothDevices } from '../services/dbService';
 import { generateMockWifi, generateMockBluetooth } from '../services/mockService';
-import { Wifi, Bluetooth, Search, Lock, Monitor, Radio, RefreshCw, AlertTriangle, ChevronLeft, ChevronRight, Layers, ArrowUp, ArrowDown, GripVertical } from 'lucide-react';
+import { Wifi, Bluetooth, Search, Lock, Monitor, Radio, RefreshCw, AlertTriangle, ChevronLeft, ChevronRight, Layers, ArrowUp, ArrowDown, GripVertical, Factory, Ruler, Signal, Tag, Shield } from 'lucide-react';
 
 interface WirelessReconProps {
     isProduction: boolean;
@@ -12,24 +12,91 @@ interface WirelessReconProps {
 
 const ITEMS_PER_PAGE = 10;
 
-// Define available columns for each type
+// Enriched Columns Definition
 const DEFAULT_WIFI_COLUMNS = [
-    { id: 'signal', label: 'Signal' },
-    { id: 'name', label: 'SSID / Network Name' },
-    { id: 'mac', label: 'BSSID (MAC)' },
-    { id: 'info', label: 'Security / Channel' },
+    { id: 'signal', label: 'Signal / Dist' },
+    { id: 'name', label: 'SSID' },
+    { id: 'mac', label: 'BSSID' },
+    { id: 'vendor', label: 'Manufacturer' },
+    { id: 'channel', label: 'Band / Channel' },
+    { id: 'security', label: 'Security' },
     { id: 'actor', label: 'Detected By' },
     { id: 'time', label: 'Last Seen' }
 ];
 
 const DEFAULT_BT_COLUMNS = [
-    { id: 'signal', label: 'Signal' },
+    { id: 'signal', label: 'Signal / Dist' },
     { id: 'name', label: 'Device Name' },
     { id: 'mac', label: 'MAC Address' },
+    { id: 'vendor', label: 'Manufacturer' },
     { id: 'type', label: 'Type' },
     { id: 'actor', label: 'Detected By' },
     { id: 'time', label: 'Last Seen' }
 ];
+
+// OUI Database for Vendor Lookup
+const OUI_DB: Record<string, string> = {
+    'B8:27:EB': 'Raspberry Pi',
+    'DC:A6:32': 'Raspberry Pi',
+    'E4:5F:01': 'Raspberry Pi',
+    'D8:3C:69': 'Apple Inc.',
+    'F0:18:98': 'Apple Inc.',
+    '7C:D1:C3': 'Apple Inc.',
+    '00:1A:11': 'Google',
+    '3C:5A:B4': 'Google',
+    '00:0C:29': 'VMware',
+    '00:50:56': 'VMware',
+    '98:01:A7': 'Intel Corp',
+    '00:14:BF': 'Cisco-Linksys',
+    '00:24:1D': 'GIANT ELECTRIC',
+    '00:09:5B': 'Netgear',
+    'AC:84:C6': 'TP-Link',
+    '00:11:32': 'Synology',
+    '44:38:39': 'Cumulus',
+    '48:2C:6A': 'Hewlett Packard',
+    '00:E0:4C': 'Realtek'
+};
+
+// --- Helpers ---
+
+const resolveVendor = (mac: string) => {
+    if (!mac) return 'Unknown';
+    const cleanMac = mac.toUpperCase().replace(/-/g, ':');
+    const prefix = cleanMac.substring(0, 8);
+    
+    // Check DB
+    if (OUI_DB[prefix]) return OUI_DB[prefix];
+    
+    // Check Locally Administered Bit (2nd least significant bit of first byte)
+    // 2, 6, A, E as second char usually indicates randomized/local
+    const firstByte = parseInt(cleanMac.substring(0, 2), 16);
+    if (!isNaN(firstByte) && (firstByte & 0b10)) {
+        return 'Randomized / Private';
+    }
+    
+    return 'Generic / Unknown';
+};
+
+const estimateDistance = (rssi: number) => {
+    if (rssi === 0 || rssi < -100) return 'Unknown';
+    // Rough FSPL calculation
+    // txPower ~ -40dBm (reference at 1m), n ~ 2.5 (indoor/mixed)
+    const txPower = -40;
+    const n = 2.5; 
+    const ratio = (txPower - rssi) / (10 * n);
+    const dist = Math.pow(10, ratio);
+    
+    if (dist < 1.0) return '< 1m';
+    if (dist > 50) return '> 50m';
+    return `~${dist.toFixed(1)}m`;
+};
+
+const getBand = (channel: number) => {
+    if (channel >= 1 && channel <= 14) return '2.4 GHz';
+    if (channel >= 36 && channel <= 177) return '5 GHz';
+    if (channel > 177) return '6 GHz'; // Rough check
+    return 'Unknown';
+};
 
 const WirelessRecon: React.FC<WirelessReconProps> = ({ isProduction, actors }) => {
     const [activeTab, setActiveTab] = useState<'WIFI' | 'BLUETOOTH'>('WIFI');
@@ -108,7 +175,7 @@ const WirelessRecon: React.FC<WirelessReconProps> = ({ isProduction, actors }) =
             if (current.key === key) {
                 return { key, direction: current.direction === 'asc' ? 'desc' : 'asc' };
             }
-            return { key, direction: 'asc' }; // Default to asc for new columns, though for signal we might want desc default. Logic handles generic.
+            return { key, direction: 'asc' };
         });
     };
 
@@ -116,7 +183,6 @@ const WirelessRecon: React.FC<WirelessReconProps> = ({ isProduction, actors }) =
     const handleDragStart = (e: React.DragEvent, index: number) => {
         setDraggedColumnIndex(index);
         e.dataTransfer.effectAllowed = "move";
-        // Ghost image usually handled by browser, but we can style if needed
     };
 
     const handleDragOver = (e: React.DragEvent, index: number) => {
@@ -194,7 +260,9 @@ const WirelessRecon: React.FC<WirelessReconProps> = ({ isProduction, actors }) =
                     case 'signal': valA = wA.signalStrength; valB = wB.signalStrength; break;
                     case 'name': valA = wA.ssid || ''; valB = wB.ssid || ''; break;
                     case 'mac': valA = wA.bssid; valB = wB.bssid; break;
-                    case 'info': valA = wA.security; valB = wB.security; break; // Sort by security
+                    case 'vendor': valA = resolveVendor(wA.bssid); valB = resolveVendor(wB.bssid); break;
+                    case 'channel': valA = wA.channel; valB = wB.channel; break;
+                    case 'security': valA = wA.security; valB = wB.security; break;
                     case 'actor': valA = wA.actorName; valB = wB.actorName; break;
                     case 'time': valA = new Date(wA.lastSeen).getTime(); valB = new Date(wB.lastSeen).getTime(); break;
                     default: return 0;
@@ -206,6 +274,7 @@ const WirelessRecon: React.FC<WirelessReconProps> = ({ isProduction, actors }) =
                     case 'signal': valA = bA.rssi; valB = bB.rssi; break;
                     case 'name': valA = bA.name || ''; valB = bB.name || ''; break;
                     case 'mac': valA = bA.mac; valB = bB.mac; break;
+                    case 'vendor': valA = resolveVendor(bA.mac); valB = resolveVendor(bB.mac); break;
                     case 'type': valA = bA.type; valB = bB.type; break;
                     case 'actor': valA = bA.actorName; valB = bB.actorName; break;
                     case 'time': valA = new Date(bA.lastSeen).getTime(); valB = new Date(bB.lastSeen).getTime(); break;
@@ -256,9 +325,14 @@ const WirelessRecon: React.FC<WirelessReconProps> = ({ isProduction, actors }) =
             switch (columnId) {
                 case 'signal':
                     return (
-                        <div className="flex items-center space-x-2" title={`${net.signalStrength} dBm`}>
-                            {getSignalBars(net.signalStrength)}
-                            <span className="text-xs font-mono text-slate-500">{net.signalStrength}</span>
+                        <div className="flex flex-col" title={`${net.signalStrength} dBm`}>
+                            <div className="flex items-center space-x-2">
+                                {getSignalBars(net.signalStrength)}
+                                <span className="text-xs font-mono text-slate-500">{net.signalStrength}</span>
+                            </div>
+                            <div className="flex items-center text-[10px] text-slate-500 mt-0.5">
+                                <Ruler className="w-2.5 h-2.5 mr-1" /> {estimateDistance(net.signalStrength)}
+                            </div>
                         </div>
                     );
                 case 'name':
@@ -268,15 +342,30 @@ const WirelessRecon: React.FC<WirelessReconProps> = ({ isProduction, actors }) =
                         </span>
                     );
                 case 'mac':
-                    return <span className="font-mono text-slate-400 text-xs">{net.bssid}</span>;
-                case 'info':
+                    return <span className="font-mono text-slate-400 text-xs bg-slate-900 px-1 rounded">{net.bssid}</span>;
+                case 'vendor':
+                    const vendor = resolveVendor(net.bssid);
                     return (
-                        <div className="flex flex-col">
-                            <span className={`text-xs font-bold ${net.security === 'OPEN' ? 'text-red-400' : 'text-emerald-400'}`}>
-                                {net.security === 'OPEN' ? <span className="flex items-center"><Lock className="w-3 h-3 mr-1"/> OPEN</span> : net.security}
-                            </span>
-                            <span className="text-[10px] text-slate-500">Channel {net.channel}</span>
+                        <div className="flex items-center text-xs text-slate-300">
+                            <Factory className={`w-3 h-3 mr-1.5 ${vendor.includes('Unknown') ? 'text-slate-600' : 'text-purple-400'}`} />
+                            {vendor}
                         </div>
+                    );
+                case 'channel':
+                    const band = getBand(net.channel);
+                    return (
+                        <div>
+                            <div className="flex items-center text-xs font-bold text-white">
+                                <Signal className="w-3 h-3 mr-1 text-slate-500"/> {band}
+                            </div>
+                            <span className="text-[10px] text-slate-500 ml-4">Channel {net.channel}</span>
+                        </div>
+                    );
+                case 'security':
+                    return (
+                        <span className={`text-xs font-bold px-2 py-0.5 rounded border ${net.security === 'OPEN' ? 'text-red-400 border-red-900/50 bg-red-900/20' : 'text-emerald-400 border-emerald-900/50 bg-emerald-900/20'}`}>
+                            {net.security === 'OPEN' ? <span className="flex items-center"><Lock className="w-3 h-3 mr-1"/> OPEN</span> : net.security}
+                        </span>
                     );
                 case 'actor':
                     return (
@@ -295,9 +384,14 @@ const WirelessRecon: React.FC<WirelessReconProps> = ({ isProduction, actors }) =
             switch (columnId) {
                 case 'signal':
                     return (
-                        <div className="flex items-center space-x-2" title={`${bt.rssi} dBm`}>
-                            {getSignalBars(bt.rssi)}
-                            <span className="text-xs font-mono text-slate-500">{bt.rssi}</span>
+                        <div className="flex flex-col" title={`${bt.rssi} dBm`}>
+                            <div className="flex items-center space-x-2">
+                                {getSignalBars(bt.rssi)}
+                                <span className="text-xs font-mono text-slate-500">{bt.rssi}</span>
+                            </div>
+                            <div className="flex items-center text-[10px] text-slate-500 mt-0.5">
+                                <Ruler className="w-2.5 h-2.5 mr-1" /> {estimateDistance(bt.rssi)}
+                            </div>
                         </div>
                     );
                 case 'name':
@@ -307,10 +401,19 @@ const WirelessRecon: React.FC<WirelessReconProps> = ({ isProduction, actors }) =
                         </span>
                     );
                 case 'mac':
-                     return <span className="font-mono text-slate-400 text-xs">{bt.mac}</span>;
+                     return <span className="font-mono text-slate-400 text-xs bg-slate-900 px-1 rounded">{bt.mac}</span>;
+                case 'vendor':
+                    const vendor = resolveVendor(bt.mac);
+                    return (
+                        <div className="flex items-center text-xs text-slate-300">
+                            <Factory className={`w-3 h-3 mr-1.5 ${vendor.includes('Unknown') ? 'text-slate-600' : 'text-purple-400'}`} />
+                            {vendor}
+                        </div>
+                    );
                 case 'type':
                     return (
-                         <span className="px-2 py-0.5 rounded bg-blue-900/30 text-blue-400 text-[10px] border border-blue-800">
+                         <span className="px-2 py-0.5 rounded bg-blue-900/30 text-blue-400 text-[10px] border border-blue-800 flex items-center w-fit">
+                            <Tag className="w-3 h-3 mr-1" />
                             {bt.type}
                         </span>
                     );

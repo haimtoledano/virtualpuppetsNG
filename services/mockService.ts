@@ -1,18 +1,23 @@
 
-
-
-
-
-
-
-
-
-
-
 import { Actor, ActorStatus, LogEntry, LogLevel, ProxyGateway, CloudTrap, ActiveTunnel, PendingActor, ProvisioningStatus, DevicePersona, WifiNetwork, BluetoothDevice, ForensicSnapshot, ForensicProcess, AttackSession } from '../types';
 
 const LOCATIONS = ['Tel Aviv HQ', 'New York Branch', 'London DC', 'Frankfurt AWS'];
 const PROCESSES = ['sshd', 'kernel', 'vpp-agent', 'udp_pot', 'cowrie'];
+
+// Common OUI Prefixes for Mock Data
+const MOCK_OUI = [
+    '00:0C:29', // VMware
+    'B8:27:EB', // Raspberry Pi
+    'D8:3C:69', // Apple
+    '00:1A:11', // Google
+    '98:01:A7', // Intel
+    '00:14:bf', // Linksys
+    '7C:D1:C3', // Apple
+    'F0:18:98', // Apple
+    '44:38:39', // Cumulus
+    'AC:84:C6', // TP-Link
+    '00:E0:4C'  // Realtek
+];
 
 export const generateGateways = (): ProxyGateway[] => {
   return [
@@ -187,7 +192,7 @@ export const generateInitialActors = (gateways: ProxyGateway[]): Actor[] => {
         cpuLoad: Math.floor(Math.random() * 30) + 5,
         memoryUsage: Math.floor(Math.random() * 40) + 20,
         activeTools: ['vpp-agent', 'tcpdump'],
-        agentVersion: Math.random() > 0.8 ? '2.5.0' : '2.6.0', // Mix versions to show updates
+        agentVersion: Math.random() > 0.8 ? '2.5.0' : '2.6.0',
         activeTunnels: [],
         deployedHoneyFiles: [],
         persona: AVAILABLE_PERSONAS[0],
@@ -498,19 +503,21 @@ export const simulateDeviceCallHome = async (): Promise<PendingActor> => {
 
 export const generateMockWifi = (actors: Actor[]): WifiNetwork[] => {
     const networks: WifiNetwork[] = [];
-    const ssids = ['Corp-Guest', 'Starbucks_Free_WiFi', 'iPhone (13)', 'HP-Print-35', 'Unknown Network', 'D-Link_2.4', 'xfinitywifi'];
+    const ssids = ['Corp-Guest', 'Starbucks_Free_WiFi', 'iPhone (13)', 'HP-Print-35', 'Unknown Network', 'D-Link_2.4', 'xfinitywifi', 'Linksys-Home'];
     
-    // Safety check in case actors is undefined or empty
     const availableActors = actors.filter(a => a.status === 'ONLINE');
     if (availableActors.length === 0) return [];
 
     availableActors.forEach(actor => {
         const count = Math.floor(Math.random() * 5);
         for(let i=0; i<count; i++) {
+            const prefix = MOCK_OUI[Math.floor(Math.random() * MOCK_OUI.length)];
+            const suffix = `${Math.floor(Math.random()*99)}:${Math.floor(Math.random()*99)}:${Math.floor(Math.random()*99)}`;
+            
             networks.push({
                 id: `wifi-${Math.random().toString(36).substr(2,6)}`,
                 ssid: ssids[Math.floor(Math.random() * ssids.length)],
-                bssid: `XX:XX:XX:${Math.floor(Math.random()*99)}:${Math.floor(Math.random()*99)}`,
+                bssid: `${prefix}:${suffix}`,
                 signalStrength: -40 - Math.floor(Math.random() * 50),
                 security: Math.random() > 0.8 ? 'OPEN' : 'WPA2',
                 channel: Math.floor(Math.random() * 11) + 1,
@@ -533,10 +540,13 @@ export const generateMockBluetooth = (actors: Actor[]): BluetoothDevice[] => {
      availableActors.forEach(actor => {
         const count = Math.floor(Math.random() * 4);
         for(let i=0; i<count; i++) {
+            const prefix = MOCK_OUI[Math.floor(Math.random() * MOCK_OUI.length)];
+            const suffix = `${Math.floor(Math.random()*99)}:${Math.floor(Math.random()*99)}:${Math.floor(Math.random()*99)}`;
+            
             devices.push({
                 id: `bt-${Math.random().toString(36).substr(2,6)}`,
                 name: names[Math.floor(Math.random() * names.length)],
-                mac: `AA:BB:CC:${Math.floor(Math.random()*99)}:${Math.floor(Math.random()*99)}`,
+                mac: `${prefix}:${suffix}`,
                 rssi: -50 - Math.floor(Math.random() * 40),
                 type: Math.random() > 0.5 ? 'BLE' : 'CLASSIC',
                 actorId: actor.id,
