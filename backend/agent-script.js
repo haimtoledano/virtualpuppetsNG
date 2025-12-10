@@ -162,7 +162,7 @@ def scan_bluetooth():
         proc = subprocess.Popen(['bluetoothctl'], stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, bufsize=1, errors='replace')
         
         # Send scan on command
-        proc.stdin.write('scan on\n')
+        proc.stdin.write('scan on\\n')
         proc.stdin.flush()
         
         start_time = time.time()
