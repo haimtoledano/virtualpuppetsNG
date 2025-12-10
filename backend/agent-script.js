@@ -1,5 +1,5 @@
 
-export const CURRENT_AGENT_VERSION = "2.5.1";
+export const CURRENT_AGENT_VERSION = "2.5.2";
 
 export const generateAgentScript = (serverUrl, token) => {
   return `#!/bin/bash
@@ -80,7 +80,8 @@ import subprocess, json, sys
 try:
     # Run nmcli command
     cmd = ['nmcli', '-t', '-f', 'SSID,BSSID,SIGNAL,SECURITY,CHAN', 'device', 'wifi', 'list']
-    output = subprocess.check_output(cmd).decode('utf-8')
+    # Use ignore errors to prevent crashes on non-utf8 SSIDs
+    output = subprocess.check_output(cmd).decode('utf-8', 'ignore')
     
     data = []
     # Limit to 30 strongest networks to prevent payload bloat
@@ -217,10 +218,12 @@ perform_recon() {
             
             log "[RECON] Uploading to $SERVER/api/agent/recon ..."
             
-            # Upload Synchronously and Capture Status Code
-            HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" -X POST -H "Content-Type: application/json" -d "$JSON" "$SERVER/api/agent/recon")
+            # Capture HTTP Code AND Body for debugging
+            RESPONSE=$(curl -s -w "\n%{http_code}" -X POST -H "Content-Type: application/json" -d "$JSON" "$SERVER/api/agent/recon")
+            HTTP_CODE=$(echo "$RESPONSE" | tail -n1)
+            BODY=$(echo "$RESPONSE" | head -n -1)
             
-            log "[RECON] Upload Result: HTTP $HTTP_CODE"
+            log "[RECON] Upload Result: HTTP $HTTP_CODE | Response: $BODY"
         else
             log "[RECON] WiFi: No networks found (Python parser returned empty)."
         fi
