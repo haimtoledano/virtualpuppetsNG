@@ -569,7 +569,7 @@ router.get('/agent/heartbeat', async (req, res) => {
 });
 
 router.post('/agent/scan', async (req, res) => {
-    const { actorId, cpu, ram, temp, hasWifi, hasBluetooth } = req.body;
+    const { actorId, cpu, ram, temp, hasWifi, hasBluetooth, version } = req.body;
     let wifiScanning = false;
     let bluetoothScanning = false;
 
@@ -583,7 +583,8 @@ router.post('/agent/scan', async (req, res) => {
                 .input('temp', sql.Float, parseFloat(temp) || 0)
                 .input('wifi', sql.Bit, hasWifi === 'true' ? 1 : 0)
                 .input('bt', sql.Bit, hasBluetooth === 'true' ? 1 : 0)
-                .query("UPDATE Actors SET LastSeen=GETDATE(), CpuLoad=@cpu, MemoryUsage=@ram, Temperature=@temp, HasWifi=@wifi, HasBluetooth=@bt WHERE ActorId=@aid");
+                .input('ver', sql.NVarChar, version || '1.0.0')
+                .query("UPDATE Actors SET LastSeen=GETDATE(), CpuLoad=@cpu, MemoryUsage=@ram, Temperature=@temp, HasWifi=@wifi, HasBluetooth=@bt, AgentVersion=@ver WHERE ActorId=@aid");
             
             // Return Scan Config
             const config = await db.request().input('aid', actorId).query("SELECT WifiScanningEnabled, BluetoothScanningEnabled FROM Actors WHERE ActorId=@aid");

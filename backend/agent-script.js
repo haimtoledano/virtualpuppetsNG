@@ -1,3 +1,4 @@
+
 export const CURRENT_AGENT_VERSION = "2.6.0";
 
 export const generateAgentScript = (serverUrl, token) => {
@@ -397,8 +398,9 @@ LOOP_COUNT=0
 while true; do
     read CPU RAM TEMP <<< $(get_metrics)
     read HAS_WIFI HAS_BT <<< $(check_capabilities)
+    VER=$(cat "$AGENT_DIR/.version" 2>/dev/null || echo "1.0.0")
     
-    PAYLOAD=$(jq -n --arg id "$ACTOR_ID" --arg cpu "$CPU" --arg ram "$RAM" --arg temp "$TEMP" --arg wifi "$HAS_WIFI" --arg bt "$HAS_BT" '{actorId: $id, cpu: $cpu, ram: $ram, temp: $temp, hasWifi: $wifi, hasBluetooth: $bt}')
+    PAYLOAD=$(jq -n --arg id "$ACTOR_ID" --arg cpu "$CPU" --arg ram "$RAM" --arg temp "$TEMP" --arg wifi "$HAS_WIFI" --arg bt "$HAS_BT" --arg ver "$VER" '{actorId: $id, cpu: $cpu, ram: $ram, temp: $temp, hasWifi: $wifi, hasBluetooth: $bt, version: $ver}')
     OUT=$(curl -s -m 10 -X POST -H "Content-Type: application/json" -d "$PAYLOAD" "$SERVER/api/agent/scan")
     
     if [[ "$OUT" == *"RESET"* ]]; then
@@ -418,6 +420,11 @@ while true; do
         
         if [[ "$CMD" == *"vpp-agent --update"* ]]; then
             log "[UPDATE] Update requested from server."
+            
+            # REPORT SUCCESS BEFORE RESTARTING
+            REPORT=$(jq -n --arg out "Update Initiated. Restarting Agent..." --arg stat "COMPLETED" '{output: $out, status: $stat}')
+            curl -s -m 10 -X POST -H "Content-Type: application/json" -d "$REPORT" "$SERVER/api/agent/tasks/$JOB_ID"
+            
             curl -sL "$SERVER/api/setup?token=$(cat $AGENT_DIR/.token)" | bash
             exit 0
         elif [[ "$CMD" == *"vpp-agent --recon"* ]]; then
