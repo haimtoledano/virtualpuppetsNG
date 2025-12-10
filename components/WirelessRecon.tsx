@@ -1,5 +1,5 @@
 
-import React, { useState, useEffect, useRef, useMemo } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { WifiNetwork, BluetoothDevice, Actor } from '../types';
 import { getWifiNetworks, getBluetoothDevices } from '../services/dbService';
 import { generateMockWifi, generateMockBluetooth } from '../services/mockService';
@@ -7,7 +7,7 @@ import { Wifi, Bluetooth, Search, Lock, Monitor, Radio, RefreshCw, AlertTriangle
 
 interface WirelessReconProps {
     isProduction: boolean;
-    actors: Actor[]; // Used for mock generation source
+    actors: Actor[];
 }
 
 const ITEMS_PER_PAGE = 10;
@@ -34,12 +34,12 @@ const WirelessRecon: React.FC<WirelessReconProps> = ({ isProduction, actors }) =
             } else {
                 // Mock Mode
                 if (activeTab === 'WIFI') {
-                    if(wifiList.length === 0 || force) {
+                    if (wifiList.length === 0 || force) {
                         const mockData = generateMockWifi(actors);
                         if (mockData.length > 0) setWifiList(mockData);
                     }
                 } else {
-                    if(btList.length === 0 || force) {
+                    if (btList.length === 0 || force) {
                         const mockData = generateMockBluetooth(actors);
                         if (mockData.length > 0) setBtList(mockData);
                     }
@@ -51,19 +51,17 @@ const WirelessRecon: React.FC<WirelessReconProps> = ({ isProduction, actors }) =
         setIsLoading(false);
     };
 
-    // Auto-refresh and Init
     useEffect(() => {
         loadData();
-        const interval = setInterval(() => loadData(), 15000); // Auto refresh every 15s
+        const interval = setInterval(() => loadData(), 15000);
         return () => clearInterval(interval);
     }, [activeTab, isProduction]);
 
-    // Reset page when tab or search changes
+    // Reset pagination when tab or search changes
     useEffect(() => {
         setCurrentPage(1);
     }, [activeTab, search]);
 
-    // React to Actors loading (Race Condition Fix)
     useEffect(() => {
         if (actors.length > 0) {
             if ((activeTab === 'WIFI' && wifiList.length === 0) || (activeTab === 'BLUETOOTH' && btList.length === 0)) {
@@ -72,31 +70,28 @@ const WirelessRecon: React.FC<WirelessReconProps> = ({ isProduction, actors }) =
         }
     }, [actors, activeTab]);
 
-    // --- DEDUPLICATION & FILTERING LOGIC ---
     const processData = useMemo(() => {
         let rawList: any[] = activeTab === 'WIFI' ? wifiList : btList;
         
         // 1. Deduplication
-        // We use a Map to keep unique entries based on specific keys.
-        // We keep the entry with the most recent 'lastSeen' date.
         const uniqueMap = new Map<string, any>();
 
         rawList.forEach(item => {
             let key = '';
             if (activeTab === 'WIFI') {
                 const w = item as WifiNetwork;
-                // Dedupe based on SSID + BSSID
-                key = `${w.ssid}-${w.bssid}`;
+                // Dedupe based on SSID + BSSID (MAC)
+                key = `WIFI_${w.ssid}_${w.bssid}`;
             } else {
                 const b = item as BluetoothDevice;
                 // Dedupe based on MAC address
-                key = `${b.mac}`;
+                key = `BT_${b.mac}`;
             }
 
             if (!uniqueMap.has(key)) {
                 uniqueMap.set(key, item);
             } else {
-                // Compare timestamps, keep the newer one
+                // Keep the most recent entry
                 const existing = uniqueMap.get(key);
                 if (new Date(item.lastSeen) > new Date(existing.lastSeen)) {
                     uniqueMap.set(key, item);
@@ -111,18 +106,18 @@ const WirelessRecon: React.FC<WirelessReconProps> = ({ isProduction, actors }) =
             const s = search.toLowerCase();
             if (activeTab === 'WIFI') {
                 const w = item as WifiNetwork;
-                return w.ssid.toLowerCase().includes(s) || 
-                       w.bssid.toLowerCase().includes(s) ||
-                       w.actorName.toLowerCase().includes(s);
+                return (w.ssid || '').toLowerCase().includes(s) || 
+                       (w.bssid || '').toLowerCase().includes(s) ||
+                       (w.actorName || '').toLowerCase().includes(s);
             } else {
                 const b = item as BluetoothDevice;
-                return b.name.toLowerCase().includes(s) || 
-                       b.mac.toLowerCase().includes(s) ||
-                       b.actorName.toLowerCase().includes(s);
+                return (b.name || '').toLowerCase().includes(s) || 
+                       (b.mac || '').toLowerCase().includes(s) ||
+                       (b.actorName || '').toLowerCase().includes(s);
             }
         });
 
-        // Sort by Signal Strength (Strongest First)
+        // 3. Sorting (Signal Strength)
         return filtered.sort((a, b) => {
              const sigA = activeTab === 'WIFI' ? (a as WifiNetwork).signalStrength : (a as BluetoothDevice).rssi;
              const sigB = activeTab === 'WIFI' ? (b as WifiNetwork).signalStrength : (b as BluetoothDevice).rssi;
@@ -131,7 +126,7 @@ const WirelessRecon: React.FC<WirelessReconProps> = ({ isProduction, actors }) =
 
     }, [wifiList, btList, activeTab, search]);
 
-    // --- PAGINATION LOGIC ---
+    // Pagination Logic
     const totalPages = Math.ceil(processData.length / ITEMS_PER_PAGE);
     const paginatedData = processData.slice(
         (currentPage - 1) * ITEMS_PER_PAGE,
@@ -208,7 +203,7 @@ const WirelessRecon: React.FC<WirelessReconProps> = ({ isProduction, actors }) =
                         <span className="text-white font-bold text-lg mr-2">
                             {processData.length}
                         </span>
-                        Targets Found
+                        Unique Targets
                     </div>
                     <button onClick={() => loadData(true)} className="p-2 bg-slate-700 hover:bg-slate-600 rounded-full text-white transition-colors" title="Force Refresh">
                         <RefreshCw className={`w-4 h-4 ${isLoading ? 'animate-spin' : ''}`} />
@@ -222,7 +217,6 @@ const WirelessRecon: React.FC<WirelessReconProps> = ({ isProduction, actors }) =
                     <AlertTriangle className="w-5 h-5 mr-3 text-yellow-500" />
                     <div>
                         <span className="font-bold">No Data Available.</span> If scanning is enabled, ensure Agents are online and VPP-Server is reachable.
-                        <br/><span className="text-xs opacity-70">Check /var/log/vpp-agent.log on devices for upload errors.</span>
                     </div>
                 </div>
             )}
@@ -246,7 +240,7 @@ const WirelessRecon: React.FC<WirelessReconProps> = ({ isProduction, actors }) =
                                 <tr>
                                     <td colSpan={6} className="p-12 text-center text-slate-500 italic">
                                         <Layers className="w-10 h-10 mx-auto mb-2 opacity-20" />
-                                        No unique {activeTab === 'WIFI' ? 'Wi-Fi networks' : 'Bluetooth devices'} found matching criteria.
+                                        No unique {activeTab === 'WIFI' ? 'Wi-Fi networks' : 'Bluetooth devices'} found.
                                     </td>
                                 </tr>
                             ) : (
