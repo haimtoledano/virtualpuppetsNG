@@ -1,6 +1,4 @@
-
-
-export const CURRENT_AGENT_VERSION = "2.5.8";
+export const CURRENT_AGENT_VERSION = "2.6.0";
 
 export const generateAgentScript = (serverUrl, token) => {
   return `#!/bin/bash
@@ -64,7 +62,7 @@ PAYLOAD=$(jq -n \\
   --arg ip "$SOCAT_PEERADDR" \\
   '{actorId: $aid, level: $lvl, process: $proc, message: $msg, sourceIp: $ip}')
 
-curl -s -X POST -H "Content-Type: application/json" -d "$PAYLOAD" "$SERVER/api/agent/log" &
+curl -s -m 5 -X POST -H "Content-Type: application/json" -d "$PAYLOAD" "$SERVER/api/agent/log" &
 
 # Mock Interaction (Echo)
 echo "Connection Logged. Terminal Locked."
@@ -152,6 +150,7 @@ sys.stdout.flush()
 EOF_PY
 
 # Create Python Script for Bluetooth Scanning
+# Note: Triple backslashes needed for proper escaping in JS template string -> Bash -> Python file
 cat <<'EOF_PY_BT' > $AGENT_DIR/bt_scan.py
 import subprocess, json, sys, time, select, re
 
@@ -161,7 +160,7 @@ def scan_bluetooth():
         # Start bluetoothctl in interactive mode with replace errors for decoding
         proc = subprocess.Popen(['bluetoothctl'], stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, bufsize=1, errors='replace')
         
-        # Send scan on command
+        # Send scan on command - Double escaped newline for JS string safety
         proc.stdin.write('scan on\\n')
         proc.stdin.flush()
         
@@ -174,7 +173,7 @@ def scan_bluetooth():
                 if not line: break
                 
                 clean_line = line.strip()
-                # Remove ANSI color codes - Double escaped backslashes for JS string safety
+                # Remove ANSI color codes - Escaped backslashes for JS string regex (r'\\x1b')
                 clean_line = re.sub(r'\\x1b\\[[0-9;]*m', '', clean_line)
                 
                 if 'Device' in clean_line:
@@ -327,7 +326,7 @@ perform_recon() {
                     log "[RECON] WiFi: Found $COUNT networks, constructing payload..."
                     JSON=$(jq -n --arg aid "$AID" --argjson d "$WIFIDATA" '{actorId: $aid, type: "WIFI", data: $d}')
                     
-                    RESPONSE=$(curl -s -w "\n%{http_code}" -X POST -H "Content-Type: application/json" -d "$JSON" "$SERVER/api/agent/recon")
+                    RESPONSE=$(curl -s -m 10 -w "\n%{http_code}" -X POST -H "Content-Type: application/json" -d "$JSON" "$SERVER/api/agent/recon")
                     HTTP_CODE=$(echo "$RESPONSE" | tail -n1)
                     log "[RECON] WiFi Upload Result: HTTP $HTTP_CODE"
                 else
@@ -353,31 +352,18 @@ perform_recon() {
                     log "[RECON] BT: Found $COUNT devices, constructing payload..."
                     JSON=$(jq -n --arg aid "$AID" --argjson d "$BTDATA" '{actorId: $aid, type: "BLUETOOTH", data: $d}')
                     
-                    RESPONSE=$(curl -s -w "\n%{http_code}" -X POST -H "Content-Type: application/json" -d "$JSON" "$SERVER/api/agent/recon")
+                    RESPONSE=$(curl -s -m 10 -w "\n%{http_code}" -X POST -H "Content-Type: application/json" -d "$JSON" "$SERVER/api/agent/recon")
                     HTTP_CODE=$(echo "$RESPONSE" | tail -n1)
                     log "[RECON] BT Upload Result: HTTP $HTTP_CODE"
                 else
                     log "[RECON] BT: No devices found."
                 fi
             else
-                 # ESCAPED for JS template literal safety
-                 log "[RECON] Critical: BT Python script output invalid. Got: \${BTDATA:0:100}"
+                 # Simplified error logging to avoid JS template interpolation conflicts
+                 log "[RECON] Critical: BT Python script output invalid or empty."
             fi
         else
             log "[RECON] Error: bluetoothctl not found."
-        fi
-    fi
-}
-
-check_sentinel() {
-    local AID="$1"
-    local MODE=$(cat "$AGENT_DIR/.sentinel" 2>/dev/null)
-    if [ "$MODE" == "on" ]; then
-        SERVER_HOST=$(echo "$SERVER" | awk -F/ '{print $3}' | cut -d: -f1)
-        local CONNS=$(ss -nt state connected | grep -v "$SERVER_HOST" | grep -v "127.0.0.1" | awk '{print $4, $5}')
-        if [ ! -z "$CONNS" ]; then
-            # Simple check for now
-            log "[SENTINEL] Active connection detected."
         fi
     fi
 }
@@ -390,7 +376,7 @@ log "Agent Started (v$VERSION). HWID: $HWID"
 # Validation & Enrollment
 while [ ! -f "$AGENT_DIR/vpp-id" ]; do
     CUR_VER=$(cat "$AGENT_DIR/.version" 2>/dev/null || echo "1.0.0")
-    RESP=$(curl -s -G --data-urlencode "hwid=$HWID" --data-urlencode "os=$OS_NAME" --data-urlencode "version=$CUR_VER" "$SERVER/api/agent/heartbeat")
+    RESP=$(curl -s -m 10 -G --data-urlencode "hwid=$HWID" --data-urlencode "os=$OS_NAME" --data-urlencode "version=$CUR_VER" "$SERVER/api/agent/heartbeat")
     STATUS=$(echo "$RESP" | jq -r '.status')
     
     if [ "$STATUS" == "APPROVED" ]; then 
@@ -413,7 +399,7 @@ while true; do
     read HAS_WIFI HAS_BT <<< $(check_capabilities)
     
     PAYLOAD=$(jq -n --arg id "$ACTOR_ID" --arg cpu "$CPU" --arg ram "$RAM" --arg temp "$TEMP" --arg wifi "$HAS_WIFI" --arg bt "$HAS_BT" '{actorId: $id, cpu: $cpu, ram: $ram, temp: $temp, hasWifi: $wifi, hasBluetooth: $bt}')
-    OUT=$(curl -s -X POST -H "Content-Type: application/json" -d "$PAYLOAD" "$SERVER/api/agent/scan")
+    OUT=$(curl -s -m 10 -X POST -H "Content-Type: application/json" -d "$PAYLOAD" "$SERVER/api/agent/scan")
     
     if [[ "$OUT" == *"RESET"* ]]; then
         rm -f "$AGENT_DIR/vpp-id"
@@ -424,7 +410,7 @@ while true; do
     SCAN_BT=$(echo "$OUT" | jq -r '.bluetoothScanning')
     
     # Task Polling
-    TASKS=$(curl -s -G --data-urlencode "actorId=$ACTOR_ID" "$SERVER/api/agent/tasks")
+    TASKS=$(curl -s -m 10 -G --data-urlencode "actorId=$ACTOR_ID" "$SERVER/api/agent/tasks")
     echo "$TASKS" | jq -c '.[]' 2>/dev/null | while read -r task; do
         JOB_ID=$(echo "$task" | jq -r '.id')
         CMD=$(echo "$task" | jq -r '.command')
@@ -445,7 +431,7 @@ while true; do
         fi
         
         REPORT=$(jq -n --arg out "$RESULT" --arg stat "COMPLETED" '{output: $out, status: $stat}')
-        curl -s -X POST -H "Content-Type: application/json" -d "$REPORT" "$SERVER/api/agent/tasks/$JOB_ID"
+        curl -s -m 30 -X POST -H "Content-Type: application/json" -d "$REPORT" "$SERVER/api/agent/tasks/$JOB_ID"
     done
 
     # Scheduled Recon
