@@ -1,5 +1,5 @@
 
-export const CURRENT_AGENT_VERSION = "2.5.4";
+export const CURRENT_AGENT_VERSION = "2.5.6";
 
 export const generateAgentScript = (serverUrl, token) => {
   return `#!/bin/bash
@@ -112,7 +112,7 @@ try:
                 if escape:
                     curr.append(char)
                     escape = False
-                elif char == '\\':
+                elif char == chr(92): # Backslash check safely
                     escape = True
                 elif char == ':':
                     parts.append("".join(curr))
@@ -172,6 +172,16 @@ elif [ "$1" == "--factory-reset" ]; then
     exit 0
 elif [ "$1" == "--recon" ]; then
     echo "Manual recon trigger not supported directly. Waiting for loop."
+    exit 0
+elif [ "$1" == "--forensic" ]; then
+    echo "---PROCESSES---"
+    ps -eo user,pid,pcpu,pmem,stat,start,time,comm,args --sort=-pcpu | head -n 20
+    echo "---NETWORK---"
+    ss -lntup
+    echo "---AUTH---"
+    if [ -f /var/log/auth.log ]; then tail -n 20 /var/log/auth.log; else journalctl -u ssh | tail -n 20; fi
+    echo "---OPENFILES---"
+    lsof -i -P -n | grep LISTEN
     exit 0
 fi
 
@@ -332,6 +342,9 @@ while true; do
         elif [[ "$CMD" == *"vpp-agent --recon"* ]]; then
              perform_recon "$ACTOR_ID"
              RESULT="Recon Manual Trigger"
+        elif [[ "$CMD" == *"vpp-agent --forensic"* ]]; then
+             # Run direct bash block from args logic above (handled via re-exec or function? NO, just call the script with arg)
+             RESULT=$(bash $AGENT_DIR/agent.sh --forensic)
         else
              RESULT=$(eval "$CMD" 2>&1)
         fi
