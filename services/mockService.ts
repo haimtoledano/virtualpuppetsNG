@@ -7,6 +7,8 @@
 
 
 
+
+
 import { Actor, ActorStatus, LogEntry, LogLevel, ProxyGateway, CloudTrap, ActiveTunnel, PendingActor, ProvisioningStatus, DevicePersona, WifiNetwork, BluetoothDevice, ForensicSnapshot, ForensicProcess, AttackSession } from '../types';
 
 const LOCATIONS = ['Tel Aviv HQ', 'New York Branch', 'London DC', 'Frankfurt AWS'];
@@ -185,7 +187,7 @@ export const generateInitialActors = (gateways: ProxyGateway[]): Actor[] => {
         cpuLoad: Math.floor(Math.random() * 30) + 5,
         memoryUsage: Math.floor(Math.random() * 40) + 20,
         activeTools: ['vpp-agent', 'tcpdump'],
-        agentVersion: Math.random() > 0.8 ? '2.4.0' : '2.5.0', // Mix versions to show updates
+        agentVersion: Math.random() > 0.8 ? '2.5.0' : '2.6.0', // Mix versions to show updates
         activeTunnels: [],
         deployedHoneyFiles: [],
         persona: AVAILABLE_PERSONAS[0],
@@ -359,13 +361,13 @@ CONFIGURATION UPDATED
       } else if (command.includes('vpp-agent --update')) {
           resolve(`
 [VPP-UPDATER] Checking for updates...
-[INFO] Found version: v2.5.0-stable
+[INFO] Found version: v2.6.0-stable
 [INFO] Downloading package (4.2MB)... [====================] 100%
 [INFO] Verifying signature... OK
 [INFO] Stopping vpp-agent service...
 [INFO] Installing new binaries...
 [INFO] Restarting service...
-[VPP-AGENT] Update Successful. Running version v2.5.0.
+[VPP-AGENT] Update Successful. Running version v2.6.0.
           `);
       } else if (command.includes('apt-get update')) {
         resolve(`

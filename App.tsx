@@ -1,8 +1,3 @@
-
-
-
-
-
 import React, { useState, useEffect, useCallback, Suspense } from 'react';
 import { generateInitialActors, generateRandomLog, generateGateways } from './services/mockService';
 import { dbQuery, getSystemConfig, getPendingActors, approvePendingActor, rejectPendingActor, getSystemLogs, sendAuditLog, triggerFleetUpdate } from './services/dbService';
@@ -20,6 +15,8 @@ const Reports = React.lazy(() => import('./components/Reports'));
 const WarRoomMap = React.lazy(() => import('./components/WarRoomMap'));
 const GatewayManager = React.lazy(() => import('./components/GatewayManager'));
 const WirelessRecon = React.lazy(() => import('./components/WirelessRecon'));
+
+const LATEST_VERSION = '2.6.0';
 
 const PageLoader = () => (
   <div className="flex flex-col items-center justify-center h-full w-full text-slate-500 min-h-[400px]">
@@ -168,7 +165,7 @@ const App: React.FC = () => {
       if (!isProduction) {
            const pending = pendingActors.find(p => p.id === pendingId);
            if (!pending) return;
-           const newActor: Actor = { id: `real-${Math.random().toString(36).substr(2,6)}`, proxyId: proxyId, name: name, localIp: pending.detectedIp, status: ActorStatus.ONLINE, lastSeen: new Date(), osVersion: 'Raspbian', cpuLoad: 5, memoryUsage: 15, activeTools: ['vpp-agent'], agentVersion: '2.5.0', activeTunnels: [] };
+           const newActor: Actor = { id: `real-${Math.random().toString(36).substr(2,6)}`, proxyId: proxyId, name: name, localIp: pending.detectedIp, status: ActorStatus.ONLINE, lastSeen: new Date(), osVersion: 'Raspbian', cpuLoad: 5, memoryUsage: 15, activeTools: ['vpp-agent'], agentVersion: LATEST_VERSION, activeTunnels: [] };
            setActors([...actors, newActor]);
            setPendingActors(prev => prev.filter(p => p.id !== pendingId));
            if (activeTab !== 'dashboard') setActiveTab('actors');
@@ -229,7 +226,7 @@ const App: React.FC = () => {
   };
   
   const handleFleetUpdate = async () => {
-      if (!confirm("This will trigger a remote update for all online actors. They may restart. Continue?")) return;
+      if (!confirm(`This will trigger a remote update for all online actors to version ${LATEST_VERSION}. They may restart. Continue?`)) return;
       
       setIsUpdatingFleet(true);
       if (isProduction) {
@@ -237,7 +234,7 @@ const App: React.FC = () => {
       } else {
           // Mock delay
           await new Promise(r => setTimeout(r, 2000));
-          alert("Mock update command sent to 120 agents.");
+          alert(`Mock update command sent to 120 agents (Target: ${LATEST_VERSION}).`);
       }
       setIsUpdatingFleet(false);
   };
@@ -315,7 +312,7 @@ const App: React.FC = () => {
                                         className="bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white px-4 py-2 rounded-lg flex items-center font-bold text-xs border border-slate-700 transition-all disabled:opacity-50"
                                      >
                                          <RefreshCw className={`w-3 h-3 mr-2 ${isUpdatingFleet ? 'animate-spin' : ''}`} />
-                                         {isUpdatingFleet ? 'PUSHING UPDATE...' : 'UPDATE ALL AGENTS (v2.5.0)'}
+                                         {isUpdatingFleet ? 'PUSHING UPDATE...' : `UPDATE ALL AGENTS (v${LATEST_VERSION})`}
                                      </button>
                                      <button 
                                         onClick={() => setIsEnrollmentOpen(true)} 
@@ -331,10 +328,10 @@ const App: React.FC = () => {
                                 <div className="flex items-center text-blue-300">
                                     <Zap className="w-4 h-4 mr-2" />
                                     <span className="font-bold mr-2">Agent Versioning:</span>
-                                    <span>Latest Stable: <span className="text-white font-mono">v2.5.0</span></span>
+                                    <span>Latest Stable: <span className="text-white font-mono">v{LATEST_VERSION}</span></span>
                                 </div>
                                 <div className="flex items-center text-xs text-slate-400">
-                                    <span className="mr-3">{actors.filter(a => a.agentVersion !== '2.5.0').length} agents outdated</span>
+                                    <span className="mr-3">{actors.filter(a => a.agentVersion !== LATEST_VERSION).length} agents outdated</span>
                                     {actors.length > 0 && <span className="bg-emerald-500/20 text-emerald-400 px-2 py-0.5 rounded">System Healthy</span>}
                                 </div>
                             </div>
@@ -344,7 +341,7 @@ const App: React.FC = () => {
                                     <div key={actor.id} onClick={() => setSelectedActorId(actor.id)} className={`cursor-pointer bg-slate-800 p-6 rounded-xl border hover:border-blue-500 transition-all shadow-lg ${actor.status === 'COMPROMISED' ? 'border-red-500 shadow-red-500/20' : 'border-slate-700'}`}>
                                         <div className="flex justify-between items-start mb-2">
                                             <h3 className="text-lg font-bold text-slate-200">{actor.name}</h3>
-                                            <span className={`text-[10px] px-1.5 py-0.5 rounded ${actor.agentVersion !== '2.5.0' ? 'bg-yellow-500/10 text-yellow-500' : 'bg-slate-700 text-slate-400'}`}>
+                                            <span className={`text-[10px] px-1.5 py-0.5 rounded ${actor.agentVersion !== LATEST_VERSION ? 'bg-yellow-500/10 text-yellow-500' : 'bg-slate-700 text-slate-400'}`}>
                                                 v{actor.agentVersion || '1.0.0'}
                                             </span>
                                         </div>
