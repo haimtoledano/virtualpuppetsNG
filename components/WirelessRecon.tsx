@@ -3,7 +3,7 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { WifiNetwork, BluetoothDevice, Actor } from '../types';
 import { getWifiNetworks, getBluetoothDevices } from '../services/dbService';
 import { generateMockWifi, generateMockBluetooth } from '../services/mockService';
-import { Wifi, Bluetooth, Search, Lock, Monitor, Radio, RefreshCw, AlertTriangle, ChevronLeft, ChevronRight, Layers } from 'lucide-react';
+import { Wifi, Bluetooth, Search, Lock, Monitor, Radio, RefreshCw, AlertTriangle, ChevronLeft, ChevronRight, Layers, ArrowUp, ArrowDown, GripVertical } from 'lucide-react';
 
 interface WirelessReconProps {
     isProduction: boolean;
@@ -12,6 +12,25 @@ interface WirelessReconProps {
 
 const ITEMS_PER_PAGE = 10;
 
+// Define available columns for each type
+const DEFAULT_WIFI_COLUMNS = [
+    { id: 'signal', label: 'Signal' },
+    { id: 'name', label: 'SSID / Network Name' },
+    { id: 'mac', label: 'BSSID (MAC)' },
+    { id: 'info', label: 'Security / Channel' },
+    { id: 'actor', label: 'Detected By' },
+    { id: 'time', label: 'Last Seen' }
+];
+
+const DEFAULT_BT_COLUMNS = [
+    { id: 'signal', label: 'Signal' },
+    { id: 'name', label: 'Device Name' },
+    { id: 'mac', label: 'MAC Address' },
+    { id: 'type', label: 'Type' },
+    { id: 'actor', label: 'Detected By' },
+    { id: 'time', label: 'Last Seen' }
+];
+
 const WirelessRecon: React.FC<WirelessReconProps> = ({ isProduction, actors }) => {
     const [activeTab, setActiveTab] = useState<'WIFI' | 'BLUETOOTH'>('WIFI');
     const [wifiList, setWifiList] = useState<WifiNetwork[]>([]);
@@ -19,6 +38,19 @@ const WirelessRecon: React.FC<WirelessReconProps> = ({ isProduction, actors }) =
     const [search, setSearch] = useState('');
     const [isLoading, setIsLoading] = useState(false);
     const [currentPage, setCurrentPage] = useState(1);
+
+    // Sorting State
+    const [sortConfig, setSortConfig] = useState<{ key: string, direction: 'asc' | 'desc' }>({ key: 'signal', direction: 'desc' });
+
+    // Column Order State
+    const [wifiColumns, setWifiColumns] = useState(DEFAULT_WIFI_COLUMNS);
+    const [btColumns, setBtColumns] = useState(DEFAULT_BT_COLUMNS);
+    
+    // Drag State
+    const [draggedColumnIndex, setDraggedColumnIndex] = useState<number | null>(null);
+
+    const activeColumns = activeTab === 'WIFI' ? wifiColumns : btColumns;
+    const setActiveColumns = activeTab === 'WIFI' ? setWifiColumns : setBtColumns;
 
     const loadData = async (force = false) => {
         setIsLoading(true);
@@ -60,6 +92,7 @@ const WirelessRecon: React.FC<WirelessReconProps> = ({ isProduction, actors }) =
     // Reset pagination when tab or search changes
     useEffect(() => {
         setCurrentPage(1);
+        setSortConfig({ key: 'signal', direction: 'desc' }); // Reset sort on tab change
     }, [activeTab, search]);
 
     useEffect(() => {
@@ -69,6 +102,39 @@ const WirelessRecon: React.FC<WirelessReconProps> = ({ isProduction, actors }) =
             }
         }
     }, [actors, activeTab]);
+
+    const handleSort = (key: string) => {
+        setSortConfig(current => {
+            if (current.key === key) {
+                return { key, direction: current.direction === 'asc' ? 'desc' : 'asc' };
+            }
+            return { key, direction: 'asc' }; // Default to asc for new columns, though for signal we might want desc default. Logic handles generic.
+        });
+    };
+
+    // --- Drag and Drop Handlers ---
+    const handleDragStart = (e: React.DragEvent, index: number) => {
+        setDraggedColumnIndex(index);
+        e.dataTransfer.effectAllowed = "move";
+        // Ghost image usually handled by browser, but we can style if needed
+    };
+
+    const handleDragOver = (e: React.DragEvent, index: number) => {
+        e.preventDefault(); // Necessary to allow dropping
+        e.dataTransfer.dropEffect = "move";
+    };
+
+    const handleDrop = (e: React.DragEvent, dropIndex: number) => {
+        e.preventDefault();
+        if (draggedColumnIndex === null || draggedColumnIndex === dropIndex) return;
+
+        const newColumns = [...activeColumns];
+        const [movedColumn] = newColumns.splice(draggedColumnIndex, 1);
+        newColumns.splice(dropIndex, 0, movedColumn);
+        
+        setActiveColumns(newColumns);
+        setDraggedColumnIndex(null);
+    };
 
     const processData = useMemo(() => {
         let rawList: any[] = activeTab === 'WIFI' ? wifiList : btList;
@@ -80,18 +146,15 @@ const WirelessRecon: React.FC<WirelessReconProps> = ({ isProduction, actors }) =
             let key = '';
             if (activeTab === 'WIFI') {
                 const w = item as WifiNetwork;
-                // Dedupe based on SSID + BSSID (MAC)
                 key = `WIFI_${w.ssid}_${w.bssid}`;
             } else {
                 const b = item as BluetoothDevice;
-                // Dedupe based on MAC address
                 key = `BT_${b.mac}`;
             }
 
             if (!uniqueMap.has(key)) {
                 uniqueMap.set(key, item);
             } else {
-                // Keep the most recent entry
                 const existing = uniqueMap.get(key);
                 if (new Date(item.lastSeen) > new Date(existing.lastSeen)) {
                     uniqueMap.set(key, item);
@@ -117,14 +180,46 @@ const WirelessRecon: React.FC<WirelessReconProps> = ({ isProduction, actors }) =
             }
         });
 
-        // 3. Sorting (Signal Strength)
+        // 3. Sorting
         return filtered.sort((a, b) => {
-             const sigA = activeTab === 'WIFI' ? (a as WifiNetwork).signalStrength : (a as BluetoothDevice).rssi;
-             const sigB = activeTab === 'WIFI' ? (b as WifiNetwork).signalStrength : (b as BluetoothDevice).rssi;
-             return sigB - sigA;
+            const dir = sortConfig.direction === 'asc' ? 1 : -1;
+            let valA: any = '';
+            let valB: any = '';
+
+            // Extract values based on column key
+            if (activeTab === 'WIFI') {
+                const wA = a as WifiNetwork;
+                const wB = b as WifiNetwork;
+                switch (sortConfig.key) {
+                    case 'signal': valA = wA.signalStrength; valB = wB.signalStrength; break;
+                    case 'name': valA = wA.ssid || ''; valB = wB.ssid || ''; break;
+                    case 'mac': valA = wA.bssid; valB = wB.bssid; break;
+                    case 'info': valA = wA.security; valB = wB.security; break; // Sort by security
+                    case 'actor': valA = wA.actorName; valB = wB.actorName; break;
+                    case 'time': valA = new Date(wA.lastSeen).getTime(); valB = new Date(wB.lastSeen).getTime(); break;
+                    default: return 0;
+                }
+            } else {
+                const bA = a as BluetoothDevice;
+                const bB = b as BluetoothDevice;
+                switch (sortConfig.key) {
+                    case 'signal': valA = bA.rssi; valB = bB.rssi; break;
+                    case 'name': valA = bA.name || ''; valB = bB.name || ''; break;
+                    case 'mac': valA = bA.mac; valB = bB.mac; break;
+                    case 'type': valA = bA.type; valB = bB.type; break;
+                    case 'actor': valA = bA.actorName; valB = bB.actorName; break;
+                    case 'time': valA = new Date(bA.lastSeen).getTime(); valB = new Date(bB.lastSeen).getTime(); break;
+                    default: return 0;
+                }
+            }
+
+            // Compare
+            if (valA < valB) return -1 * dir;
+            if (valA > valB) return 1 * dir;
+            return 0;
         });
 
-    }, [wifiList, btList, activeTab, search]);
+    }, [wifiList, btList, activeTab, search, sortConfig]);
 
     // Pagination Logic
     const totalPages = Math.ceil(processData.length / ITEMS_PER_PAGE);
@@ -153,6 +248,85 @@ const WirelessRecon: React.FC<WirelessReconProps> = ({ isProduction, actors }) =
                 <div className={`w-1 rounded-sm ${bars >= 4 ? getSignalColor(dbm) : 'bg-slate-700'} h-4`}></div>
             </div>
         );
+    };
+
+    const renderCell = (item: any, columnId: string) => {
+        if (activeTab === 'WIFI') {
+            const net = item as WifiNetwork;
+            switch (columnId) {
+                case 'signal':
+                    return (
+                        <div className="flex items-center space-x-2" title={`${net.signalStrength} dBm`}>
+                            {getSignalBars(net.signalStrength)}
+                            <span className="text-xs font-mono text-slate-500">{net.signalStrength}</span>
+                        </div>
+                    );
+                case 'name':
+                    return (
+                        <span className="font-bold text-white">
+                            {net.ssid || <span className="text-slate-600 italic">&lt;Hidden SSID&gt;</span>}
+                        </span>
+                    );
+                case 'mac':
+                    return <span className="font-mono text-slate-400 text-xs">{net.bssid}</span>;
+                case 'info':
+                    return (
+                        <div className="flex flex-col">
+                            <span className={`text-xs font-bold ${net.security === 'OPEN' ? 'text-red-400' : 'text-emerald-400'}`}>
+                                {net.security === 'OPEN' ? <span className="flex items-center"><Lock className="w-3 h-3 mr-1"/> OPEN</span> : net.security}
+                            </span>
+                            <span className="text-[10px] text-slate-500">Channel {net.channel}</span>
+                        </div>
+                    );
+                case 'actor':
+                    return (
+                        <div className="flex items-center text-xs text-slate-300">
+                            <Monitor className="w-3 h-3 mr-1.5 text-cyan-500" />
+                            {net.actorName}
+                        </div>
+                    );
+                case 'time':
+                    return <span className="text-right text-xs text-slate-500 font-mono">{new Date(net.lastSeen).toLocaleTimeString()}</span>;
+                default:
+                    return null;
+            }
+        } else {
+            const bt = item as BluetoothDevice;
+            switch (columnId) {
+                case 'signal':
+                    return (
+                        <div className="flex items-center space-x-2" title={`${bt.rssi} dBm`}>
+                            {getSignalBars(bt.rssi)}
+                            <span className="text-xs font-mono text-slate-500">{bt.rssi}</span>
+                        </div>
+                    );
+                case 'name':
+                    return (
+                        <span className="font-bold text-white">
+                            {bt.name || <span className="text-slate-600 italic">Unknown Device</span>}
+                        </span>
+                    );
+                case 'mac':
+                     return <span className="font-mono text-slate-400 text-xs">{bt.mac}</span>;
+                case 'type':
+                    return (
+                         <span className="px-2 py-0.5 rounded bg-blue-900/30 text-blue-400 text-[10px] border border-blue-800">
+                            {bt.type}
+                        </span>
+                    );
+                case 'actor':
+                    return (
+                        <div className="flex items-center text-xs text-slate-300">
+                            <Monitor className="w-3 h-3 mr-1.5 text-cyan-500" />
+                            {bt.actorName}
+                        </div>
+                    );
+                case 'time':
+                    return <span className="text-right text-xs text-slate-500 font-mono">{new Date(bt.lastSeen).toLocaleTimeString()}</span>;
+                default:
+                    return null;
+            }
+        }
     };
 
     return (
@@ -225,91 +399,51 @@ const WirelessRecon: React.FC<WirelessReconProps> = ({ isProduction, actors }) =
             <div className="bg-slate-800 rounded-xl border border-slate-700 overflow-hidden shadow-lg flex flex-col min-h-[400px]">
                 <div className="flex-1 overflow-x-auto">
                     <table className="w-full text-left text-sm">
-                        <thead className="bg-slate-900 text-slate-400 border-b border-slate-700">
+                        <thead className="bg-slate-900 text-slate-400 border-b border-slate-700 select-none">
                             <tr>
-                                <th className="p-4 font-bold uppercase text-xs w-24">Signal</th>
-                                <th className="p-4 font-bold uppercase text-xs">{activeTab === 'WIFI' ? 'SSID / Network Name' : 'Device Name'}</th>
-                                <th className="p-4 font-bold uppercase text-xs">{activeTab === 'WIFI' ? 'BSSID (MAC)' : 'MAC Address'}</th>
-                                <th className="p-4 font-bold uppercase text-xs">{activeTab === 'WIFI' ? 'Security / Channel' : 'Type'}</th>
-                                <th className="p-4 font-bold uppercase text-xs">Detected By</th>
-                                <th className="p-4 font-bold uppercase text-xs text-right">Last Seen</th>
+                                {activeColumns.map((col, index) => (
+                                    <th 
+                                        key={col.id}
+                                        draggable
+                                        onDragStart={(e) => handleDragStart(e, index)}
+                                        onDragOver={(e) => handleDragOver(e, index)}
+                                        onDrop={(e) => handleDrop(e, index)}
+                                        onClick={() => handleSort(col.id)}
+                                        className={`p-4 font-bold uppercase text-xs cursor-pointer hover:bg-slate-800 hover:text-white transition-colors group ${draggedColumnIndex === index ? 'opacity-50 bg-slate-800' : ''}`}
+                                    >
+                                        <div className="flex items-center justify-between">
+                                            <div className="flex items-center">
+                                                <GripVertical className="w-3 h-3 mr-2 text-slate-600 cursor-grab active:cursor-grabbing opacity-0 group-hover:opacity-100 transition-opacity" />
+                                                {col.label}
+                                            </div>
+                                            {sortConfig.key === col.id && (
+                                                sortConfig.direction === 'asc' 
+                                                ? <ArrowUp className="w-3 h-3 text-cyan-400" /> 
+                                                : <ArrowDown className="w-3 h-3 text-cyan-400" />
+                                            )}
+                                        </div>
+                                    </th>
+                                ))}
                             </tr>
                         </thead>
                         <tbody className="divide-y divide-slate-700/50">
                             {paginatedData.length === 0 ? (
                                 <tr>
-                                    <td colSpan={6} className="p-12 text-center text-slate-500 italic">
+                                    <td colSpan={activeColumns.length} className="p-12 text-center text-slate-500 italic">
                                         <Layers className="w-10 h-10 mx-auto mb-2 opacity-20" />
                                         No unique {activeTab === 'WIFI' ? 'Wi-Fi networks' : 'Bluetooth devices'} found.
                                     </td>
                                 </tr>
                             ) : (
-                                paginatedData.map((item, idx) => {
-                                    if (activeTab === 'WIFI') {
-                                        const net = item as WifiNetwork;
-                                        return (
-                                            <tr key={`${net.id}-${idx}`} className="hover:bg-slate-700/30 transition-colors group">
-                                                <td className="p-4">
-                                                    <div className="flex items-center space-x-2" title={`${net.signalStrength} dBm`}>
-                                                        {getSignalBars(net.signalStrength)}
-                                                        <span className="text-xs font-mono text-slate-500">{net.signalStrength}</span>
-                                                    </div>
-                                                </td>
-                                                <td className="p-4 font-bold text-white">
-                                                    {net.ssid || <span className="text-slate-600 italic">&lt;Hidden SSID&gt;</span>}
-                                                </td>
-                                                <td className="p-4 font-mono text-slate-400 text-xs">{net.bssid}</td>
-                                                <td className="p-4">
-                                                    <div className="flex flex-col">
-                                                        <span className={`text-xs font-bold ${net.security === 'OPEN' ? 'text-red-400' : 'text-emerald-400'}`}>
-                                                            {net.security === 'OPEN' ? <span className="flex items-center"><Lock className="w-3 h-3 mr-1"/> OPEN</span> : net.security}
-                                                        </span>
-                                                        <span className="text-[10px] text-slate-500">Channel {net.channel}</span>
-                                                    </div>
-                                                </td>
-                                                <td className="p-4">
-                                                    <div className="flex items-center text-xs text-slate-300">
-                                                        <Monitor className="w-3 h-3 mr-1.5 text-cyan-500" />
-                                                        {net.actorName}
-                                                    </div>
-                                                </td>
-                                                <td className="p-4 text-right text-xs text-slate-500 font-mono">
-                                                    {new Date(net.lastSeen).toLocaleTimeString()}
-                                                </td>
-                                            </tr>
-                                        );
-                                    } else {
-                                        const bt = item as BluetoothDevice;
-                                        return (
-                                            <tr key={`${bt.id}-${idx}`} className="hover:bg-slate-700/30 transition-colors group">
-                                                <td className="p-4">
-                                                    <div className="flex items-center space-x-2" title={`${bt.rssi} dBm`}>
-                                                        {getSignalBars(bt.rssi)}
-                                                        <span className="text-xs font-mono text-slate-500">{bt.rssi}</span>
-                                                    </div>
-                                                </td>
-                                                <td className="p-4 font-bold text-white">
-                                                    {bt.name || <span className="text-slate-600 italic">Unknown Device</span>}
-                                                </td>
-                                                <td className="p-4 font-mono text-slate-400 text-xs">{bt.mac}</td>
-                                                <td className="p-4">
-                                                    <span className="px-2 py-0.5 rounded bg-blue-900/30 text-blue-400 text-[10px] border border-blue-800">
-                                                        {bt.type}
-                                                    </span>
-                                                </td>
-                                                <td className="p-4">
-                                                    <div className="flex items-center text-xs text-slate-300">
-                                                        <Monitor className="w-3 h-3 mr-1.5 text-cyan-500" />
-                                                        {bt.actorName}
-                                                    </div>
-                                                </td>
-                                                <td className="p-4 text-right text-xs text-slate-500 font-mono">
-                                                    {new Date(bt.lastSeen).toLocaleTimeString()}
-                                                </td>
-                                            </tr>
-                                        );
-                                    }
-                                })
+                                paginatedData.map((item, idx) => (
+                                    <tr key={`${(item as any).id}-${idx}`} className="hover:bg-slate-700/30 transition-colors group">
+                                        {activeColumns.map(col => (
+                                            <td key={col.id} className="p-4">
+                                                {renderCell(item, col.id)}
+                                            </td>
+                                        ))}
+                                    </tr>
+                                ))
                             )}
                         </tbody>
                     </table>
