@@ -378,6 +378,17 @@ router.post('/agent/recon', async (req, res) => {
         return res.json({success: false, error: "Invalid Data"});
     }
 
+    // RESOLVE ACTOR NAME FROM DB TO DISPLAY IN RECON TABLE
+    let resolvedActorName = 'Agent';
+    try {
+        const actorResult = await db.request().input('aid_lookup', sql.NVarChar, actorId).query("SELECT Name FROM Actors WHERE ActorId = @aid_lookup");
+        if (actorResult.recordset.length > 0) {
+            resolvedActorName = actorResult.recordset[0].Name;
+        }
+    } catch (e) {
+        console.warn("[API-RECON] Failed to resolve actor name:", e.message);
+    }
+
     try {
         if (type === 'WIFI') {
              let successCount = 0;
@@ -402,11 +413,11 @@ router.post('/agent/recon', async (req, res) => {
                         .input('sec', net.security || 'OPEN')
                         .input('ch', net.channel || 0)
                         .input('aid', actorId)
-                        .input('aname', net.actorName || 'Agent')
+                        .input('aname', resolvedActorName) // Use resolved name
                         .query(`
                             MERGE WifiNetworks AS target
                             USING (SELECT @id AS Id) AS source ON (target.Id = source.Id)
-                            WHEN MATCHED THEN UPDATE SET SignalStrength=@sig, LastSeen=GETDATE()
+                            WHEN MATCHED THEN UPDATE SET SignalStrength=@sig, LastSeen=GETDATE(), ActorName=@aname
                             WHEN NOT MATCHED THEN INSERT (Id, Ssid, Bssid, SignalStrength, Security, Channel, ActorId, ActorName, LastSeen)
                             VALUES (@id, @ssid, @bssid, @sig, @sec, @ch, @aid, @aname, GETDATE());
                         `);
@@ -431,11 +442,11 @@ router.post('/agent/recon', async (req, res) => {
                         .input('rssi', dev.rssi || 0)
                         .input('type', dev.type || 'UNKNOWN')
                         .input('aid', actorId)
-                        .input('aname', dev.actorName || 'Agent')
+                        .input('aname', resolvedActorName) // Use resolved name
                         .query(`
                             MERGE BluetoothDevices AS target
                             USING (SELECT @id AS Id) AS source ON (target.Id = source.Id)
-                            WHEN MATCHED THEN UPDATE SET Rssi=@rssi, LastSeen=GETDATE()
+                            WHEN MATCHED THEN UPDATE SET Rssi=@rssi, LastSeen=GETDATE(), ActorName=@aname
                             WHEN NOT MATCHED THEN INSERT (Id, Name, Mac, Rssi, Type, ActorId, ActorName, LastSeen)
                             VALUES (@id, @name, @mac, @rssi, @type, @aid, @aname, GETDATE());
                         `);
