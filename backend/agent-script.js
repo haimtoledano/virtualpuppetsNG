@@ -1,5 +1,5 @@
 
-export const CURRENT_AGENT_VERSION = "2.5.2";
+export const CURRENT_AGENT_VERSION = "2.5.3";
 
 export const generateAgentScript = (serverUrl, token) => {
   return `#!/bin/bash
@@ -75,18 +75,45 @@ chmod +x $AGENT_DIR/trap_relay.sh
 
 # Create Python Parser for Robust WiFi Scanning
 cat <<'EOF_PY' > $AGENT_DIR/wifi_scan.py
-import subprocess, json, sys
+import subprocess, json, sys, os
+
+def get_nmcli_output():
+    # Try common paths and bare command
+    commands = [
+        ['nmcli', '-t', '-f', 'SSID,BSSID,SIGNAL,SECURITY,CHAN', 'device', 'wifi', 'list'],
+        ['/usr/bin/nmcli', '-t', '-f', 'SSID,BSSID,SIGNAL,SECURITY,CHAN', 'device', 'wifi', 'list'],
+        ['/bin/nmcli', '-t', '-f', 'SSID,BSSID,SIGNAL,SECURITY,CHAN', 'device', 'wifi', 'list']
+    ]
+    
+    for cmd in commands:
+        try:
+            # Run and capture stdout, ignore stderr
+            return subprocess.check_output(cmd, stderr=subprocess.DEVNULL).decode('utf-8', 'ignore')
+        except:
+            continue
+    return None
 
 try:
-    # Run nmcli command
-    cmd = ['nmcli', '-t', '-f', 'SSID,BSSID,SIGNAL,SECURITY,CHAN', 'device', 'wifi', 'list']
-    # Use ignore errors to prevent crashes on non-utf8 SSIDs
-    output = subprocess.check_output(cmd).decode('utf-8', 'ignore')
+    output = get_nmcli_output()
+    
+    if output is None:
+        sys.stderr.write("[DEBUG] Error: nmcli command failed to execute in any path.\\n")
+        print("[]")
+        sys.exit(0)
+    
+    if not output.strip():
+        sys.stderr.write("[DEBUG] Warning: nmcli executed but returned blank output.\\n")
+        print("[]")
+        sys.exit(0)
+
+    # Log the first line for debugging format
+    first_line = output.splitlines()[0]
+    sys.stderr.write(f"[DEBUG] Scan success. First line raw: {first_line}\\n")
     
     data = []
-    # Limit to 30 strongest networks to prevent payload bloat
-    for line in output.splitlines()[:30]:
-        # Robust parsing for escaped colons
+    # Limit to 40 strongest networks
+    for line in output.splitlines()[:40]:
+        # Robust parsing for escaped colons (nmcli -t escapes colons as \:)
         parts = []
         curr = []
         escape = False
@@ -105,10 +132,12 @@ try:
         
         if len(parts) >= 5:
             ssid = parts[0]
-            if not ssid: ssid = "<Hidden>"
+            # Replace empty SSID with Hidden tag
+            if not ssid or ssid.strip() == "": 
+                ssid = "<Hidden>"
             
             try: signal = int(parts[2])
-            except: signal = 0
+            except: signal = -99
             
             try: chan = int(parts[4])
             except: chan = 0
@@ -122,9 +151,10 @@ try:
             })
             
     print(json.dumps(data))
+
 except Exception as e:
-    # Fallback empty array on error
-    sys.stderr.write(str(e))
+    # Fallback empty array on crash
+    sys.stderr.write(f"[DEBUG] Python Script Crash: {str(e)}\\n")
     print("[]")
 EOF_PY
 
@@ -208,24 +238,30 @@ perform_recon() {
     if command -v nmcli &> /dev/null; then
         # Use robust Python parser
         WIFIDATA=$(python3 $AGENT_DIR/wifi_scan.py)
-        COUNT=$(echo "$WIFIDATA" | grep -o "ssid" | wc -l)
         
-        if [ "$COUNT" -gt 0 ]; then
-            log "[RECON] WiFi: Found $COUNT networks, constructing payload..."
-            
-            # Construct payload safely using --argjson
-            JSON=$(jq -n --arg aid "$AID" --argjson d "$WIFIDATA" '{actorId: $aid, type: "WIFI", data: $d}')
-            
-            log "[RECON] Uploading to $SERVER/api/agent/recon ..."
-            
-            # Capture HTTP Code AND Body for debugging
-            RESPONSE=$(curl -s -w "\n%{http_code}" -X POST -H "Content-Type: application/json" -d "$JSON" "$SERVER/api/agent/recon")
-            HTTP_CODE=$(echo "$RESPONSE" | tail -n1)
-            BODY=$(echo "$RESPONSE" | head -n -1)
-            
-            log "[RECON] Upload Result: HTTP $HTTP_CODE | Response: $BODY"
+        # Check if valid JSON array
+        if [[ "$WIFIDATA" == "["* ]]; then
+             COUNT=$(echo "$WIFIDATA" | jq '. | length')
+             
+             if [ "$COUNT" -gt 0 ]; then
+                log "[RECON] WiFi: Found $COUNT networks, constructing payload..."
+                
+                # Construct payload safely using --argjson
+                JSON=$(jq -n --arg aid "$AID" --argjson d "$WIFIDATA" '{actorId: $aid, type: "WIFI", data: $d}')
+                
+                log "[RECON] Uploading to $SERVER/api/agent/recon ..."
+                
+                # Capture HTTP Code AND Body for debugging
+                RESPONSE=$(curl -s -w "\n%{http_code}" -X POST -H "Content-Type: application/json" -d "$JSON" "$SERVER/api/agent/recon")
+                HTTP_CODE=$(echo "$RESPONSE" | tail -n1)
+                BODY=$(echo "$RESPONSE" | head -n -1)
+                
+                log "[RECON] Upload Result: HTTP $HTTP_CODE | Response: $BODY"
+            else
+                log "[RECON] WiFi: No networks found (Python parser returned empty list)."
+            fi
         else
-            log "[RECON] WiFi: No networks found (Python parser returned empty)."
+             log "[RECON] Critical: Python script output invalid JSON: $WIFIDATA"
         fi
     else
         log "[RECON] Error: nmcli not found."
