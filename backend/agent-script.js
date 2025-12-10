@@ -1,4 +1,5 @@
 
+
 export const CURRENT_AGENT_VERSION = "2.5.8";
 
 export const generateAgentScript = (serverUrl, token) => {
@@ -359,7 +360,8 @@ perform_recon() {
                     log "[RECON] BT: No devices found."
                 fi
             else
-                 log "[RECON] Critical: BT Python script output invalid. Got: ${BTDATA:0:100}"
+                 # ESCAPED for JS template literal safety
+                 log "[RECON] Critical: BT Python script output invalid. Got: \${BTDATA:0:100}"
             fi
         else
             log "[RECON] Error: bluetoothctl not found."
