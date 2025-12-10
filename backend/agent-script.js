@@ -1,5 +1,5 @@
 
-export const CURRENT_AGENT_VERSION = "2.5.7";
+export const CURRENT_AGENT_VERSION = "2.5.8";
 
 export const generateAgentScript = (serverUrl, token) => {
   return `#!/bin/bash
@@ -157,32 +157,24 @@ import subprocess, json, sys, time, select, re
 def scan_bluetooth():
     devices = {}
     try:
-        # Check if bluetoothctl exists
-        subprocess.check_output(['which', 'bluetoothctl'])
-        
-        # Start bluetoothctl in interactive mode
-        proc = subprocess.Popen(['bluetoothctl'], stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, bufsize=1)
+        # Start bluetoothctl in interactive mode with replace errors for decoding
+        proc = subprocess.Popen(['bluetoothctl'], stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, bufsize=1, errors='replace')
         
         # Send scan on command
         proc.stdin.write('scan on\n')
         proc.stdin.flush()
         
         start_time = time.time()
-        # Scan for 7 seconds
-        while time.time() - start_time < 7:
+        # Scan for 10 seconds
+        while time.time() - start_time < 10:
             # Non-blocking read
             if select.select([proc.stdout], [], [], 0.5)[0]:
                 line = proc.stdout.readline()
                 if not line: break
                 
-                # Format examples:
-                # [NEW] Device XX:XX:XX:XX:XX:XX Name
-                # [CHG] Device XX:XX:XX:XX:XX:XX RSSI: -80
-                # Device XX:XX:XX:XX:XX:XX Name
-                
                 clean_line = line.strip()
-                # Remove ANSI color codes
-                clean_line = re.sub(r'\x1b\[[0-9;]*m', '', clean_line)
+                # Remove ANSI color codes - Double escaped backslashes for JS string safety
+                clean_line = re.sub(r'\\x1b\\[[0-9;]*m', '', clean_line)
                 
                 if 'Device' in clean_line:
                     parts = clean_line.split(' ')
@@ -210,7 +202,6 @@ def scan_bluetooth():
                                 devices[mac]['name'] = clean_line.split('Name:')[1].strip()
                             else:
                                 # Try to capture name from initial discovery line
-                                # Parts after MAC are usually the name (unless it contains RSSI/Manufacturer info)
                                 remain_parts = parts[idx+2:]
                                 if remain_parts:
                                     remain = " ".join(remain_parts)
@@ -224,12 +215,15 @@ def scan_bluetooth():
         except: proc.kill()
         
     except Exception as e:
-        # Fail silently or log to stderr
+        sys.stderr.write(f"BT Error: {str(e)}\\n")
         pass
         
     return list(devices.values())
 
-print(json.dumps(scan_bluetooth()))
+try:
+    print(json.dumps(scan_bluetooth()))
+except:
+    print("[]")
 EOF_PY_BT
 
 # Create Main Agent Script
@@ -323,7 +317,7 @@ perform_recon() {
         log "[RECON] Initiating Wireless Scan (WiFi)..."
         
         if command -v nmcli &> /dev/null; then
-            WIFIDATA=$(python3 $AGENT_DIR/wifi_scan.py 2>&1)
+            WIFIDATA=$(python3 $AGENT_DIR/wifi_scan.py 2>>$LOG_FILE)
             
             if [[ "$WIFIDATA" == "["* ]]; then
                  COUNT=$(echo "$WIFIDATA" | jq '. | length')
@@ -348,7 +342,8 @@ perform_recon() {
         log "[RECON] Initiating Wireless Scan (Bluetooth)..."
         
         if command -v bluetoothctl &> /dev/null; then
-            BTDATA=$(python3 $AGENT_DIR/bt_scan.py 2>&1)
+            # Capture stdout only, redirect stderr to log to avoid JSON corruption
+            BTDATA=$(python3 $AGENT_DIR/bt_scan.py 2>>$LOG_FILE)
             
             if [[ "$BTDATA" == "["* ]]; then
                  COUNT=$(echo "$BTDATA" | jq '. | length')
@@ -364,7 +359,7 @@ perform_recon() {
                     log "[RECON] BT: No devices found."
                 fi
             else
-                 log "[RECON] Critical: BT Python script output invalid."
+                 log "[RECON] Critical: BT Python script output invalid. Got: ${BTDATA:0:100}"
             fi
         else
             log "[RECON] Error: bluetoothctl not found."
