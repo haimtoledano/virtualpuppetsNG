@@ -1,5 +1,5 @@
 
-export const CURRENT_AGENT_VERSION = "2.5.6";
+export const CURRENT_AGENT_VERSION = "2.5.7";
 
 export const generateAgentScript = (serverUrl, token) => {
   return `#!/bin/bash
@@ -150,6 +150,88 @@ except Exception as e:
 sys.stdout.flush()
 EOF_PY
 
+# Create Python Script for Bluetooth Scanning
+cat <<'EOF_PY_BT' > $AGENT_DIR/bt_scan.py
+import subprocess, json, sys, time, select, re
+
+def scan_bluetooth():
+    devices = {}
+    try:
+        # Check if bluetoothctl exists
+        subprocess.check_output(['which', 'bluetoothctl'])
+        
+        # Start bluetoothctl in interactive mode
+        proc = subprocess.Popen(['bluetoothctl'], stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, bufsize=1)
+        
+        # Send scan on command
+        proc.stdin.write('scan on\n')
+        proc.stdin.flush()
+        
+        start_time = time.time()
+        # Scan for 7 seconds
+        while time.time() - start_time < 7:
+            # Non-blocking read
+            if select.select([proc.stdout], [], [], 0.5)[0]:
+                line = proc.stdout.readline()
+                if not line: break
+                
+                # Format examples:
+                # [NEW] Device XX:XX:XX:XX:XX:XX Name
+                # [CHG] Device XX:XX:XX:XX:XX:XX RSSI: -80
+                # Device XX:XX:XX:XX:XX:XX Name
+                
+                clean_line = line.strip()
+                # Remove ANSI color codes
+                clean_line = re.sub(r'\x1b\[[0-9;]*m', '', clean_line)
+                
+                if 'Device' in clean_line:
+                    parts = clean_line.split(' ')
+                    try:
+                        # Find where 'Device' occurs
+                        idx = parts.index('Device')
+                        if len(parts) > idx + 1:
+                            mac = parts[idx+1]
+                            
+                            # Simple MAC Validation
+                            if not re.match(r"([0-9A-Fa-f]{2}:){5}[0-9A-Fa-f]{2}", mac):
+                                continue
+                                
+                            if mac not in devices:
+                                devices[mac] = {"mac": mac, "name": "Unknown", "rssi": -90, "type": "CLASSIC"}
+                            
+                            # Check for RSSI update
+                            if 'RSSI:' in clean_line:
+                                try:
+                                    rssi_str = clean_line.split('RSSI:')[1].strip()
+                                    devices[mac]['rssi'] = int(rssi_str)
+                                except: pass
+                            # Check for Name update
+                            elif 'Name:' in clean_line:
+                                devices[mac]['name'] = clean_line.split('Name:')[1].strip()
+                            else:
+                                # Try to capture name from initial discovery line
+                                # Parts after MAC are usually the name (unless it contains RSSI/Manufacturer info)
+                                remain_parts = parts[idx+2:]
+                                if remain_parts:
+                                    remain = " ".join(remain_parts)
+                                    if 'RSSI' not in remain and 'Manufacturer' not in remain:
+                                        devices[mac]['name'] = remain
+                    except: continue
+
+        # Terminate process
+        proc.terminate()
+        try: proc.wait(timeout=1)
+        except: proc.kill()
+        
+    except Exception as e:
+        # Fail silently or log to stderr
+        pass
+        
+    return list(devices.values())
+
+print(json.dumps(scan_bluetooth()))
+EOF_PY_BT
+
 # Create Main Agent Script
 cat <<'EOF_SRV' > $AGENT_DIR/agent.sh
 #!/bin/bash
@@ -235,43 +317,58 @@ get_metrics() {
 
 perform_recon() {
     local AID="$1"
-    log "[RECON] Initiating Wireless Scan..."
+    local TYPE="$2"
     
-    if command -v nmcli &> /dev/null; then
-        # Capture stderr (2>&1) so we see errors in the variable if python fails
-        WIFIDATA=$(python3 $AGENT_DIR/wifi_scan.py 2>&1)
+    if [ "$TYPE" == "WIFI" ]; then
+        log "[RECON] Initiating Wireless Scan (WiFi)..."
         
-        # Check if valid JSON array
-        if [[ "$WIFIDATA" == "["* ]]; then
-             COUNT=$(echo "$WIFIDATA" | jq '. | length')
-             
-             if [ "$COUNT" -gt 0 ]; then
-                log "[RECON] WiFi: Found $COUNT networks, constructing payload..."
-                
-                # Construct payload safely using --argjson
-                JSON=$(jq -n --arg aid "$AID" --argjson d "$WIFIDATA" '{actorId: $aid, type: "WIFI", data: $d}')
-                
-                log "[RECON] Uploading to $SERVER/api/agent/recon ..."
-                
-                # Capture HTTP Code AND Body for debugging
-                RESPONSE=$(curl -s -w "\n%{http_code}" -X POST -H "Content-Type: application/json" -d "$JSON" "$SERVER/api/agent/recon")
-                HTTP_CODE=$(echo "$RESPONSE" | tail -n1)
-                BODY=$(echo "$RESPONSE" | head -n -1)
-                
-                log "[RECON] Upload Result: HTTP $HTTP_CODE | Response: $BODY"
+        if command -v nmcli &> /dev/null; then
+            WIFIDATA=$(python3 $AGENT_DIR/wifi_scan.py 2>&1)
+            
+            if [[ "$WIFIDATA" == "["* ]]; then
+                 COUNT=$(echo "$WIFIDATA" | jq '. | length')
+                 
+                 if [ "$COUNT" -gt 0 ]; then
+                    log "[RECON] WiFi: Found $COUNT networks, constructing payload..."
+                    JSON=$(jq -n --arg aid "$AID" --argjson d "$WIFIDATA" '{actorId: $aid, type: "WIFI", data: $d}')
+                    
+                    RESPONSE=$(curl -s -w "\n%{http_code}" -X POST -H "Content-Type: application/json" -d "$JSON" "$SERVER/api/agent/recon")
+                    HTTP_CODE=$(echo "$RESPONSE" | tail -n1)
+                    log "[RECON] WiFi Upload Result: HTTP $HTTP_CODE"
+                else
+                    log "[RECON] WiFi: No networks found."
+                fi
             else
-                log "[RECON] WiFi: No networks found (Python parser returned empty list)."
+                 log "[RECON] Critical: WiFi Python script output invalid."
+            fi
+        fi
+    fi
+
+    if [ "$TYPE" == "BLUETOOTH" ]; then
+        log "[RECON] Initiating Wireless Scan (Bluetooth)..."
+        
+        if command -v bluetoothctl &> /dev/null; then
+            BTDATA=$(python3 $AGENT_DIR/bt_scan.py 2>&1)
+            
+            if [[ "$BTDATA" == "["* ]]; then
+                 COUNT=$(echo "$BTDATA" | jq '. | length')
+                 
+                 if [ "$COUNT" -gt 0 ]; then
+                    log "[RECON] BT: Found $COUNT devices, constructing payload..."
+                    JSON=$(jq -n --arg aid "$AID" --argjson d "$BTDATA" '{actorId: $aid, type: "BLUETOOTH", data: $d}')
+                    
+                    RESPONSE=$(curl -s -w "\n%{http_code}" -X POST -H "Content-Type: application/json" -d "$JSON" "$SERVER/api/agent/recon")
+                    HTTP_CODE=$(echo "$RESPONSE" | tail -n1)
+                    log "[RECON] BT Upload Result: HTTP $HTTP_CODE"
+                else
+                    log "[RECON] BT: No devices found."
+                fi
+            else
+                 log "[RECON] Critical: BT Python script output invalid."
             fi
         else
-             log "[RECON] Critical: Python script failed or output invalid JSON."
-             log "[RECON] Raw Output was: $WIFIDATA"
-             
-             # Fallback Debug: Run raw nmcli to see what's happening
-             log "[RECON] DEBUG: Running raw 'nmcli dev wifi list' to check hardware..."
-             nmcli device wifi list >> $LOG_FILE 2>&1
+            log "[RECON] Error: bluetoothctl not found."
         fi
-    else
-        log "[RECON] Error: nmcli not found."
     fi
 }
 
@@ -327,6 +424,7 @@ while true; do
     fi
     
     SCAN_WIFI=$(echo "$OUT" | jq -r '.wifiScanning')
+    SCAN_BT=$(echo "$OUT" | jq -r '.bluetoothScanning')
     
     # Task Polling
     TASKS=$(curl -s -G --data-urlencode "actorId=$ACTOR_ID" "$SERVER/api/agent/tasks")
@@ -340,10 +438,10 @@ while true; do
             curl -sL "$SERVER/api/setup?token=$(cat $AGENT_DIR/.token)" | bash
             exit 0
         elif [[ "$CMD" == *"vpp-agent --recon"* ]]; then
-             perform_recon "$ACTOR_ID"
-             RESULT="Recon Manual Trigger"
+             perform_recon "$ACTOR_ID" "WIFI"
+             perform_recon "$ACTOR_ID" "BLUETOOTH"
+             RESULT="Recon Manual Trigger Completed"
         elif [[ "$CMD" == *"vpp-agent --forensic"* ]]; then
-             # Run direct bash block from args logic above (handled via re-exec or function? NO, just call the script with arg)
              RESULT=$(bash $AGENT_DIR/agent.sh --forensic)
         else
              RESULT=$(eval "$CMD" 2>&1)
@@ -358,7 +456,12 @@ while true; do
     if [ $LOOP_COUNT -ge 12 ]; then
         LOOP_COUNT=0
         if [ "$SCAN_WIFI" == "true" ]; then
-             perform_recon "$ACTOR_ID"
+             perform_recon "$ACTOR_ID" "WIFI"
+        fi
+        # Small delay between scans if both are enabled
+        if [ "$SCAN_BT" == "true" ]; then
+             sleep 2
+             perform_recon "$ACTOR_ID" "BLUETOOTH"
         fi
     fi
 
