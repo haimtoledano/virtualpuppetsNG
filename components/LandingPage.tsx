@@ -8,7 +8,7 @@ interface LandingPageProps {
 
 const LandingPage: React.FC<LandingPageProps> = ({ onLoginClick }) => {
   return (
-    <div className="min-h-screen bg-cyber-900 text-slate-200 font-sans selection:bg-blue-500/30 overflow-x-hidden">
+    <div className="h-screen w-full bg-cyber-900 text-slate-200 font-sans selection:bg-blue-500/30 overflow-y-auto overflow-x-hidden scroll-smooth">
       
       {/* Background Effects */}
       <div className="fixed inset-0 pointer-events-none">
