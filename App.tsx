@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect, useCallback, Suspense } from 'react';
 import { generateInitialActors, generateRandomLog, generateGateways } from './services/mockService';
 import { dbQuery, getSystemConfig, getPendingActors, approvePendingActor, rejectPendingActor, getSystemLogs, sendAuditLog, triggerFleetUpdate } from './services/dbService';
@@ -15,6 +16,7 @@ const Reports = React.lazy(() => import('./components/Reports'));
 const WarRoomMap = React.lazy(() => import('./components/WarRoomMap'));
 const GatewayManager = React.lazy(() => import('./components/GatewayManager'));
 const WirelessRecon = React.lazy(() => import('./components/WirelessRecon'));
+const LandingPage = React.lazy(() => import('./components/LandingPage'));
 
 const LATEST_VERSION = '2.6.0';
 
@@ -31,6 +33,7 @@ const App: React.FC = () => {
       const savedUser = localStorage.getItem('vpp_user');
       return savedUser ? JSON.parse(savedUser) : null;
   });
+  const [showLogin, setShowLogin] = useState(false); // New state to control Landing vs Login
   const [systemConfig, setSystemConfig] = useState<SystemConfig | null>(null);
   const [activeTab, setActiveTab] = useState<'dashboard' | 'map' | 'actors' | 'wireless' | 'gateways' | 'reports' | 'settings'>('dashboard');
   const [gateways, setGateways] = useState<ProxyGateway[]>([]);
@@ -204,6 +207,7 @@ const App: React.FC = () => {
       if (currentUser && isProduction) sendAuditLog(currentUser.username, 'LOGOUT', 'User logged out');
       setCurrentUser(null);
       localStorage.removeItem('vpp_user');
+      setShowLogin(false); // Return to landing page on logout
   };
 
   const handleUpdateUserPreferences = async (newPrefs: UserPreferences) => {
@@ -260,12 +264,23 @@ const App: React.FC = () => {
       setAutoForensicTarget(actorId);
   };
 
-  if (isProduction && !currentUser) return (
+  // 1. Landing Page (Default if not logged in and not explicitly asking for login)
+  if (!currentUser && !showLogin) {
+      return (
+          <Suspense fallback={<PageLoader />}>
+              <LandingPage onLoginClick={() => setShowLogin(true)} />
+          </Suspense>
+      );
+  }
+
+  // 2. Login Screen (If not logged in but requested)
+  if (!currentUser && showLogin) return (
     <Suspense fallback={<div className="min-h-screen bg-cyber-900 flex items-center justify-center text-blue-500 font-mono text-sm tracking-wider">INITIALIZING SECURE ENVIRONMENT...</div>}>
       <LoginScreen onLoginSuccess={handleLoginSuccess} />
     </Suspense>
   );
 
+  // 3. Main Application (Logged In)
   const selectedActor = actors.find(a => a.id === selectedActorId);
   const selectedActorGateway = selectedActor ? gateways.find(g => g.id === selectedActor.proxyId) : undefined;
 
