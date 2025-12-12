@@ -4,7 +4,7 @@ import { generateInitialActors, generateRandomLog, generateGateways } from './se
 import { dbQuery, getSystemConfig, getPendingActors, approvePendingActor, rejectPendingActor, getSystemLogs, sendAuditLog, triggerFleetUpdate } from './services/dbService';
 import { saveUserPreferences } from './services/authService';
 import { Actor, LogEntry, ProxyGateway, PendingActor, ActorStatus, User, SystemConfig, UserPreferences, LogLevel } from './types';
-import { LayoutDashboard, Settings as SettingsIcon, Network, Plus, LogOut, User as UserIcon, FileText, Globe, Router, Radio, Loader, RefreshCw, Zap, Server } from 'lucide-react';
+import { LayoutDashboard, Settings as SettingsIcon, Network, Plus, LogOut, User as UserIcon, FileText, Globe, Router, Radio, Loader, RefreshCw, Zap, Server, ChevronLeft, ChevronRight } from 'lucide-react';
 
 // Lazy Load Components
 const Dashboard = React.lazy(() => import('./components/Dashboard'));
@@ -25,6 +25,26 @@ const PageLoader = () => (
   </div>
 );
 
+const NavItem = ({ icon: Icon, label, active, onClick, expanded }: { icon: any, label: string, active: boolean, onClick: () => void, expanded: boolean }) => (
+    <button 
+        onClick={onClick} 
+        className={`w-full flex items-center ${expanded ? 'px-4 py-3 justify-start' : 'p-3 justify-center'} rounded-lg transition-all duration-200 group relative ${active ? 'bg-blue-600/10 text-blue-400 border border-blue-500/20' : 'text-slate-500 hover:text-slate-200 hover:bg-slate-800'}`}
+        title={!expanded ? label : ''}
+    >
+        <Icon className={`w-5 h-5 shrink-0 ${active ? 'text-blue-400' : 'group-hover:text-white'} transition-colors`} />
+        {expanded && (
+            <span className="ml-3 text-sm font-medium tracking-wide whitespace-nowrap overflow-hidden transition-all duration-300 animate-fade-in">
+                {label}
+            </span>
+        )}
+        {!expanded && (
+            <div className="absolute left-full ml-4 px-2 py-1 bg-slate-900 text-white text-xs rounded opacity-0 group-hover:opacity-100 pointer-events-none transition-opacity z-50 whitespace-nowrap border border-slate-700 shadow-xl">
+                {label}
+            </div>
+        )}
+    </button>
+);
+
 export default function App() {
   const [isProduction, setIsProduction] = useState(() => localStorage.getItem('vpp_mode') === 'PRODUCTION');
   const [currentUser, setCurrentUser] = useState<User | null>(() => {
@@ -42,6 +62,7 @@ export default function App() {
   const [isEnrollmentOpen, setIsEnrollmentOpen] = useState(false);
   const [isUpdatingFleet, setIsUpdatingFleet] = useState(false);
   const [autoForensicTarget, setAutoForensicTarget] = useState<string | null>(null);
+  const [isSidebarExpanded, setIsSidebarExpanded] = useState(false);
 
   // Derived target version (default 2.7.0 if not set)
   const targetVersion = systemConfig?.targetAgentVersion || '2.7.0';
@@ -163,7 +184,7 @@ export default function App() {
         }, 3000); // 3s polling
         return () => clearInterval(interval);
     }
-  }, [isProduction, currentUser, actors]); // Added actors to dependency to ensure mock generation uses latest state
+  }, [isProduction, currentUser, actors]);
 
   const handleAdoptDevice = async (pendingId: string, proxyId: string, name: string) => {
       if (!isProduction) {
@@ -245,12 +266,9 @@ export default function App() {
   };
 
   const handleRestoreState = (snapshot: any) => {
-      // Defensive checks to ensure state remains valid even if snapshot is partial/corrupt
       if (snapshot.actors && Array.isArray(snapshot.actors)) setActors(snapshot.actors);
       if (snapshot.gateways && Array.isArray(snapshot.gateways)) setGateways(snapshot.gateways);
       if (snapshot.systemConfig) setSystemConfig(snapshot.systemConfig);
-      
-      // If we restore logs, that's optional, but helpful
       if (snapshot.logs && Array.isArray(snapshot.logs)) setLogs(snapshot.logs);
 
       if (isProduction) {
@@ -287,44 +305,62 @@ export default function App() {
 
   return (
         <Suspense fallback={<PageLoader />}>
-            <div className="min-h-screen bg-cyber-900 text-slate-200 font-sans selection:bg-blue-500/30 flex">
+            <div className="min-h-screen bg-cyber-900 text-slate-200 font-sans selection:bg-blue-500/30 flex overflow-hidden">
                 
                 {/* Sidebar Navigation */}
-                <div className={`fixed left-0 top-0 bottom-0 w-16 bg-slate-900 border-r border-slate-700 flex flex-col items-center py-6 space-y-6 z-50 transition-all ${currentUser ? 'translate-x-0' : '-translate-x-full'}`}>
-                    <div className="bg-blue-600/20 p-2 rounded-lg mb-4">
-                        <Zap className="w-6 h-6 text-blue-400" />
-                    </div>
+                <div className={`fixed left-0 top-0 bottom-0 ${isSidebarExpanded ? 'w-64' : 'w-20'} bg-slate-950 border-r border-slate-800 flex flex-col z-50 transition-all duration-300 ease-in-out ${currentUser ? 'translate-x-0' : '-translate-x-full'} shadow-2xl`}>
                     
-                    <button onClick={() => setActiveTab('dashboard')} className={`p-3 rounded-lg transition-colors ${activeTab === 'dashboard' ? 'bg-slate-800 text-blue-400' : 'text-slate-500 hover:text-white'}`} title="Dashboard">
-                        <LayoutDashboard className="w-5 h-5" />
+                    {/* Header */}
+                    <div className="h-20 flex items-center justify-center border-b border-slate-800/50 relative shrink-0">
+                        <div className={`flex items-center transition-all duration-300 ${isSidebarExpanded ? 'w-full px-6' : 'justify-center'}`}>
+                            <div className="bg-blue-600 rounded-lg p-1.5 shadow-lg shadow-blue-500/20 shrink-0">
+                                <Zap className="w-5 h-5 text-white" />
+                            </div>
+                            {isSidebarExpanded && (
+                                <div className="ml-3 overflow-hidden animate-fade-in">
+                                    <h1 className="font-bold text-white text-base tracking-wider whitespace-nowrap">PUPPETS</h1>
+                                    <p className="text-[10px] text-blue-400 font-mono tracking-widest">COMMAND NODE</p>
+                                </div>
+                            )}
+                        </div>
+                    </div>
+
+                    {/* Toggle Button */}
+                    <button 
+                        onClick={() => setIsSidebarExpanded(!isSidebarExpanded)}
+                        className="absolute -right-3 top-24 bg-slate-800 border border-slate-700 text-slate-400 hover:text-white hover:border-blue-500 p-1 rounded-full shadow-xl transition-all z-50 hover:scale-110"
+                        title={isSidebarExpanded ? "Collapse Menu" : "Expand Menu"}
+                    >
+                        {isSidebarExpanded ? <ChevronLeft className="w-3 h-3" /> : <ChevronRight className="w-3 h-3" />}
                     </button>
-                    <button onClick={() => setActiveTab('map')} className={`p-3 rounded-lg transition-colors ${activeTab === 'map' ? 'bg-slate-800 text-blue-400' : 'text-slate-500 hover:text-white'}`} title="War Room Map">
-                        <Globe className="w-5 h-5" />
-                    </button>
-                    <button onClick={() => setActiveTab('actors')} className={`p-3 rounded-lg transition-colors ${activeTab === 'actors' ? 'bg-slate-800 text-blue-400' : 'text-slate-500 hover:text-white'}`} title="Fleet">
-                        <Server className="w-5 h-5" />
-                    </button>
-                    <button onClick={() => setActiveTab('gateways')} className={`p-3 rounded-lg transition-colors ${activeTab === 'gateways' ? 'bg-slate-800 text-blue-400' : 'text-slate-500 hover:text-white'}`} title="Gateways">
-                        <Network className="w-5 h-5" />
-                    </button>
-                    <button onClick={() => setActiveTab('wireless')} className={`p-3 rounded-lg transition-colors ${activeTab === 'wireless' ? 'bg-slate-800 text-blue-400' : 'text-slate-500 hover:text-white'}`} title="Wireless Recon">
-                        <Radio className="w-5 h-5" />
-                    </button>
-                    <button onClick={() => setActiveTab('reports')} className={`p-3 rounded-lg transition-colors ${activeTab === 'reports' ? 'bg-slate-800 text-blue-400' : 'text-slate-500 hover:text-white'}`} title="Reports">
-                        <FileText className="w-5 h-5" />
-                    </button>
-                    <div className="flex-1"></div>
-                    <button onClick={() => setActiveTab('settings')} className={`p-3 rounded-lg transition-colors ${activeTab === 'settings' ? 'bg-slate-800 text-blue-400' : 'text-slate-500 hover:text-white'}`} title="Settings">
-                        <SettingsIcon className="w-5 h-5" />
-                    </button>
-                    <button onClick={handleLogout} className="p-3 rounded-lg text-slate-500 hover:text-red-400 hover:bg-slate-800 transition-colors" title="Logout">
-                        <LogOut className="w-5 h-5" />
-                    </button>
+                    
+                    {/* Menu Items */}
+                    <div className="flex-1 py-6 px-3 space-y-2 overflow-y-auto scrollbar-thin scrollbar-thumb-slate-800 overflow-x-hidden">
+                        <NavItem icon={LayoutDashboard} label="Dashboard" active={activeTab === 'dashboard'} onClick={() => setActiveTab('dashboard')} expanded={isSidebarExpanded} />
+                        <NavItem icon={Globe} label="War Room Map" active={activeTab === 'map'} onClick={() => setActiveTab('map')} expanded={isSidebarExpanded} />
+                        <NavItem icon={Server} label="Fleet Matrix" active={activeTab === 'actors'} onClick={() => setActiveTab('actors')} expanded={isSidebarExpanded} />
+                        <NavItem icon={Network} label="Gateway Infra" active={activeTab === 'gateways'} onClick={() => setActiveTab('gateways')} expanded={isSidebarExpanded} />
+                        <NavItem icon={Radio} label="Wireless Recon" active={activeTab === 'wireless'} onClick={() => setActiveTab('wireless')} expanded={isSidebarExpanded} />
+                        <NavItem icon={FileText} label="Intel Reports" active={activeTab === 'reports'} onClick={() => setActiveTab('reports')} expanded={isSidebarExpanded} />
+                    </div>
+
+                    {/* Footer Actions */}
+                    <div className="p-3 border-t border-slate-800/50 space-y-2 mb-2 bg-slate-950/50 shrink-0">
+                        <NavItem icon={SettingsIcon} label="System Settings" active={activeTab === 'settings'} onClick={() => setActiveTab('settings')} expanded={isSidebarExpanded} />
+                        <button 
+                            onClick={handleLogout} 
+                            className={`w-full flex items-center ${isSidebarExpanded ? 'px-4 py-3 justify-start' : 'p-3 justify-center'} rounded-lg transition-all duration-200 text-slate-500 hover:text-red-400 hover:bg-red-950/30 group`}
+                            title={!isSidebarExpanded ? "Logout" : ""}
+                        >
+                            <LogOut className="w-5 h-5 shrink-0 group-hover:scale-110 transition-transform" />
+                            {isSidebarExpanded && <span className="ml-3 text-sm font-medium whitespace-nowrap animate-fade-in">Terminate Session</span>}
+                        </button>
+                    </div>
                 </div>
 
-                {/* Main Content Area */}
-                <div className={`flex-1 flex flex-col transition-all duration-300 ${currentUser ? 'ml-16' : ''} h-screen overflow-hidden`}>
-                    <div className="flex-1 overflow-y-auto p-6">
+                {/* Main Content Area - Dynamic Margin */}
+                <div className={`flex-1 flex flex-col transition-all duration-300 ease-in-out ${currentUser ? (isSidebarExpanded ? 'ml-64' : 'ml-20') : ''} h-screen overflow-hidden bg-slate-900/95`}>
+                    <div className="flex-1 overflow-y-auto p-6 scroll-smooth">
                         {selectedActor ? (
                             <ActorDetail 
                                 actor={selectedActor} 
