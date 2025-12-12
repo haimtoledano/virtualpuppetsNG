@@ -797,7 +797,16 @@ const ActorDetail: React.FC<ActorDetailProps> = ({ actor, gateway, logs: initial
           let destPort = undefined;
 
           // 0. Sentinel Specific Match (High Priority)
-          const sentinelMatch = log.message.match(/detected from\s+.*?:(\d+)\s+->\s+:(\d+)/i);
+          // Match 1: Mock format "detected from IP:PORT -> :PORT"
+          const sentinelMockMatch = log.message.match(/detected from\s+.*?:(\d+)\s+->\s+:(\d+)/i);
+          // Match 2: Real Kernel format "DPT=5566"
+          const kernelMatch = log.message.match(/DPT=(\d+)/);
+
+          if (sentinelMockMatch) {
+              destPort = sentinelMockMatch[2];
+          } else if (kernelMatch) {
+              destPort = kernelMatch[1];
+          } 
 
           // 1. Generic Complex Match (Existing)
           const complexMatch = log.message.match(/from\s+(?:[0-9a-f.:]+|\[.*?\]):(\d+)\s+(?:to|->)\s+(?:[0-9a-f.:]+|\[.*?\])?:(\d+)/i);
@@ -805,21 +814,21 @@ const ActorDetail: React.FC<ActorDetailProps> = ({ actor, gateway, logs: initial
           // 2. Specific Trap Match (New robust format)
           const trapMatch = log.message.match(/->\s+:(\d+)/); 
 
-          if (sentinelMatch) {
-              destPort = sentinelMatch[2];
-          } else if (complexMatch) {
-              const p1 = parseInt(complexMatch[1]);
-              const p2 = parseInt(complexMatch[2]);
-              if (p2 > 30000 && p1 < 30000) {
-                  destPort = p1.toString();
+          if (!destPort) {
+              if (complexMatch) {
+                  const p1 = parseInt(complexMatch[1]);
+                  const p2 = parseInt(complexMatch[2]);
+                  if (p2 > 30000 && p1 < 30000) {
+                      destPort = p1.toString();
+                  } else {
+                      destPort = p2.toString();
+                  }
+              } else if (trapMatch) {
+                  destPort = trapMatch[1];
               } else {
-                  destPort = p2.toString();
+                  const portMatch = log.message.match(/to\s+(?:[0-9.]+|\[.*?\]):(\d+)/);
+                  if (portMatch) destPort = portMatch[1];
               }
-          } else if (trapMatch) {
-              destPort = trapMatch[1];
-          } else {
-              const portMatch = log.message.match(/to\s+(?:[0-9.]+|\[.*?\]):(\d+)/);
-              if (portMatch) destPort = portMatch[1];
           }
 
           if (!attackerIp && (log.level === 'WARNING' || log.level === 'CRITICAL')) {
@@ -1089,7 +1098,7 @@ const ActorDetail: React.FC<ActorDetailProps> = ({ actor, gateway, logs: initial
                                <label className="relative inline-flex items-center cursor-pointer">
                                   <input type="checkbox" checked={wifiEnabled} onChange={handleToggleWifi} disabled={!actor.hasWifi} className="sr-only peer" />
                                   <div className="w-9 h-5 bg-slate-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-emerald-600"></div>
-                               </label>
+                                </label>
                                {!actor.hasWifi && <span className="text-[9px] text-red-400 mt-1">Hardware Missing</span>}
                            </div>
                            <div className={`p-4 rounded border flex flex-col items-center justify-center transition-all ${actor.hasBluetooth ? 'bg-slate-900 border-slate-600' : 'bg-slate-900/50 border-slate-800 opacity-50'}`}>
