@@ -4,7 +4,7 @@ import { generateInitialActors, generateRandomLog, generateGateways } from './se
 import { dbQuery, getSystemConfig, getPendingActors, approvePendingActor, rejectPendingActor, getSystemLogs, sendAuditLog, triggerFleetUpdate } from './services/dbService';
 import { saveUserPreferences } from './services/authService';
 import { Actor, LogEntry, ProxyGateway, PendingActor, ActorStatus, User, SystemConfig, UserPreferences, LogLevel } from './types';
-import { LayoutDashboard, Settings as SettingsIcon, Network, Plus, LogOut, User as UserIcon, FileText, Globe, Router, Radio, Loader, RefreshCw, Zap } from 'lucide-react';
+import { LayoutDashboard, Settings as SettingsIcon, Network, Plus, LogOut, User as UserIcon, FileText, Globe, Router, Radio, Loader, RefreshCw, Zap, Server } from 'lucide-react';
 
 // Lazy Load Components
 const Dashboard = React.lazy(() => import('./components/Dashboard'));
@@ -286,10 +286,7 @@ export default function App() {
   const selectedActorGateway = selectedActor ? gateways.find(g => g.id === selectedActor.proxyId) : undefined;
 
   const renderContent = () => {
-    // ...
-  };
-
-  return (
+    return (
         <Suspense fallback={<PageLoader />}>
             {selectedActor ? (
                 <ActorDetail 
