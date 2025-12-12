@@ -1,10 +1,8 @@
 
-
-
 import React, { useMemo } from 'react';
-import { Actor, ActorStatus, LogEntry, LogLevel, ProxyGateway } from '../types';
+import { Actor, ActorStatus, LogEntry, LogLevel, ProxyGateway, DevicePersona } from '../types';
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid, LineChart, Line } from 'recharts';
-import { ShieldAlert, Server, Activity, Terminal as TerminalIcon, AlertTriangle, Network, Router, Cpu, Info, Globe, Skull, Cloud, Zap } from 'lucide-react';
+import { ShieldAlert, Server, Activity, Terminal as TerminalIcon, AlertTriangle, Network, Router, Cpu, Info, Globe, Skull, Cloud, Zap, Camera, Printer, Box, Eye, Lock } from 'lucide-react';
 import Terminal from './Terminal';
 
 interface DashboardProps {
@@ -62,26 +60,87 @@ const Dashboard: React.FC<DashboardProps> = ({ gateways, actors, logs, onActorSe
   // We only show last 50 logs in the dashboard terminal to keep performance high
   const recentLogs = logs.slice(-50);
 
+  const getPersonaIcon = (p: DevicePersona | undefined) => {
+    switch(p?.icon) {
+        case 'CAMERA': return Camera;
+        case 'PRINTER': return Printer;
+        case 'ROUTER': return Router;
+        case 'PLC': return Zap;
+        case 'SERVER': return Server;
+        default: return Box; 
+    }
+  };
+
   // Helper for rendering actor squares
-  const renderActorSquare = (actor: Actor) => (
-    <div 
-        key={actor.id} 
-        onClick={() => onActorSelect && onActorSelect(actor.id)}
-        className={`
-            group relative h-4 w-full rounded-sm cursor-pointer transition-all hover:scale-125 hover:z-10
-            ${actor.status === ActorStatus.ONLINE ? 'bg-emerald-500/80 hover:bg-emerald-400' : 
-              actor.status === ActorStatus.COMPROMISED ? 'bg-red-500 hover:bg-red-400 animate-pulse' : 
-              'bg-slate-600 hover:bg-slate-500'}
-        `}
-    >
-        {/* Tooltip */}
-        <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-1 hidden group-hover:block bg-slate-900 text-slate-200 text-[10px] px-2 py-1 rounded border border-slate-600 whitespace-nowrap z-50 shadow-xl">
-            <div className="font-bold">{actor.name}</div>
-            <div className="font-mono text-slate-400">{actor.localIp}</div>
-            <div className={`${actor.status === 'COMPROMISED' ? 'text-red-400' : 'text-emerald-400'}`}>{actor.status}</div>
+  const renderActorSquare = (actor: Actor) => {
+    const PersonaIcon = getPersonaIcon(actor.persona);
+    const hasTunnels = actor.activeTunnels && actor.activeTunnels.length > 0;
+    const isSentinel = actor.tcpSentinelEnabled;
+    const isCompromised = actor.status === ActorStatus.COMPROMISED;
+    const isOnline = actor.status === ActorStatus.ONLINE;
+
+    return (
+        <div 
+            key={actor.id} 
+            onClick={() => onActorSelect && onActorSelect(actor.id)}
+            className={`
+                group relative h-10 w-full rounded-md cursor-pointer transition-all duration-200 
+                hover:scale-110 hover:z-20 border flex items-center justify-center overflow-hidden
+                ${isOnline ? 'bg-slate-800/80 border-slate-700 hover:border-emerald-500/50' : 
+                  isCompromised ? 'bg-red-950/40 border-red-500 hover:bg-red-900/60 shadow-[0_0_10px_rgba(239,68,68,0.2)]' : 
+                  'bg-slate-900 border-slate-800 opacity-50'}
+            `}
+        >
+            {/* Background Status Tint */}
+            {isOnline && <div className="absolute inset-0 bg-emerald-500/5 pointer-events-none"></div>}
+            
+            {/* Persona Icon (Centered) */}
+            <PersonaIcon className={`w-5 h-5 transition-colors duration-300 ${isCompromised ? 'text-red-400' : 'text-slate-600 group-hover:text-slate-300'}`} />
+
+            {/* Status Dot (Top Left) */}
+            <div className={`absolute top-1 left-1 w-1.5 h-1.5 rounded-full ${isOnline ? 'bg-emerald-500' : isCompromised ? 'bg-red-500 animate-ping' : 'bg-slate-600'}`}></div>
+            {isCompromised && <div className="absolute top-1 left-1 w-1.5 h-1.5 rounded-full bg-red-500"></div>}
+
+            {/* Sentinel Indicator (Top Right) */}
+            {isSentinel && (
+                <div className="absolute top-1 right-1" title="Sentinel Mode Active">
+                    <div className="w-1.5 h-1.5 bg-red-500 rounded-full animate-pulse shadow-[0_0_4px_#ef4444]"></div>
+                </div>
+            )}
+
+            {/* Tunnel Indicator (Bottom Right) */}
+            {hasTunnels && (
+                <div className="absolute bottom-1 right-1" title={`${actor.activeTunnels?.length} Active Tunnels`}>
+                    <Network className="w-2.5 h-2.5 text-cyan-400 drop-shadow-[0_0_2px_rgba(34,211,238,0.8)]" />
+                </div>
+            )}
+
+            {/* Tooltip */}
+            <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 hidden group-hover:block bg-slate-950 text-slate-200 text-xs px-3 py-2 rounded-lg border border-slate-700 whitespace-nowrap z-50 shadow-2xl min-w-[160px]">
+                <div className="flex items-center justify-between font-bold text-white mb-1 border-b border-slate-800 pb-1">
+                    <span>{actor.name}</span>
+                    {isSentinel && <span className="text-[9px] bg-red-900/50 text-red-300 px-1 rounded flex items-center"><Eye className="w-2 h-2 mr-1" /> SENTINEL</span>}
+                </div>
+                <div className="space-y-1 mb-2">
+                    <div className="font-mono text-slate-500 text-[10px]">{actor.localIp}</div>
+                    <div className="flex items-center text-[10px] text-slate-300">
+                        <PersonaIcon className="w-3 h-3 mr-1.5 text-blue-400" />
+                        {actor.persona?.name || 'Generic Device'}
+                    </div>
+                    {hasTunnels && (
+                        <div className="flex items-center text-[10px] text-cyan-300">
+                            <Network className="w-3 h-3 mr-1.5" />
+                            {actor.activeTunnels?.length} Active Tunnels
+                        </div>
+                    )}
+                </div>
+                <div className={`text-[9px] font-bold uppercase tracking-wider ${isCompromised ? 'text-red-400' : 'text-emerald-400'}`}>
+                    STATUS: {actor.status}
+                </div>
+            </div>
         </div>
-    </div>
-  );
+    );
+  };
 
   return (
     <div className="flex flex-col h-[calc(100vh-100px)] space-y-4 animate-fade-in pb-2 overflow-hidden">
@@ -224,9 +283,10 @@ const Dashboard: React.FC<DashboardProps> = ({ gateways, actors, logs, onActorSe
                 <h3 className="text-xs font-semibold text-slate-400 mb-3 flex justify-between items-center shrink-0">
                     <span>FLEET MATRIX ({stats.totalActors} NODES)</span>
                     <div className="flex items-center space-x-3 text-[10px] font-normal">
-                        <span className="flex items-center"><span className="w-2 h-2 bg-emerald-500 rounded-sm mr-1"></span> ONLINE</span>
-                        <span className="flex items-center"><span className="w-2 h-2 bg-red-500 rounded-sm mr-1"></span> COMPROMISED</span>
-                        <span className="flex items-center"><span className="w-2 h-2 bg-slate-600 rounded-sm mr-1"></span> OFFLINE</span>
+                        <span className="flex items-center"><span className="w-1.5 h-1.5 bg-emerald-500 rounded-full mr-1"></span> ONLINE</span>
+                        <span className="flex items-center"><span className="w-1.5 h-1.5 bg-red-500 rounded-full mr-1 animate-ping"></span> COMPROMISED</span>
+                        <span className="flex items-center"><Eye className="w-3 h-3 mr-1 text-red-500"/> SENTINEL</span>
+                        <span className="flex items-center"><Network className="w-3 h-3 mr-1 text-cyan-400"/> TUNNEL</span>
                     </div>
                 </h3>
                 
@@ -246,7 +306,7 @@ const Dashboard: React.FC<DashboardProps> = ({ gateways, actors, logs, onActorSe
                                     <span className="text-[10px] text-slate-500 font-mono">{gwActors.length} Nodes</span>
                                 </div>
                                 
-                                <div className="grid grid-cols-10 sm:grid-cols-12 md:grid-cols-16 lg:grid-cols-20 gap-1.5">
+                                <div className="grid grid-cols-4 sm:grid-cols-6 md:grid-cols-8 lg:grid-cols-10 gap-2">
                                     {gwActors.map(renderActorSquare)}
                                 </div>
                             </div>
@@ -272,7 +332,7 @@ const Dashboard: React.FC<DashboardProps> = ({ gateways, actors, logs, onActorSe
                                     </div>
                                     <span className="text-[10px] text-slate-500 font-mono">{unassigned.length} Nodes</span>
                                 </div>
-                                <div className="grid grid-cols-10 sm:grid-cols-12 md:grid-cols-16 lg:grid-cols-20 gap-1.5">
+                                <div className="grid grid-cols-4 sm:grid-cols-6 md:grid-cols-8 lg:grid-cols-10 gap-2">
                                     {unassigned.map(renderActorSquare)}
                                 </div>
                              </div>
