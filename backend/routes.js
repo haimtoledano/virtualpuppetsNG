@@ -200,7 +200,8 @@ router.get('/actors', async (req, res) => {
             bluetoothScanningEnabled: row.BluetoothScanningEnabled,
             cpuLoad: row.CpuLoad,
             memoryUsage: row.MemoryUsage,
-            temperature: row.Temperature
+            temperature: row.Temperature,
+            physicalAddress: row.PhysicalAddress // Included
         }));
         res.json(actors);
     } catch(e) { console.error(e); res.json([]); }
@@ -208,7 +209,26 @@ router.get('/actors', async (req, res) => {
 
 router.put('/actors/:id', async (req, res) => {
     const db = getDbPool(); if(!db) return res.json({success: false});
-    await db.request().input('id', req.params.id).input('n', req.body.name).query("UPDATE Actors SET Name=@n WHERE ActorId=@id");
+    // Support update for physicalAddress
+    const { name, physicalAddress } = req.body;
+    
+    let q = "UPDATE Actors SET ";
+    let updates = [];
+    const reqDb = db.request().input('id', req.params.id);
+
+    if (name) {
+        updates.push("Name=@n");
+        reqDb.input('n', name);
+    }
+    if (physicalAddress !== undefined) {
+        updates.push("PhysicalAddress=@addr");
+        reqDb.input('addr', physicalAddress);
+    }
+
+    if (updates.length > 0) {
+        q += updates.join(", ") + " WHERE ActorId=@id";
+        await reqDb.query(q);
+    }
     res.json({success: true});
 });
 
@@ -416,237 +436,4 @@ router.post('/agent/recon', async (req, res) => {
                         .input('aname', resolvedActorName) // Use resolved name
                         .query(`
                             MERGE WifiNetworks AS target
-                            USING (SELECT @id AS Id) AS source ON (target.Id = source.Id)
-                            WHEN MATCHED THEN UPDATE SET SignalStrength=@sig, LastSeen=GETDATE(), ActorName=@aname
-                            WHEN NOT MATCHED THEN INSERT (Id, Ssid, Bssid, SignalStrength, Security, Channel, ActorId, ActorName, LastSeen)
-                            VALUES (@id, @ssid, @bssid, @sig, @sec, @ch, @aid, @aname, GETDATE());
-                        `);
-                     successCount++;
-                 } catch (innerErr) {
-                     console.error(`[API-RECON] WiFi Row Insert Error (${net.ssid}): ${innerErr.message}`);
-                     failCount++;
-                 }
-             }
-             console.log(`[API-RECON] WiFi Processing Complete. Success: ${successCount}, Failed: ${failCount}`);
-
-        } else if (type === 'BLUETOOTH') {
-             let successCount = 0;
-             let failCount = 0;
-             for (const dev of data) {
-                  try {
-                      const id = `bt-${actorId}-${dev.mac.replace(/:/g,'')}`;
-                      await db.request()
-                        .input('id', id)
-                        .input('name', dev.name)
-                        .input('mac', dev.mac)
-                        .input('rssi', dev.rssi || 0)
-                        .input('type', dev.type || 'UNKNOWN')
-                        .input('aid', actorId)
-                        .input('aname', resolvedActorName) // Use resolved name
-                        .query(`
-                            MERGE BluetoothDevices AS target
-                            USING (SELECT @id AS Id) AS source ON (target.Id = source.Id)
-                            WHEN MATCHED THEN UPDATE SET Rssi=@rssi, LastSeen=GETDATE(), ActorName=@aname
-                            WHEN NOT MATCHED THEN INSERT (Id, Name, Mac, Rssi, Type, ActorId, ActorName, LastSeen)
-                            VALUES (@id, @name, @mac, @rssi, @type, @aid, @aname, GETDATE());
-                        `);
-                      successCount++;
-                  } catch (innerErr) {
-                      console.error(`[API-RECON] BT Row Insert Error (${dev.name}): ${innerErr.message}`);
-                      failCount++;
-                  }
-             }
-             console.log(`[API-RECON] BT Processing Complete. Success: ${successCount}, Failed: ${failCount}`);
-        }
-        res.json({success: true});
-    } catch (e) { 
-        console.error("[API-RECON] Global Handler Error:", e);
-        res.json({success: false, error: e.message}); 
-    }
-});
-
-// --- SESSIONS (Honeypot In-Memory Bridge) ---
-router.get('/sessions', (req, res) => {
-    res.json(getSessions());
-});
-
-router.delete('/sessions/:id', (req, res) => {
-    deleteSession(req.params.id);
-    res.json({success: true});
-});
-
-// --- ENROLLMENT ---
-router.post('/enroll/generate', async (req, res) => {
-    const db = getDbPool();
-    const token = `tok-${Math.random().toString(36).substr(2,8)}`;
-    if (db) {
-        await db.request().input('t', token).input('type', req.body.type).input('tid', req.body.targetId).query("INSERT INTO EnrollmentTokens (Token, Type, TargetId, CreatedAt, IsUsed) VALUES (@t, @type, @tid, GETDATE(), 0)");
-    }
-    res.json({token});
-});
-
-router.get('/enroll/pending', async (req, res) => {
-    const db = getDbPool();
-    if (!db) return res.json([]);
-    try {
-        const r = await db.request().query("SELECT Id as id, HwId as hwid, DetectedIp as detectedIp, DetectedAt as detectedAt, OsVersion as osVersion FROM PendingActors");
-        res.json(r.recordset);
-    } catch(e) { res.json([]); }
-});
-
-router.post('/enroll/approve', async (req, res) => {
-    const db = getDbPool();
-    if (!db) return res.json({success: false});
-    const { pendingId, proxyId, name } = req.body;
-    try {
-        const pendingRes = await db.request().input('pid', sql.NVarChar, pendingId).query("SELECT * FROM PendingActors WHERE Id = @pid");
-        if (pendingRes.recordset.length === 0) return res.json({success: false, error: "Pending actor not found"});
-        const pending = pendingRes.recordset[0];
-        
-        const actorId = `puppet-${Math.random().toString(36).substr(2,6)}`;
-        
-        await db.request()
-            .input('aid', sql.NVarChar, actorId)
-            .input('hwid', sql.NVarChar, pending.HwId)
-            .input('gw', sql.NVarChar, proxyId)
-            .input('name', sql.NVarChar, name)
-            .input('ip', sql.NVarChar, pending.DetectedIp)
-            .input('os', sql.NVarChar, pending.OsVersion || 'Linux')
-            .input('ver', sql.NVarChar, CURRENT_AGENT_VERSION)
-            .query(`INSERT INTO Actors (ActorId, HwId, GatewayId, Name, Status, LocalIp, LastSeen, OsVersion, AgentVersion) VALUES (@aid, @hwid, @gw, @name, 'ONLINE', @ip, GETDATE(), @os, @ver)`);
-
-        await db.request().input('pid', sql.NVarChar, pendingId).query("DELETE FROM PendingActors WHERE Id = @pid");
-        res.json({success: true});
-    } catch(e) { res.json({success: false, error: e.message}); }
-});
-
-router.delete('/enroll/pending/:id', async (req, res) => {
-    const db = getDbPool(); if(!db) return res.json({success: false});
-    await db.request().input('id', req.params.id).query("DELETE FROM PendingActors WHERE Id=@id");
-    res.json({success: true});
-});
-
-// --- AGENT INTERFACE (Heartbeat & Commands) ---
-
-router.get('/agent/heartbeat', async (req, res) => {
-    const db = getDbPool();
-    if (!db) return res.status(503).json({});
-
-    const { hwid, os, version } = req.query;
-    console.log(`[API] Heartbeat from HWID: ${hwid || 'unknown'} (${getClientIp(req)})`);
-
-    if (!hwid) return res.status(400).json({});
-    
-    try {
-        const actor = await db.request().input('h', sql.NVarChar, hwid).query("SELECT ActorId FROM Actors WHERE HwId = @h");
-        
-        if (actor.recordset.length > 0) {
-            const actorId = actor.recordset[0].ActorId;
-            await db.request()
-                .input('aid', sql.NVarChar, actorId)
-                .input('os', sql.NVarChar, os || 'Unknown')
-                .input('ver', sql.NVarChar, version || '1.0.0')
-                .query(`UPDATE Actors SET LastSeen=GETDATE(), OsVersion=CASE WHEN @os<>'Unknown' THEN @os ELSE OsVersion END, AgentVersion=@ver WHERE ActorId=@aid`);
-            
-            return res.json({ status: 'APPROVED', actorId: actorId, latestVersion: CURRENT_AGENT_VERSION });
-        }
-        
-        const pending = await db.request().input('h', sql.NVarChar, hwid).query("SELECT * FROM PendingActors WHERE HwId = @h");
-        if (pending.recordset.length === 0) {
-             console.log(`[API] New Agent Detected: ${hwid} (${os})`);
-             await db.request()
-                .input('pid', sql.NVarChar, `temp-${Math.random().toString(36).substr(2,6)}`)
-                .input('h', sql.NVarChar, hwid)
-                .input('ip', sql.NVarChar, getClientIp(req))
-                .input('os', sql.NVarChar, os||'Unknown')
-                .query("INSERT INTO PendingActors (Id, HwId, DetectedIp, DetectedAt, OsVersion, TargetGatewayId) VALUES (@pid, @h, @ip, GETDATE(), @os, '')");
-        }
-        res.json({ status: 'PENDING' });
-    } catch(e) { 
-        console.error('[API] Heartbeat DB Error:', e);
-        res.status(500).json({}); 
-    }
-});
-
-router.post('/agent/scan', async (req, res) => {
-    const { actorId, cpu, ram, temp, hasWifi, hasBluetooth, version } = req.body;
-    let wifiScanning = false;
-    let bluetoothScanning = false;
-
-    if(actorId) {
-        const db = getDbPool();
-        if(db) {
-            await db.request()
-                .input('aid', actorId)
-                .input('cpu', sql.Float, parseFloat(cpu) || 0)
-                .input('ram', sql.Float, parseFloat(ram) || 0)
-                .input('temp', sql.Float, parseFloat(temp) || 0)
-                .input('wifi', sql.Bit, hasWifi === 'true' ? 1 : 0)
-                .input('bt', sql.Bit, hasBluetooth === 'true' ? 1 : 0)
-                .input('ver', sql.NVarChar, version || '1.0.0')
-                .query("UPDATE Actors SET LastSeen=GETDATE(), CpuLoad=@cpu, MemoryUsage=@ram, Temperature=@temp, HasWifi=@wifi, HasBluetooth=@bt, AgentVersion=@ver WHERE ActorId=@aid");
-            
-            // Return Scan Config
-            const config = await db.request().input('aid', actorId).query("SELECT WifiScanningEnabled, BluetoothScanningEnabled FROM Actors WHERE ActorId=@aid");
-            if(config.recordset.length > 0) {
-                wifiScanning = config.recordset[0].WifiScanningEnabled;
-                bluetoothScanning = config.recordset[0].BluetoothScanningEnabled;
-            }
-        }
-    }
-    res.json({status: 'ok', wifiScanning, bluetoothScanning});
-});
-
-// NEW: Agent Command Polling
-router.get('/agent/tasks', async (req, res) => {
-    const { actorId } = req.query;
-    const db = getDbPool();
-    if (!db || !actorId) return res.json([]);
-
-    try {
-        const result = await db.request()
-            .input('aid', sql.NVarChar, actorId)
-            .query("SELECT JobId as id, Command as command FROM CommandQueue WHERE ActorId = @aid AND Status = 'PENDING'");
-        
-        // Mark fetched tasks as RUNNING immediately
-        if (result.recordset.length > 0) {
-             const ids = result.recordset.map(r => r.id);
-             // Note: In real app, consider transaction, but for now simple update
-             for(const id of ids) {
-                 await db.request().input('jid', id).query("UPDATE CommandQueue SET Status='RUNNING' WHERE JobId=@jid");
-             }
-        }
-        res.json(result.recordset);
-    } catch (e) { res.json([]); }
-});
-
-// NEW: Agent Command Result
-router.post('/agent/tasks/:jobId', async (req, res) => {
-    const { jobId } = req.params;
-    const { output, status } = req.body;
-    const db = getDbPool();
-    if (!db) return res.json({success: false});
-
-    try {
-        await db.request()
-            .input('jid', jobId)
-            .input('out', output)
-            .input('stat', status)
-            .query("UPDATE CommandQueue SET Output=@out, Status=@stat, UpdatedAt=GETDATE() WHERE JobId=@jid");
-        res.json({success: true});
-    } catch (e) { res.json({success: false}); }
-});
-
-router.get('/setup', (req, res) => {
-    const host = req.get('host');
-    const protocol = req.protocol;
-    // Set serverUrl to base host only to avoid double /api in curl command
-    const serverUrl = `${protocol}://${host}`; 
-    const token = req.query.token || 'manual_install';
-    
-    const script = generateAgentScript(serverUrl, token);
-    res.setHeader('Content-Type', 'text/plain');
-    res.send(script);
-});
-
-export default router;
+                            USING (SELECT @id AS Id) AS source ON

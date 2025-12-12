@@ -1,5 +1,4 @@
 
-
 export enum ActorStatus {
   ONLINE = 'ONLINE',
   OFFLINE = 'OFFLINE',
@@ -79,6 +78,7 @@ export interface Actor {
   bluetoothScanningEnabled?: boolean;
   // Security Features
   tcpSentinelEnabled?: boolean; // If true, alerts on ANY connection
+  physicalAddress?: string; // New field for physical location
 }
 
 export enum LogLevel {
@@ -121,6 +121,7 @@ export interface PendingActor {
   detectedAt: Date;
   status: ProvisioningStatus;
   osVersion?: string; // New field for detected OS
+  hostname?: string; // New field for detected hostname
 }
 
 // --- NEW: Security & Database Types ---
