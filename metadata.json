@@ -1,5 +1,5 @@
 {
-  "name": "Copy of Virtual Puppets NextGen02",
+  "name": "Main Virtual Puppets NextGen02",
   "description": "A modern Command & Control (C2) dashboard for managing distributed honeypot actors (Raspberry Pis). Monitor syslogs, execute remote commands, and analyze threat patterns using AI.",
   "requestFramePermissions": []
 }
