@@ -4,7 +4,7 @@ import { generateInitialActors, generateRandomLog, generateGateways } from './se
 import { dbQuery, getSystemConfig, getPendingActors, approvePendingActor, rejectPendingActor, getSystemLogs, sendAuditLog, triggerFleetUpdate } from './services/dbService';
 import { saveUserPreferences } from './services/authService';
 import { Actor, LogEntry, ProxyGateway, PendingActor, ActorStatus, User, SystemConfig, UserPreferences, LogLevel } from './types';
-import { LayoutDashboard, Settings as SettingsIcon, Network, Plus, LogOut, User as UserIcon, FileText, Globe, Router, Radio, Loader, RefreshCw, Zap, Server, ChevronLeft, ChevronRight } from 'lucide-react';
+import { LayoutDashboard, Settings as SettingsIcon, Network, Plus, LogOut, User as UserIcon, FileText, Globe, Router, Radio, Loader, RefreshCw, Zap, Server, ChevronLeft, ChevronRight, Camera, Printer, Box, Eye, Cpu } from 'lucide-react';
 
 // Lazy Load Components
 const Dashboard = React.lazy(() => import('./components/Dashboard'));
@@ -283,6 +283,17 @@ export default function App() {
       setAutoForensicTarget(actorId);
   };
 
+  const getPersonaIcon = (p: any) => {
+    switch(p?.icon) {
+        case 'CAMERA': return Camera;
+        case 'PRINTER': return Printer;
+        case 'ROUTER': return Router;
+        case 'PLC': return Zap;
+        case 'SERVER': return Server;
+        default: return Box; 
+    }
+  };
+
   // 1. Landing Page (Default if not logged in and not explicitly asking for login)
   if (!currentUser && !showLogin) {
       return (
@@ -437,21 +448,64 @@ export default function App() {
                                         </div>
 
                                         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                                            {actors.map(actor => (
-                                                <div key={actor.id} onClick={() => setSelectedActorId(actor.id)} className={`cursor-pointer bg-slate-800 p-6 rounded-xl border hover:border-blue-500 transition-all shadow-lg ${actor.status === 'COMPROMISED' ? 'border-red-500 shadow-red-500/20' : 'border-slate-700'}`}>
-                                                    <div className="flex justify-between items-start mb-2">
-                                                        <h3 className="text-lg font-bold text-slate-200">{actor.name}</h3>
-                                                        <span className={`text-[10px] px-1.5 py-0.5 rounded ${actor.agentVersion !== targetVersion ? 'bg-yellow-500/10 text-yellow-500' : 'bg-slate-700 text-slate-400'}`}>
-                                                            v{actor.agentVersion || '1.0.0'}
-                                                        </span>
+                                            {actors.map(actor => {
+                                                const PersonaIcon = getPersonaIcon(actor.persona);
+                                                const hasTunnels = actor.activeTunnels && actor.activeTunnels.length > 0;
+                                                const isSentinel = actor.tcpSentinelEnabled;
+                                                const isCompromised = actor.status === 'COMPROMISED';
+                                                
+                                                return (
+                                                    <div key={actor.id} onClick={() => setSelectedActorId(actor.id)} className={`cursor-pointer bg-slate-800 rounded-xl border transition-all shadow-lg group relative overflow-hidden ${actor.status === 'COMPROMISED' ? 'border-red-500 shadow-red-500/20' : 'border-slate-700 hover:border-blue-500'}`}>
+                                                        {/* Status Bar Top */}
+                                                        <div className={`h-1 w-full ${isCompromised ? 'bg-red-500 animate-pulse' : actor.status === 'ONLINE' ? 'bg-emerald-500' : 'bg-slate-600'}`}></div>
+                                                        
+                                                        <div className="p-5">
+                                                            <div className="flex justify-between items-start mb-4">
+                                                                <div className="flex items-center">
+                                                                    <div className={`p-3 rounded-lg mr-3 ${isCompromised ? 'bg-red-900/30 text-red-400' : 'bg-slate-900 text-blue-400 group-hover:text-white group-hover:bg-blue-600 transition-colors'}`}>
+                                                                        <PersonaIcon className="w-6 h-6" />
+                                                                    </div>
+                                                                    <div>
+                                                                        <h3 className="text-lg font-bold text-slate-200 group-hover:text-blue-400 transition-colors">{actor.name}</h3>
+                                                                        <div className="flex items-center text-xs text-slate-500 font-mono">
+                                                                            {actor.localIp}
+                                                                        </div>
+                                                                    </div>
+                                                                </div>
+                                                                <span className={`text-[10px] px-2 py-1 rounded font-mono font-bold ${actor.agentVersion !== targetVersion ? 'bg-yellow-500/10 text-yellow-500 border border-yellow-500/30' : 'bg-slate-900 text-slate-500 border border-slate-700'}`}>
+                                                                    v{actor.agentVersion || '1.0.0'}
+                                                                </span>
+                                                            </div>
+
+                                                            <div className="flex justify-between items-center text-xs border-t border-slate-700 pt-4 mt-2">
+                                                                <div className="flex items-center space-x-3">
+                                                                    <div className="flex items-center text-slate-400" title="Gateway Connection">
+                                                                        <Router className="w-3 h-3 mr-1" />
+                                                                        {gateways.find(g => g.id === actor.proxyId)?.name || 'Direct'}
+                                                                    </div>
+                                                                    <div className="flex items-center text-slate-400" title="Operating System">
+                                                                        <Cpu className="w-3 h-3 mr-1" />
+                                                                        {actor.osVersion?.split(' ')[0] || 'Linux'}
+                                                                    </div>
+                                                                </div>
+                                                                
+                                                                <div className="flex space-x-2">
+                                                                    {isSentinel && (
+                                                                        <div className="bg-red-900/50 text-red-400 px-1.5 py-0.5 rounded border border-red-800 flex items-center" title="Sentinel Mode Active">
+                                                                            <Eye className="w-3 h-3" />
+                                                                        </div>
+                                                                    )}
+                                                                    {hasTunnels && (
+                                                                        <div className="bg-cyan-900/30 text-cyan-400 px-1.5 py-0.5 rounded border border-cyan-800 flex items-center" title={`${actor.activeTunnels?.length} Active Tunnels`}>
+                                                                            <Network className="w-3 h-3" />
+                                                                        </div>
+                                                                    )}
+                                                                </div>
+                                                            </div>
+                                                        </div>
                                                     </div>
-                                                    <p className="text-sm text-slate-500 font-mono mb-4">{actor.localIp}</p>
-                                                    <div className="flex justify-between text-xs text-slate-400">
-                                                        <span>Status: <span className={actor.status === 'ONLINE' ? 'text-emerald-400' : actor.status === 'COMPROMISED' ? 'text-red-500 font-bold animate-pulse' : 'text-red-400'}>{actor.status}</span></span>
-                                                        <span className="text-slate-500">{gateways.find(g => g.id === actor.proxyId)?.name || 'Direct'}</span>
-                                                    </div>
-                                                </div>
-                                            ))}
+                                                );
+                                            })}
                                         </div>
                                     </div>
                                 )}
