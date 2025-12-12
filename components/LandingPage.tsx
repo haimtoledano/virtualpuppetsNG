@@ -6,6 +6,8 @@ interface LandingPageProps {
   onLoginClick: () => void;
 }
 
+const VP_LOGO_PATH = "/vp-logo.png"; // Defined here for local use as well
+
 const PERSONAS = [
     { icon: Laptop, label: "Workstation", id: "WIN-11-ENT", color: "text-blue-400" },
     { icon: Printer, label: "Office Printer", id: "HP-JET-4050", color: "text-emerald-400" },
@@ -260,8 +262,14 @@ const LandingPage: React.FC<LandingPageProps> = ({ onLoginClick }) => {
       {/* Navigation */}
       <nav className="relative z-50 max-w-7xl mx-auto px-6 py-6 flex justify-between items-center backdrop-blur-sm">
         <div className="flex items-center space-x-3 group cursor-default">
-          <div className="relative w-9 h-9 bg-gradient-to-tr from-blue-600 to-cyan-500 rounded-lg flex items-center justify-center shadow-lg shadow-blue-500/20">
-            <Shield className="w-5 h-5 text-white" />
+          <div className="relative h-10 w-auto flex items-center justify-center">
+             <img src={VP_LOGO_PATH} alt="VP Logo" className="h-10 w-auto object-contain" onError={(e) => { e.currentTarget.style.display = 'none'; }} />
+             {/* Fallback Shield if Image fails (optional, mostly relies on image) */}
+             <div className="hidden">
+                <div className="relative w-9 h-9 bg-gradient-to-tr from-blue-600 to-cyan-500 rounded-lg flex items-center justify-center shadow-lg shadow-blue-500/20">
+                    <Shield className="w-5 h-5 text-white" />
+                </div>
+             </div>
           </div>
           <div className="flex flex-col">
             <span className="text-lg font-bold tracking-widest text-white">VIRTUAL PUPPETS</span>
@@ -284,15 +292,20 @@ const LandingPage: React.FC<LandingPageProps> = ({ onLoginClick }) => {
       <header className="relative z-10 pt-20 pb-32 px-6 max-w-7xl mx-auto flex flex-col lg:flex-row items-center gap-16">
         
         {/* Left: Text Content */}
-        <div className="flex-1 text-center lg:text-left z-10 space-y-8">
+        <div className="flex-1 text-center lg:text-left z-10 space-y-8 relative">
             
-            <div className="inline-block">
+            {/* Background Logo Watermark for Hero */}
+            <div className="absolute -top-20 -left-20 w-96 h-96 opacity-5 z-0 pointer-events-none">
+                <img src={VP_LOGO_PATH} alt="" className="w-full h-full object-contain" />
+            </div>
+
+            <div className="inline-block relative z-10">
                 <div className="inline-flex items-center space-x-2 bg-blue-950/30 border border-blue-500/20 rounded-full px-3 py-1 backdrop-blur-md">
                     <span className="text-[10px] font-mono text-blue-300 uppercase tracking-widest">v2.6.0 Stable Release</span>
                 </div>
             </div>
             
-            <h1 className="text-5xl md:text-7xl font-bold text-white tracking-tight leading-none">
+            <h1 className="relative z-10 text-5xl md:text-7xl font-bold text-white tracking-tight leading-none">
               {headline.pre} <br />
               <span className="text-transparent bg-clip-text bg-gradient-to-r from-blue-400 via-cyan-400 to-emerald-400 relative">
                 {headline.post}
@@ -300,13 +313,13 @@ const LandingPage: React.FC<LandingPageProps> = ({ onLoginClick }) => {
               </span>
             </h1>
             
-            <p className="text-lg text-slate-400 max-w-2xl mx-auto lg:mx-0 leading-relaxed font-light">
+            <p className="relative z-10 text-lg text-slate-400 max-w-2xl mx-auto lg:mx-0 leading-relaxed font-light">
               Advanced honeypot orchestration. Deceive adversaries with <span className="text-slate-200 font-medium">dynamic personas</span>, 
               capture <span className="text-slate-200 font-medium">forensic snapshots</span>, and visualize threats in real-time.
               You pull the strings.
             </p>
 
-            <div className="flex flex-col sm:flex-row items-center justify-center lg:justify-start gap-4 pt-4">
+            <div className="relative z-10 flex flex-col sm:flex-row items-center justify-center lg:justify-start gap-4 pt-4">
                 <button 
                     onClick={onLoginClick}
                     className="w-full sm:w-auto bg-blue-600 hover:bg-blue-500 text-white px-8 py-4 rounded-lg font-bold text-sm tracking-widest shadow-[0_0_20px_rgba(37,99,235,0.3)] hover:shadow-[0_0_30px_rgba(37,99,235,0.5)] transition-all hover:-translate-y-1 flex items-center justify-center uppercase"
