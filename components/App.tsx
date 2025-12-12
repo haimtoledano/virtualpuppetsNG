@@ -38,13 +38,17 @@ const VpLogo = ({ className = "w-10 h-10" }: { className?: string }) => (
     </svg>
 );
 
-const NavItem = ({ icon: Icon, label, active, onClick, expanded }: { icon: any, label: string, active: boolean, onClick: () => void, expanded: boolean }) => (
+const NavItem = ({ icon: Icon, label, active, onClick, expanded, hasAlert }: { icon: any, label: string, active: boolean, onClick: () => void, expanded: boolean, hasAlert?: boolean }) => (
     <button 
         onClick={onClick} 
         className={`w-full flex items-center ${expanded ? 'px-4 py-3 justify-start' : 'p-3 justify-center'} rounded-lg transition-all duration-200 group relative ${active ? 'bg-blue-600/10 text-blue-400 border border-blue-500/20' : 'text-slate-500 hover:text-slate-200 hover:bg-slate-800'}`}
         title={!expanded ? label : ''}
     >
-        <Icon className={`w-5 h-5 shrink-0 ${active ? 'text-blue-400' : 'group-hover:text-white'} transition-colors`} />
+        <div className="relative">
+            <Icon className={`w-5 h-5 shrink-0 ${active ? 'text-blue-400' : 'group-hover:text-white'} transition-colors`} />
+            {hasAlert && <span className="absolute -top-1 -right-1 w-2 h-2 bg-blue-500 rounded-full animate-pulse"></span>}
+        </div>
+        
         {expanded && (
             <span className="ml-3 text-sm font-medium tracking-wide whitespace-nowrap overflow-hidden transition-all duration-300 animate-fade-in">
                 {label}
@@ -382,7 +386,7 @@ export default function App() {
 
                     {/* Footer Actions */}
                     <div className="p-3 border-t border-slate-800/50 space-y-2 mb-2 bg-slate-950/50 shrink-0">
-                        <NavItem icon={HelpCircle} label="Help & Support" active={activeTab === 'help'} onClick={() => setActiveTab('help')} expanded={isSidebarExpanded} />
+                        <NavItem icon={HelpCircle} label="Help & Support" active={activeTab === 'help'} onClick={() => setActiveTab('help')} expanded={isSidebarExpanded} hasAlert={true} />
                         <NavItem icon={SettingsIcon} label="System Settings" active={activeTab === 'settings'} onClick={() => setActiveTab('settings')} expanded={isSidebarExpanded} />
                         <button 
                             onClick={handleLogout} 
