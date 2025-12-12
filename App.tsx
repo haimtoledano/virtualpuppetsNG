@@ -313,12 +313,19 @@ export default function App() {
                     {/* Header */}
                     <div className="h-20 flex items-center justify-center border-b border-slate-800/50 relative shrink-0">
                         <div className={`flex items-center transition-all duration-300 ${isSidebarExpanded ? 'w-full px-6' : 'justify-center'}`}>
-                            <div className="bg-blue-600 rounded-lg p-1.5 shadow-lg shadow-blue-500/20 shrink-0">
-                                <Zap className="w-5 h-5 text-white" />
-                            </div>
+                            {systemConfig?.logoUrl ? (
+                                <img src={systemConfig.logoUrl} alt="Logo" className="h-8 w-8 object-contain shrink-0" />
+                            ) : (
+                                <div className="bg-blue-600 rounded-lg p-1.5 shadow-lg shadow-blue-500/20 shrink-0">
+                                    <Zap className="w-5 h-5 text-white" />
+                                </div>
+                            )}
+                            
                             {isSidebarExpanded && (
                                 <div className="ml-3 overflow-hidden animate-fade-in">
-                                    <h1 className="font-bold text-white text-base tracking-wider whitespace-nowrap">PUPPETS</h1>
+                                    <h1 className="font-bold text-white text-base tracking-wider whitespace-nowrap uppercase">
+                                        {systemConfig?.companyName || 'PUPPETS'}
+                                    </h1>
                                     <p className="text-[10px] text-blue-400 font-mono tracking-widest">COMMAND NODE</p>
                                 </div>
                             )}
@@ -353,7 +360,11 @@ export default function App() {
                             title={!isSidebarExpanded ? "Logout" : ""}
                         >
                             <LogOut className="w-5 h-5 shrink-0 group-hover:scale-110 transition-transform" />
-                            {isSidebarExpanded && <span className="ml-3 text-sm font-medium whitespace-nowrap animate-fade-in">Terminate Session</span>}
+                            {isSidebarExpanded && (
+                                <span className="ml-3 text-sm font-medium whitespace-nowrap animate-fade-in truncate">
+                                    Terminate {currentUser?.username || 'Session'}
+                                </span>
+                            )}
                         </button>
                     </div>
                 </div>
