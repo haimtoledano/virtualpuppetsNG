@@ -30,8 +30,16 @@ router.get('/config/system', async (req, res) => {
         const config = {};
         result.recordset.forEach(row => {
             let key = row.ConfigKey;
-            if (key.toLowerCase() === 'companyname') key = 'companyName';
-            else if (key.toLowerCase() === 'domain') key = 'domain';
+            const lowerKey = key.toLowerCase();
+            
+            // Normalize keys to camelCase for frontend consistency
+            if (lowerKey === 'companyname') key = 'companyName';
+            else if (lowerKey === 'domain') key = 'domain';
+            else if (lowerKey === 'logourl') key = 'logoUrl';
+            else if (lowerKey === 'aiconfig') key = 'aiConfig';
+            else if (lowerKey === 'syslogconfig') key = 'syslogConfig';
+            else if (lowerKey === 'targetagentversion') key = 'targetAgentVersion';
+
             try { config[key] = JSON.parse(row.ConfigValue); } catch { config[key] = row.ConfigValue; }
         });
         res.json(config);
