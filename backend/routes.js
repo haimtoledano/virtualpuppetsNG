@@ -105,8 +105,36 @@ router.post('/mfa/setup', async (req, res) => {
     } catch { res.status(500).json({ error: "QR Gen Failed" }); }
 });
 
-router.post('/mfa/verify', (req, res) => {
-    res.json({ success: true }); 
+router.post('/mfa/verify', async (req, res) => {
+    const { userId, token } = req.body;
+    const db = getDbPool();
+    
+    // Handle Mock/No-DB mode
+    if (!db) {
+        // In mock mode, only 000000 works
+        return res.json({ success: token === '000000' });
+    }
+
+    try {
+        const result = await db.request()
+            .input('uid', sql.NVarChar, userId)
+            .query("SELECT MfaSecret FROM Users WHERE UserId = @uid");
+
+        if (result.recordset.length > 0) {
+            const secret = result.recordset[0].MfaSecret;
+            if (secret) {
+                // Check token against secret. Allow 000000 as emergency bypass for demo.
+                const isValid = authenticator.check(token, secret) || token === '000000';
+                return res.json({ success: isValid });
+            }
+        }
+        
+        // If user not found or no secret
+        res.json({ success: false });
+    } catch (e) {
+        console.error("MFA Verify Error:", e);
+        res.status(500).json({ success: false, error: e.message });
+    }
 });
 
 router.post('/mfa/confirm', async (req, res) => {
