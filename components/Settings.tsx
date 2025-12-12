@@ -1,9 +1,10 @@
+
 import React, { useState, useEffect } from 'react';
 import { User, DbConfig, UserRole, SystemConfig, AiConfig, AiProvider, SyslogConfig, Actor, ProxyGateway } from '../types';
 import { dbQuery, getSystemConfig, updateSystemConfig, connectToDatabase } from '../services/dbService';
 import { createUser, deleteUser, hashPassword, updateUser, resetUserMfa } from '../services/authService';
 import { testAiConnection } from '../services/aiService';
-import { Settings as SettingsIcon, Database, Users, Shield, Trash2, AlertTriangle, Plus, Lock, Bot, Cloud, Server, Building, Globe, Save, RefreshCw, Edit, ShieldAlert, X, Check, ShieldCheck, FileText, Key, Activity, HardDrive, Download, Upload, Clock } from 'lucide-react';
+import { Settings as SettingsIcon, Database, Users, Shield, Trash2, AlertTriangle, Plus, Lock, Bot, Cloud, Server, Building, Globe, Save, RefreshCw, Edit, ShieldAlert, X, Check, ShieldCheck, FileText, Key, Activity, HardDrive, Download, Upload, Clock, Box } from 'lucide-react';
 
 interface SettingsProps {
   isProduction: boolean;
@@ -31,6 +32,7 @@ const Settings: React.FC<SettingsProps> = ({ isProduction, onToggleProduction, c
   const [editPassword, setEditPassword] = useState('');
   
   const [sysConfig, setSysConfig] = useState<SystemConfig | null>(null);
+  const [targetVersion, setTargetVersion] = useState<string>('2.7.0');
   const [isTestingAi, setIsTestingAi] = useState(false);
 
   // Snapshot State
@@ -66,10 +68,12 @@ const Settings: React.FC<SettingsProps> = ({ isProduction, onToggleProduction, c
                 setUsers(data);
             }
             // Load System Config for AI & Core
-            if (activeTab === 'AI' || activeTab === 'CORE' || activeTab === 'AUDIT' || activeTab === 'SNAPSHOTS') {
-                const cfg = await getSystemConfig();
-                if (cfg) {
-                    setSysConfig(cfg);
+            const cfg = await getSystemConfig();
+            if (cfg) {
+                setSysConfig(cfg);
+                setTargetVersion(cfg.targetAgentVersion || '2.7.0');
+                
+                if (activeTab === 'AI' || activeTab === 'CORE' || activeTab === 'AUDIT' || activeTab === 'SNAPSHOTS') {
                     // Hydrate all forms to prevent saving empty defaults
                     if (cfg.aiConfig) {
                         setAiForm(cfg.aiConfig);
@@ -198,6 +202,22 @@ const Settings: React.FC<SettingsProps> = ({ isProduction, onToggleProduction, c
       alert("Syslog Configuration Saved. Events will be forwarded.");
   };
 
+  const handleSaveFleetPolicy = async () => {
+      if (!sysConfig) return;
+      const updatedConfig: SystemConfig = {
+          ...sysConfig,
+          targetAgentVersion: targetVersion
+      };
+      await fetch('/api/config/system', {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify(updatedConfig)
+      });
+      setSysConfig(updatedConfig);
+      onConfigUpdate?.();
+      alert(`Fleet Policy Updated. Agents will be checked against v${targetVersion}.`);
+  };
+
   const handleSaveOrgConfig = async () => {
       setIsSavingCore(true);
       try {
@@ -207,7 +227,8 @@ const Settings: React.FC<SettingsProps> = ({ isProduction, onToggleProduction, c
               logoUrl: orgForm.logoUrl,
               setupCompletedAt: new Date().toISOString(),
               aiConfig: sysConfig?.aiConfig || aiForm,
-              syslogConfig: sysConfig?.syslogConfig || syslogForm
+              syslogConfig: sysConfig?.syslogConfig || syslogForm,
+              targetAgentVersion: targetVersion
           };
 
           await updateSystemConfig(updated);
@@ -378,35 +399,69 @@ const Settings: React.FC<SettingsProps> = ({ isProduction, onToggleProduction, c
         </div>
 
         {activeTab === 'GENERAL' && (
-            <div className="bg-slate-800 rounded-xl border border-slate-700 p-6 shadow-lg">
-                <div className="flex justify-between items-center">
-                    <div>
-                        <h3 className="text-xl font-bold text-white mb-2">Operation Mode</h3>
-                        <p className="text-slate-400 text-sm max-w-xl">
-                            {isProduction 
-                                ? "System is running in PRODUCTION mode (MSSQL Backed)." 
-                                : "System is running in MOCK mode (Simulation)."
-                            }
-                        </p>
+            <div className="space-y-6">
+                <div className="bg-slate-800 rounded-xl border border-slate-700 p-6 shadow-lg">
+                    <div className="flex justify-between items-center">
+                        <div>
+                            <h3 className="text-xl font-bold text-white mb-2">Operation Mode</h3>
+                            <p className="text-slate-400 text-sm max-w-xl">
+                                {isProduction 
+                                    ? "System is running in PRODUCTION mode (MSSQL Backed)." 
+                                    : "System is running in MOCK mode (Simulation)."
+                                }
+                            </p>
+                        </div>
+                        <div className="flex items-center">
+                             <span className={`mr-3 font-bold text-sm ${isProduction ? 'text-emerald-400' : 'text-slate-500'}`}>
+                                 {isProduction ? 'PRODUCTION' : 'MOCK'}
+                             </span>
+                             
+                             {canSwitchMode ? (
+                                 <button 
+                                    onClick={onToggleProduction}
+                                    className={`w-14 h-8 rounded-full p-1 transition-colors duration-300 ${isProduction ? 'bg-emerald-600' : 'bg-slate-600'}`}
+                                 >
+                                     <div className={`bg-white w-6 h-6 rounded-full shadow-md transform transition-transform duration-300 ${isProduction ? 'translate-x-6' : 'translate-x-0'}`} />
+                                 </button>
+                             ) : (
+                                 <div className="flex items-center text-slate-500 text-xs bg-slate-900 px-3 py-1 rounded border border-slate-700">
+                                     <Lock className="w-3 h-3 mr-2" />
+                                     Locked by Policy
+                                 </div>
+                             )}
+                        </div>
                     </div>
-                    <div className="flex items-center">
-                         <span className={`mr-3 font-bold text-sm ${isProduction ? 'text-emerald-400' : 'text-slate-500'}`}>
-                             {isProduction ? 'PRODUCTION' : 'MOCK'}
-                         </span>
-                         
-                         {canSwitchMode ? (
-                             <button 
-                                onClick={onToggleProduction}
-                                className={`w-14 h-8 rounded-full p-1 transition-colors duration-300 ${isProduction ? 'bg-emerald-600' : 'bg-slate-600'}`}
-                             >
-                                 <div className={`bg-white w-6 h-6 rounded-full shadow-md transform transition-transform duration-300 ${isProduction ? 'translate-x-6' : 'translate-x-0'}`} />
-                             </button>
-                         ) : (
-                             <div className="flex items-center text-slate-500 text-xs bg-slate-900 px-3 py-1 rounded border border-slate-700">
-                                 <Lock className="w-3 h-3 mr-2" />
-                                 Locked by Policy
-                             </div>
-                         )}
+                </div>
+
+                {/* Fleet Policy Section */}
+                <div className="bg-slate-800 rounded-xl border border-slate-700 p-6 shadow-lg">
+                    <div className="flex items-start mb-4">
+                        <Box className="w-10 h-10 text-indigo-500 mr-4" />
+                        <div>
+                            <h3 className="text-xl font-bold text-white">Fleet Policy</h3>
+                            <p className="text-slate-400 text-sm">Define global compliance standards for all enrolled agents.</p>
+                        </div>
+                    </div>
+                    <div className="max-w-xl">
+                        <label className="block text-slate-500 text-xs font-bold uppercase mb-2">Target Agent Version</label>
+                        <div className="flex gap-4">
+                            <input 
+                                value={targetVersion}
+                                onChange={e => setTargetVersion(e.target.value)}
+                                className="flex-1 bg-slate-900 border border-slate-600 rounded p-3 text-white outline-none focus:border-indigo-500 font-mono"
+                                placeholder="e.g. 2.7.0"
+                            />
+                            <button 
+                                onClick={handleSaveFleetPolicy}
+                                className="bg-indigo-600 hover:bg-indigo-500 text-white px-6 py-2 rounded font-bold transition-colors shadow-lg"
+                            >
+                                Update Policy
+                            </button>
+                        </div>
+                        <p className="text-xs text-slate-500 mt-2">
+                            Agents not matching this version will be flagged as "Outdated". 
+                            Running "Update All" will attempt to upgrade them to this version.
+                        </p>
                     </div>
                 </div>
             </div>

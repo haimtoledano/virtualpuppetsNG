@@ -18,8 +18,6 @@ const GatewayManager = React.lazy(() => import('./components/GatewayManager'));
 const WirelessRecon = React.lazy(() => import('./components/WirelessRecon'));
 const LandingPage = React.lazy(() => import('./components/LandingPage'));
 
-const LATEST_VERSION = '2.6.0';
-
 const PageLoader = () => (
   <div className="flex flex-col items-center justify-center h-full w-full text-slate-500 min-h-[400px]">
     <Loader className="w-8 h-8 text-blue-500 animate-spin mb-3" />
@@ -27,7 +25,7 @@ const PageLoader = () => (
   </div>
 );
 
-const App: React.FC = () => {
+export default function App() {
   const [isProduction, setIsProduction] = useState(() => localStorage.getItem('vpp_mode') === 'PRODUCTION');
   const [currentUser, setCurrentUser] = useState<User | null>(() => {
       const savedUser = localStorage.getItem('vpp_user');
@@ -44,6 +42,9 @@ const App: React.FC = () => {
   const [isEnrollmentOpen, setIsEnrollmentOpen] = useState(false);
   const [isUpdatingFleet, setIsUpdatingFleet] = useState(false);
   const [autoForensicTarget, setAutoForensicTarget] = useState<string | null>(null);
+
+  // Derived target version (default 2.7.0 if not set)
+  const targetVersion = systemConfig?.targetAgentVersion || '2.7.0';
 
   useEffect(() => {
       if (!currentUser || !isProduction) return;
@@ -168,7 +169,7 @@ const App: React.FC = () => {
       if (!isProduction) {
            const pending = pendingActors.find(p => p.id === pendingId);
            if (!pending) return;
-           const newActor: Actor = { id: `real-${Math.random().toString(36).substr(2,6)}`, proxyId: proxyId, name: name, localIp: pending.detectedIp, status: ActorStatus.ONLINE, lastSeen: new Date(), osVersion: 'Raspbian', cpuLoad: 5, memoryUsage: 15, activeTools: ['vpp-agent'], agentVersion: LATEST_VERSION, activeTunnels: [] };
+           const newActor: Actor = { id: `real-${Math.random().toString(36).substr(2,6)}`, proxyId: proxyId, name: name, localIp: pending.detectedIp, status: ActorStatus.ONLINE, lastSeen: new Date(), osVersion: 'Raspbian', cpuLoad: 5, memoryUsage: 15, activeTools: ['vpp-agent'], agentVersion: targetVersion, activeTunnels: [] };
            setActors([...actors, newActor]);
            setPendingActors(prev => prev.filter(p => p.id !== pendingId));
            if (activeTab !== 'dashboard') setActiveTab('actors');
@@ -230,15 +231,15 @@ const App: React.FC = () => {
   };
   
   const handleFleetUpdate = async () => {
-      if (!confirm(`This will trigger a remote update for all online actors to version ${LATEST_VERSION}. They may restart. Continue?`)) return;
+      if (!confirm(`This will trigger a remote update for all online actors to version ${targetVersion}. They may restart. Continue?`)) return;
       
       setIsUpdatingFleet(true);
       if (isProduction) {
-          await triggerFleetUpdate(actors);
+          await triggerFleetUpdate(actors, targetVersion);
       } else {
           // Mock delay
           await new Promise(r => setTimeout(r, 2000));
-          alert(`Mock update command sent to 120 agents (Target: ${LATEST_VERSION}).`);
+          alert(`Mock update command sent to 120 agents (Target: ${targetVersion}).`);
       }
       setIsUpdatingFleet(false);
   };
@@ -285,7 +286,10 @@ const App: React.FC = () => {
   const selectedActorGateway = selectedActor ? gateways.find(g => g.id === selectedActor.proxyId) : undefined;
 
   const renderContent = () => {
-    return (
+    // ...
+  };
+
+  return (
         <Suspense fallback={<PageLoader />}>
             {selectedActor ? (
                 <ActorDetail 
@@ -327,7 +331,7 @@ const App: React.FC = () => {
                                         className="bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white px-4 py-2 rounded-lg flex items-center font-bold text-xs border border-slate-700 transition-all disabled:opacity-50"
                                      >
                                          <RefreshCw className={`w-3 h-3 mr-2 ${isUpdatingFleet ? 'animate-spin' : ''}`} />
-                                         {isUpdatingFleet ? 'PUSHING UPDATE...' : `UPDATE ALL AGENTS (v${LATEST_VERSION})`}
+                                         {isUpdatingFleet ? 'PUSHING UPDATE...' : `UPDATE ALL AGENTS (v${targetVersion})`}
                                      </button>
                                      <button 
                                         onClick={() => setIsEnrollmentOpen(true)} 
@@ -343,10 +347,10 @@ const App: React.FC = () => {
                                 <div className="flex items-center text-blue-300">
                                     <Zap className="w-4 h-4 mr-2" />
                                     <span className="font-bold mr-2">Agent Versioning:</span>
-                                    <span>Latest Stable: <span className="text-white font-mono">v{LATEST_VERSION}</span></span>
+                                    <span>Latest Stable: <span className="text-white font-mono">v{targetVersion}</span></span>
                                 </div>
                                 <div className="flex items-center text-xs text-slate-400">
-                                    <span className="mr-3">{actors.filter(a => a.agentVersion !== LATEST_VERSION).length} agents outdated</span>
+                                    <span className="mr-3">{actors.filter(a => a.agentVersion !== targetVersion).length} agents outdated</span>
                                     {actors.length > 0 && <span className="bg-emerald-500/20 text-emerald-400 px-2 py-0.5 rounded">System Healthy</span>}
                                 </div>
                             </div>
@@ -356,7 +360,7 @@ const App: React.FC = () => {
                                     <div key={actor.id} onClick={() => setSelectedActorId(actor.id)} className={`cursor-pointer bg-slate-800 p-6 rounded-xl border hover:border-blue-500 transition-all shadow-lg ${actor.status === 'COMPROMISED' ? 'border-red-500 shadow-red-500/20' : 'border-slate-700'}`}>
                                         <div className="flex justify-between items-start mb-2">
                                             <h3 className="text-lg font-bold text-slate-200">{actor.name}</h3>
-                                            <span className={`text-[10px] px-1.5 py-0.5 rounded ${actor.agentVersion !== LATEST_VERSION ? 'bg-yellow-500/10 text-yellow-500' : 'bg-slate-700 text-slate-400'}`}>
+                                            <span className={`text-[10px] px-1.5 py-0.5 rounded ${actor.agentVersion !== targetVersion ? 'bg-yellow-500/10 text-yellow-500' : 'bg-slate-700 text-slate-400'}`}>
                                                 v{actor.agentVersion || '1.0.0'}
                                             </span>
                                         </div>
@@ -372,66 +376,57 @@ const App: React.FC = () => {
                     )}
                 </>
             )}
+            
+            <EnrollmentModal 
+                isOpen={isEnrollmentOpen} 
+                onClose={() => setIsEnrollmentOpen(false)}
+                gateways={gateways}
+                pendingActors={pendingActors}
+                setPendingActors={setPendingActors}
+                onApprove={handleAdoptDevice}
+                onReject={handleRejectDevice}
+                domain={systemConfig?.domain || 'vpp.io'}
+                isProduction={isProduction}
+                onGatewayRegistered={loadProductionData}
+            />
+
+            {/* Sidebar Navigation (Example, normally separate component) */}
+            <div className={`fixed left-0 top-0 bottom-0 w-16 bg-slate-900 border-r border-slate-700 flex flex-col items-center py-6 space-y-6 z-50 transition-all ${currentUser ? 'translate-x-0' : '-translate-x-full'}`}>
+                <div className="bg-blue-600/20 p-2 rounded-lg mb-4">
+                    <Zap className="w-6 h-6 text-blue-400" />
+                </div>
+                
+                <button onClick={() => setActiveTab('dashboard')} className={`p-3 rounded-lg transition-colors ${activeTab === 'dashboard' ? 'bg-slate-800 text-blue-400' : 'text-slate-500 hover:text-white'}`} title="Dashboard">
+                    <LayoutDashboard className="w-5 h-5" />
+                </button>
+                <button onClick={() => setActiveTab('map')} className={`p-3 rounded-lg transition-colors ${activeTab === 'map' ? 'bg-slate-800 text-blue-400' : 'text-slate-500 hover:text-white'}`} title="War Room Map">
+                    <Globe className="w-5 h-5" />
+                </button>
+                <button onClick={() => setActiveTab('actors')} className={`p-3 rounded-lg transition-colors ${activeTab === 'actors' ? 'bg-slate-800 text-blue-400' : 'text-slate-500 hover:text-white'}`} title="Fleet">
+                    <Server className="w-5 h-5" />
+                </button>
+                <button onClick={() => setActiveTab('gateways')} className={`p-3 rounded-lg transition-colors ${activeTab === 'gateways' ? 'bg-slate-800 text-blue-400' : 'text-slate-500 hover:text-white'}`} title="Gateways">
+                    <Network className="w-5 h-5" />
+                </button>
+                <button onClick={() => setActiveTab('wireless')} className={`p-3 rounded-lg transition-colors ${activeTab === 'wireless' ? 'bg-slate-800 text-blue-400' : 'text-slate-500 hover:text-white'}`} title="Wireless Recon">
+                    <Radio className="w-5 h-5" />
+                </button>
+                <button onClick={() => setActiveTab('reports')} className={`p-3 rounded-lg transition-colors ${activeTab === 'reports' ? 'bg-slate-800 text-blue-400' : 'text-slate-500 hover:text-white'}`} title="Reports">
+                    <FileText className="w-5 h-5" />
+                </button>
+                <div className="flex-1"></div>
+                <button onClick={() => setActiveTab('settings')} className={`p-3 rounded-lg transition-colors ${activeTab === 'settings' ? 'bg-slate-800 text-blue-400' : 'text-slate-500 hover:text-white'}`} title="Settings">
+                    <SettingsIcon className="w-5 h-5" />
+                </button>
+                <button onClick={handleLogout} className="p-3 rounded-lg text-slate-500 hover:text-red-400 hover:bg-slate-800 transition-colors" title="Logout">
+                    <LogOut className="w-5 h-5" />
+                </button>
+            </div>
+
+            {/* Main Content Padding Fix */}
+            <div className={`transition-all duration-300 ${currentUser ? 'ml-16' : ''}`}>
+               {/* This div just ensures spacing for the fixed sidebar */}
+            </div>
         </Suspense>
     );
-  };
-
-  const getCompanyLogo = () => {
-      const logoUrl = systemConfig?.logoUrl || (systemConfig as any)?.LogoUrl;
-      const name = systemConfig?.companyName || (systemConfig as any)?.CompanyName || 'VIRTUAL PUPPETS';
-      
-      if (logoUrl) {
-          return (
-              <img 
-                  src={logoUrl} 
-                  alt={name} 
-                  className="max-h-12 max-w-full object-contain" 
-              />
-          );
-      }
-      return (
-          <span className="text-lg font-bold tracking-wider hidden md:block truncate uppercase">
-              {name}
-          </span>
-      );
-  };
-
-  return (
-    <div className="flex h-screen bg-cyber-900 text-slate-200 font-sans">
-      <aside className="w-20 md:w-64 bg-slate-900 border-r border-slate-700 flex flex-col hidden md:flex">
-        <div className="p-6 flex items-center justify-center md:justify-start border-b border-slate-800 h-20">
-            {getCompanyLogo()}
-        </div>
-        <nav className="flex-1 p-4 space-y-2">
-            <button onClick={() => setActiveTab('dashboard')} className={`w-full flex items-center p-3 rounded-lg transition-colors ${activeTab === 'dashboard' ? 'bg-blue-600 text-white' : 'text-slate-400 hover:bg-slate-800'}`}><LayoutDashboard className="w-5 h-5 mr-3" />Dashboard</button>
-            <button onClick={() => setActiveTab('map')} className={`w-full flex items-center p-3 rounded-lg transition-colors ${activeTab === 'map' ? 'bg-blue-600 text-white' : 'text-slate-400 hover:bg-slate-800'}`}><Globe className="w-5 h-5 mr-3" />Threat Map</button>
-            <button onClick={() => setActiveTab('actors')} className={`w-full flex items-center p-3 rounded-lg transition-colors ${activeTab === 'actors' ? 'bg-blue-600 text-white' : 'text-slate-400 hover:bg-slate-800'}`}><Network className="w-5 h-5 mr-3" />Global Fleet</button>
-            <button onClick={() => setActiveTab('wireless')} className={`w-full flex items-center p-3 rounded-lg transition-colors ${activeTab === 'wireless' ? 'bg-blue-600 text-white' : 'text-slate-400 hover:bg-slate-800'}`}><Radio className="w-5 h-5 mr-3" />Wireless Recon</button>
-            <button onClick={() => setActiveTab('gateways')} className={`w-full flex items-center p-3 rounded-lg transition-colors ${activeTab === 'gateways' ? 'bg-blue-600 text-white' : 'text-slate-400 hover:bg-slate-800'}`}><Router className="w-5 h-5 mr-3" />Gateways</button>
-            <button onClick={() => setActiveTab('reports')} className={`w-full flex items-center p-3 rounded-lg transition-colors ${activeTab === 'reports' ? 'bg-blue-600 text-white' : 'text-slate-400 hover:bg-slate-800'}`}><FileText className="w-5 h-5 mr-3" />Reports</button>
-            <button onClick={() => setActiveTab('settings')} className={`w-full flex items-center p-3 rounded-lg transition-colors ${activeTab === 'settings' ? 'bg-blue-600 text-white' : 'text-slate-400 hover:bg-slate-800'}`}><SettingsIcon className="w-5 h-5 mr-3" />Settings</button>
-        </nav>
-        {isProduction && currentUser && (
-            <div className="px-4 pb-2 mb-2">
-                <div className="bg-slate-800 p-3 rounded-lg flex items-center justify-between border border-slate-700">
-                    <div className="flex items-center overflow-hidden">
-                        <UserIcon className="w-4 h-4 text-emerald-400 mr-2 shrink-0" />
-                        <span className="text-xs font-bold text-white truncate">{currentUser.username}</span>
-                    </div>
-                    <button onClick={handleLogout} className="text-slate-500 hover:text-white ml-2"><LogOut className="w-4 h-4" /></button>
-                </div>
-            </div>
-        )}
-      </aside>
-      <main className="flex-1 overflow-y-auto h-full p-4 md:p-8 bg-gradient-to-br from-cyber-900 to-slate-900">{renderContent()}</main>
-      
-      {/* Conditionally render Modal to save resources if not open */}
-      {isEnrollmentOpen && (
-          <Suspense fallback={null}>
-            <EnrollmentModal isOpen={isEnrollmentOpen} onClose={() => setIsEnrollmentOpen(false)} gateways={gateways} pendingActors={pendingActors} setPendingActors={setPendingActors} onApprove={handleAdoptDevice} onReject={handleRejectDevice} domain={systemConfig?.domain || 'vpp.io'} isProduction={isProduction} onGatewayRegistered={loadProductionData} />
-          </Suspense>
-      )}
-    </div>
-  );
-};
-export default App;
+}

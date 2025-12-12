@@ -112,12 +112,12 @@ export const resetActorToFactory = async (id: string) => {
 };
 
 // --- NEW: Fleet Update ---
-export const triggerFleetUpdate = async (actors: Actor[]) => {
+export const triggerFleetUpdate = async (actors: Actor[], targetVersion: string) => {
     const onlineActors = actors.filter(a => a.status === 'ONLINE' || a.status === 'COMPROMISED');
     
     // Batch queue commands
     const promises = onlineActors.map(actor => {
-        return queueSystemCommand(actor.id, 'vpp-agent --update --version=2.7.0');
+        return queueSystemCommand(actor.id, `vpp-agent --update --version=${targetVersion}`);
     });
     
     await Promise.all(promises);

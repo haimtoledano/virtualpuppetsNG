@@ -178,6 +178,7 @@ export interface SystemConfig {
   setupCompletedAt: string;
   aiConfig?: AiConfig; 
   syslogConfig?: SyslogConfig; // New field for Syslog
+  targetAgentVersion?: string; // New field for dynamic version control
 }
 
 export interface AuthState {
