@@ -293,8 +293,8 @@ const LandingPage: React.FC<LandingPageProps> = ({ onLoginClick }) => {
         </button>
       </nav>
 
-      {/* Hero Section */}
-      <header className="relative z-10 pt-20 pb-32 px-6 max-w-7xl mx-auto flex flex-col lg:flex-row items-center gap-16">
+      {/* Hero Section - Reduced top padding from pt-20 to pt-8 */}
+      <header className="relative z-10 pt-8 pb-32 px-6 max-w-7xl mx-auto flex flex-col lg:flex-row items-center gap-16">
         
         {/* Left: Text Content */}
         <div className="flex-1 text-center lg:text-left z-10 space-y-8 relative">

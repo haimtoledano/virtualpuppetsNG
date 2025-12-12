@@ -4,7 +4,7 @@ import { generateInitialActors, generateRandomLog, generateGateways } from './se
 import { dbQuery, getSystemConfig, getPendingActors, approvePendingActor, rejectPendingActor, getSystemLogs, sendAuditLog, triggerFleetUpdate } from './services/dbService';
 import { saveUserPreferences } from './services/authService';
 import { Actor, LogEntry, ProxyGateway, PendingActor, ActorStatus, User, SystemConfig, UserPreferences, LogLevel } from './types';
-import { LayoutDashboard, Settings as SettingsIcon, Network, Plus, LogOut, User as UserIcon, FileText, Globe, Router, Radio, Loader, RefreshCw, Zap, Server, ChevronLeft, ChevronRight, Camera, Printer, Box, Eye, Cpu } from 'lucide-react';
+import { LayoutDashboard, Settings as SettingsIcon, Network, Plus, LogOut, User as UserIcon, FileText, Globe, Router, Radio, Loader, RefreshCw, Zap, Server, ChevronLeft, ChevronRight, Camera, Printer, Box, Eye, Cpu, HelpCircle } from 'lucide-react';
 
 // Lazy Load Components
 const Dashboard = React.lazy(() => import('./components/Dashboard'));
@@ -17,6 +17,7 @@ const WarRoomMap = React.lazy(() => import('./components/WarRoomMap'));
 const GatewayManager = React.lazy(() => import('./components/GatewayManager'));
 const WirelessRecon = React.lazy(() => import('./components/WirelessRecon'));
 const LandingPage = React.lazy(() => import('./components/LandingPage'));
+const HelpCenter = React.lazy(() => import('./components/HelpCenter'));
 
 const PageLoader = () => (
   <div className="flex flex-col items-center justify-center h-full w-full text-slate-500 min-h-[400px]">
@@ -65,7 +66,7 @@ export default function App() {
   });
   const [showLogin, setShowLogin] = useState(false); // New state to control Landing vs Login
   const [systemConfig, setSystemConfig] = useState<SystemConfig | null>(null);
-  const [activeTab, setActiveTab] = useState<'dashboard' | 'map' | 'actors' | 'wireless' | 'gateways' | 'reports' | 'settings'>('dashboard');
+  const [activeTab, setActiveTab] = useState<'dashboard' | 'map' | 'actors' | 'wireless' | 'gateways' | 'reports' | 'settings' | 'help'>('dashboard');
   const [gateways, setGateways] = useState<ProxyGateway[]>([]);
   const [actors, setActors] = useState<Actor[]>([]);
   const [logs, setLogs] = useState<LogEntry[]>([]);
@@ -381,6 +382,7 @@ export default function App() {
 
                     {/* Footer Actions */}
                     <div className="p-3 border-t border-slate-800/50 space-y-2 mb-2 bg-slate-950/50 shrink-0">
+                        <NavItem icon={HelpCircle} label="Help & Support" active={activeTab === 'help'} onClick={() => setActiveTab('help')} expanded={isSidebarExpanded} />
                         <NavItem icon={SettingsIcon} label="System Settings" active={activeTab === 'settings'} onClick={() => setActiveTab('settings')} expanded={isSidebarExpanded} />
                         <button 
                             onClick={handleLogout} 
@@ -418,6 +420,7 @@ export default function App() {
                                 {activeTab === 'reports' && <Reports currentUser={currentUser} logs={logs} actors={actors} />}
                                 {activeTab === 'gateways' && <GatewayManager gateways={gateways} onRefresh={loadProductionData} domain={systemConfig?.domain || 'vpp.io'} isProduction={isProduction} />}
                                 {activeTab === 'wireless' && <WirelessRecon isProduction={isProduction} actors={actors} />}
+                                {activeTab === 'help' && <HelpCenter />}
                                 {activeTab === 'settings' && (
                                     <Settings 
                                         isProduction={isProduction} 
