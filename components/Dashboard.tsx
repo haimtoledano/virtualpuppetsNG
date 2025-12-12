@@ -2,7 +2,7 @@
 import React, { useMemo } from 'react';
 import { Actor, ActorStatus, LogEntry, LogLevel, ProxyGateway, DevicePersona } from '../types';
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid, LineChart, Line } from 'recharts';
-import { ShieldAlert, Server, Activity, Terminal as TerminalIcon, AlertTriangle, Network, Router, Cpu, Info, Globe, Skull, Cloud, Zap, Camera, Printer, Box, Eye, Lock } from 'lucide-react';
+import { ShieldAlert, Server, Activity, Terminal as TerminalIcon, AlertTriangle, Network, Router, Cpu, Info, Globe, Skull, Cloud, Zap, Camera, Printer, Box, Eye, Lock, MapPin } from 'lucide-react';
 import Terminal from './Terminal';
 
 interface DashboardProps {
@@ -79,20 +79,24 @@ const Dashboard: React.FC<DashboardProps> = ({ gateways, actors, logs, onActorSe
     const isCompromised = actor.status === ActorStatus.COMPROMISED;
     const isOnline = actor.status === ActorStatus.ONLINE;
 
+    // Resolve Location: Priority Actor Physical Address -> Gateway Location -> Default
+    const gateway = gateways.find(g => g.id === actor.proxyId);
+    const location = actor.physicalAddress || gateway?.location || 'Cloud / Direct';
+
     return (
         <div 
             key={actor.id} 
             onClick={() => onActorSelect && onActorSelect(actor.id)}
             className={`
                 group relative h-10 w-full rounded-md cursor-pointer transition-all duration-200 
-                hover:scale-110 hover:z-20 border flex items-center justify-center overflow-hidden
+                hover:scale-110 hover:z-50 border flex items-center justify-center overflow-visible
                 ${isOnline ? 'bg-slate-800/80 border-slate-700 hover:border-emerald-500/50' : 
                   isCompromised ? 'bg-red-950/40 border-red-500 hover:bg-red-900/60 shadow-[0_0_10px_rgba(239,68,68,0.2)]' : 
                   'bg-slate-900 border-slate-800 opacity-50'}
             `}
         >
             {/* Background Status Tint */}
-            {isOnline && <div className="absolute inset-0 bg-emerald-500/5 pointer-events-none"></div>}
+            {isOnline && <div className="absolute inset-0 bg-emerald-500/5 pointer-events-none rounded-md"></div>}
             
             {/* Persona Icon (Centered) */}
             <PersonaIcon className={`w-5 h-5 transition-colors duration-300 ${isCompromised ? 'text-red-400' : 'text-slate-600 group-hover:text-slate-300'}`} />
@@ -115,28 +119,37 @@ const Dashboard: React.FC<DashboardProps> = ({ gateways, actors, logs, onActorSe
                 </div>
             )}
 
-            {/* Tooltip */}
-            <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 hidden group-hover:block bg-slate-950 text-slate-200 text-xs px-3 py-2 rounded-lg border border-slate-700 whitespace-nowrap z-50 shadow-2xl min-w-[160px]">
-                <div className="flex items-center justify-between font-bold text-white mb-1 border-b border-slate-800 pb-1">
-                    <span>{actor.name}</span>
-                    {isSentinel && <span className="text-[9px] bg-red-900/50 text-red-300 px-1 rounded flex items-center"><Eye className="w-2 h-2 mr-1" /> SENTINEL</span>}
+            {/* Enhanced Tooltip */}
+            <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 hidden group-hover:block bg-slate-900 text-slate-200 text-xs p-3 rounded-xl border border-slate-600 whitespace-nowrap z-50 shadow-2xl min-w-[180px] backdrop-blur-md">
+                <div className="flex items-center justify-between font-bold text-white mb-2 border-b border-slate-700 pb-2">
+                    <span className="flex items-center"><TerminalIcon className="w-3 h-3 mr-2 text-blue-400"/> {actor.name}</span>
+                    {isSentinel && <Eye className="w-3 h-3 text-red-500 animate-pulse" />}
                 </div>
-                <div className="space-y-1 mb-2">
-                    <div className="font-mono text-slate-500 text-[10px]">{actor.localIp}</div>
-                    <div className="flex items-center text-[10px] text-slate-300">
-                        <PersonaIcon className="w-3 h-3 mr-1.5 text-blue-400" />
-                        {actor.persona?.name || 'Generic Device'}
+                <div className="space-y-1.5 mb-2">
+                    <div className="flex items-center justify-between text-[10px]">
+                        <span className="text-slate-500 flex items-center"><Globe className="w-3 h-3 mr-1.5"/> IP Address</span>
+                        <span className="font-mono text-emerald-400">{actor.localIp}</span>
                     </div>
-                    {hasTunnels && (
-                        <div className="flex items-center text-[10px] text-cyan-300">
-                            <Network className="w-3 h-3 mr-1.5" />
-                            {actor.activeTunnels?.length} Active Tunnels
-                        </div>
-                    )}
+                    <div className="flex items-center justify-between text-[10px]">
+                        <span className="text-slate-500 flex items-center"><MapPin className="w-3 h-3 mr-1.5"/> Location</span>
+                        <span className="text-slate-300 max-w-[100px] truncate ml-2 text-right">{location}</span>
+                    </div>
+                    <div className="flex items-center justify-between text-[10px]">
+                        <span className="text-slate-500 flex items-center"><PersonaIcon className="w-3 h-3 mr-1.5"/> Persona</span>
+                        <span className="text-blue-300">{actor.persona?.name || 'Generic'}</span>
+                    </div>
                 </div>
-                <div className={`text-[9px] font-bold uppercase tracking-wider ${isCompromised ? 'text-red-400' : 'text-emerald-400'}`}>
-                    STATUS: {actor.status}
+                
+                {/* Footer Status */}
+                <div className="pt-2 border-t border-slate-700 flex justify-between items-center">
+                     <span className={`text-[9px] font-bold uppercase tracking-wider ${isCompromised ? 'text-red-400' : 'text-emerald-500'}`}>
+                        {actor.status}
+                    </span>
+                    {hasTunnels && <span className="text-[9px] text-cyan-400 flex items-center"><Network className="w-2 h-2 mr-1"/> TUNNEL ACTIVE</span>}
                 </div>
+                
+                {/* Pointer Arrow */}
+                <div className="absolute top-full left-1/2 -translate-x-1/2 -mt-1 border-8 border-transparent border-t-slate-600"></div>
             </div>
         </div>
     );
