@@ -6,8 +6,6 @@ interface LandingPageProps {
   onLoginClick: () => void;
 }
 
-const VP_LOGO_PATH = "/vp-logo.png"; // Defined here for local use as well
-
 const PERSONAS = [
     { icon: Laptop, label: "Workstation", id: "WIN-11-ENT", color: "text-blue-400" },
     { icon: Printer, label: "Office Printer", id: "HP-JET-4050", color: "text-emerald-400" },
@@ -29,6 +27,18 @@ const SLOGANS = [
     { pre: "Orchestrate", post: "The Breach" },
     { pre: "Where Hackers", post: "Go to Fail" }
 ];
+
+// Inline Logo Component
+const VpLogo = ({ className = "w-10 h-10" }: { className?: string }) => (
+    <svg viewBox="0 0 100 60" className={className} fill="none" xmlns="http://www.w3.org/2000/svg">
+        <path d="M10 5 L35 55 L60 5" stroke="currentColor" strokeWidth="8" strokeLinecap="round" strokeLinejoin="round" />
+        <path d="M60 5 L60 35 H80 C90 35 90 5 80 5 H60" stroke="currentColor" strokeWidth="8" strokeLinecap="round" strokeLinejoin="round" />
+        <circle cx="22" cy="30" r="3" className="fill-cyan-400 animate-pulse" />
+        <circle cx="48" cy="30" r="3" className="fill-cyan-400 animate-pulse" style={{animationDelay: '0.2s'}} />
+        <circle cx="70" cy="20" r="3" className="fill-cyan-400 animate-pulse" style={{animationDelay: '0.4s'}} />
+        <path d="M22 30 L48 30 L70 20" stroke="#22d3ee" strokeWidth="1.5" strokeOpacity="0.8" />
+    </svg>
+);
 
 const LandingPage: React.FC<LandingPageProps> = ({ onLoginClick }) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -263,13 +273,8 @@ const LandingPage: React.FC<LandingPageProps> = ({ onLoginClick }) => {
       <nav className="relative z-50 max-w-7xl mx-auto px-6 py-6 flex justify-between items-center backdrop-blur-sm">
         <div className="flex items-center space-x-3 group cursor-default">
           <div className="relative h-10 w-auto flex items-center justify-center">
-             <img src={VP_LOGO_PATH} alt="VP Logo" className="h-10 w-auto object-contain" onError={(e) => { e.currentTarget.style.display = 'none'; }} />
-             {/* Fallback Shield if Image fails (optional, mostly relies on image) */}
-             <div className="hidden">
-                <div className="relative w-9 h-9 bg-gradient-to-tr from-blue-600 to-cyan-500 rounded-lg flex items-center justify-center shadow-lg shadow-blue-500/20">
-                    <Shield className="w-5 h-5 text-white" />
-                </div>
-             </div>
+             {/* Using SVG Component instead of Image */}
+             <VpLogo className="h-10 w-auto text-white filter drop-shadow-[0_0_5px_rgba(34,211,238,0.5)]" />
           </div>
           <div className="flex flex-col">
             <span className="text-lg font-bold tracking-widest text-white">VIRTUAL PUPPETS</span>
@@ -296,7 +301,7 @@ const LandingPage: React.FC<LandingPageProps> = ({ onLoginClick }) => {
             
             {/* Background Logo Watermark for Hero */}
             <div className="absolute -top-20 -left-20 w-96 h-96 opacity-5 z-0 pointer-events-none">
-                <img src={VP_LOGO_PATH} alt="" className="w-full h-full object-contain" />
+                <VpLogo className="w-full h-full text-white" />
             </div>
 
             <div className="inline-block relative z-10">

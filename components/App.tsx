@@ -18,13 +18,23 @@ const GatewayManager = React.lazy(() => import('./components/GatewayManager'));
 const WirelessRecon = React.lazy(() => import('./components/WirelessRecon'));
 const LandingPage = React.lazy(() => import('./components/LandingPage'));
 
-const VP_LOGO_PATH = "/vp-logo.png"; // Ensure this file exists in your public folder
-
 const PageLoader = () => (
   <div className="flex flex-col items-center justify-center h-full w-full text-slate-500 min-h-[400px]">
     <Loader className="w-8 h-8 text-blue-500 animate-spin mb-3" />
     <span className="text-xs font-mono tracking-widest opacity-70">LOADING MODULE...</span>
   </div>
+);
+
+// Inline Logo Component to avoid missing file issues
+const VpLogo = ({ className = "w-10 h-10" }: { className?: string }) => (
+    <svg viewBox="0 0 100 60" className={className} fill="none" xmlns="http://www.w3.org/2000/svg">
+        <path d="M10 5 L35 55 L60 5" stroke="currentColor" strokeWidth="8" strokeLinecap="round" strokeLinejoin="round" />
+        <path d="M60 5 L60 35 H80 C90 35 90 5 80 5 H60" stroke="currentColor" strokeWidth="8" strokeLinecap="round" strokeLinejoin="round" />
+        <circle cx="22" cy="30" r="3" className="fill-cyan-400 animate-pulse" />
+        <circle cx="48" cy="30" r="3" className="fill-cyan-400 animate-pulse" style={{animationDelay: '0.2s'}} />
+        <circle cx="70" cy="20" r="3" className="fill-cyan-400 animate-pulse" style={{animationDelay: '0.4s'}} />
+        <path d="M22 30 L48 30 L70 20" stroke="#22d3ee" strokeWidth="1.5" strokeOpacity="0.8" />
+    </svg>
 );
 
 const NavItem = ({ icon: Icon, label, active, onClick, expanded }: { icon: any, label: string, active: boolean, onClick: () => void, expanded: boolean }) => (
@@ -322,12 +332,7 @@ export default function App() {
                 
                 {/* --- GLOBAL WATERMARK --- */}
                 <div className="fixed inset-0 z-0 flex items-center justify-center pointer-events-none opacity-5 overflow-hidden">
-                    <img 
-                        src={VP_LOGO_PATH} 
-                        alt="" 
-                        className="w-[60vw] h-[60vw] max-w-[800px] max-h-[800px] object-contain filter grayscale opacity-50"
-                        onError={(e) => e.currentTarget.style.display = 'none'} // Hide if missing
-                    />
+                    <VpLogo className="w-[60vw] h-[60vw] max-w-[800px] max-h-[800px] text-white opacity-[0.03] filter blur-[1px]" />
                 </div>
 
                 {/* Sidebar Navigation */}
@@ -339,8 +344,8 @@ export default function App() {
                             {systemConfig?.logoUrl ? (
                                 <img src={systemConfig.logoUrl} alt="Logo" className="h-8 w-8 object-contain shrink-0" />
                             ) : (
-                                <div className="bg-blue-600 rounded-lg p-1.5 shadow-lg shadow-blue-500/20 shrink-0">
-                                    <Zap className="w-5 h-5 text-white" />
+                                <div className="bg-slate-900 rounded-lg p-1.5 shadow-lg border border-slate-800 shrink-0">
+                                    <VpLogo className="w-5 h-5 text-blue-500" />
                                 </div>
                             )}
                             
