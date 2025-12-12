@@ -1,5 +1,5 @@
 
-export const CURRENT_AGENT_VERSION = "2.6.0";
+export const CURRENT_AGENT_VERSION = "2.7.0";
 
 export const generateAgentScript = (serverUrl, token) => {
   return `#!/bin/bash

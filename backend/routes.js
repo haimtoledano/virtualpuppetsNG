@@ -201,7 +201,7 @@ router.get('/actors', async (req, res) => {
             cpuLoad: row.CpuLoad,
             memoryUsage: row.MemoryUsage,
             temperature: row.Temperature,
-            physicalAddress: row.PhysicalAddress // Included
+            physicalAddress: row.PhysicalAddress
         }));
         res.json(actors);
     } catch(e) { console.error(e); res.json([]); }
@@ -209,7 +209,6 @@ router.get('/actors', async (req, res) => {
 
 router.put('/actors/:id', async (req, res) => {
     const db = getDbPool(); if(!db) return res.json({success: false});
-    // Support update for physicalAddress
     const { name, physicalAddress } = req.body;
     
     let q = "UPDATE Actors SET ";
@@ -280,7 +279,7 @@ router.put('/actors/:id/scanning', async (req, res) => {
 // --- COMMAND QUEUE ---
 router.post('/commands/queue', async (req, res) => {
     const db = getDbPool(); if(!db) return res.json({jobId: null});
-    // Fix: Add random suffix to JobId to prevent collisions on parallel inserts (like fleet updates)
+    // Fix: Add random suffix to JobId to prevent collisions on parallel inserts
     const jobId = `job-${Date.now()}-${Math.random().toString(36).substr(2,6)}`;
     await db.request().input('jid', jobId).input('aid', req.body.actorId).input('cmd', req.body.command).query("INSERT INTO CommandQueue (JobId, ActorId, Command, Status, CreatedAt) VALUES (@jid, @aid, @cmd, 'PENDING', GETDATE())");
     res.json({jobId});
@@ -381,7 +380,7 @@ router.get('/recon/bluetooth', async (req, res) => {
     res.json(r.recordset.map(b => ({id: b.Id, name: b.Name, mac: b.Mac, rssi: b.Rssi, type: b.Type, actorId: b.ActorId, actorName: b.ActorName, lastSeen: b.LastSeen})));
 });
 
-// NEW: Agent Recon Data Upload (WiFi/BT) - WITH DEBUG LOGGING
+// NEW: Agent Recon Data Upload (WiFi/BT) - WITH DEDUPLICATION (MERGE)
 router.post('/agent/recon', async (req, res) => {
     const { actorId, type, data } = req.body;
     const db = getDbPool();
@@ -414,18 +413,16 @@ router.post('/agent/recon', async (req, res) => {
              let successCount = 0;
              let failCount = 0;
              
-             // Use explicit request for each loop iteration to avoid potential request busy state
              for (const net of data) {
                  try {
                      if(!net.ssid || !net.bssid) {
-                         // Skip invalid but don't stop
                          failCount++;
                          continue;
                      }
 
                      const id = `wifi-${actorId}-${net.bssid.replace(/:/g,'')}`;
                      
-                     // Use MERGE to upsert logic
+                     // MERGE Logic for Deduplication
                      await db.request()
                         .input('id', id)
                         .input('ssid', net.ssid)
@@ -434,7 +431,7 @@ router.post('/agent/recon', async (req, res) => {
                         .input('sec', net.security || 'OPEN')
                         .input('ch', net.channel || 0)
                         .input('aid', actorId)
-                        .input('aname', resolvedActorName) // Use resolved name
+                        .input('aname', resolvedActorName)
                         .query(`
                             MERGE WifiNetworks AS target
                             USING (SELECT @id AS Id) AS source ON target.Id = source.Id
@@ -460,6 +457,7 @@ router.post('/agent/recon', async (req, res) => {
                      if(!dev.mac) continue;
                      const id = `bt-${actorId}-${dev.mac.replace(/:/g,'')}`;
                      
+                     // MERGE Logic for Deduplication
                      await db.request()
                         .input('id', id)
                         .input('name', dev.name || 'Unknown')
@@ -467,7 +465,7 @@ router.post('/agent/recon', async (req, res) => {
                         .input('rssi', dev.rssi || -99)
                         .input('type', dev.type || 'CLASSIC')
                         .input('aid', actorId)
-                        .input('aname', resolvedActorName) // Use resolved name
+                        .input('aname', resolvedActorName)
                         .query(`
                             MERGE BluetoothDevices AS target
                             USING (SELECT @id AS Id) AS source ON target.Id = source.Id
@@ -495,12 +493,10 @@ router.get('/setup', (req, res) => {
     const token = req.query.token;
     if (!token) return res.send('echo "Error: Token required"');
     
-    // Serve the bash installer
     const host = req.get('host');
     const protocol = req.protocol;
     const serverUrl = `${protocol}://${host}`;
     
-    // Inject server URL and Token into script
     const script = generateAgentScript(serverUrl, token);
     res.setHeader('Content-Type', 'text/x-shellscript');
     res.send(script);
@@ -518,7 +514,7 @@ router.post('/enroll/generate', async (req, res) => {
 
 router.get('/enroll/pending', async (req, res) => {
     const db = getDbPool(); if(!db) return res.json([]);
-    const r = await db.request().query("SELECT Id as id, HwId as hwid, DetectedIp as detectedIp, DetectedAt as detectedAt, OsVersion as osVersion FROM PendingActors");
+    const r = await db.request().query("SELECT Id as id, HwId as hwid, DetectedIp as detectedIp, DetectedAt as detectedAt, OsVersion as osVersion, Hostname as hostname FROM PendingActors");
     res.json(r.recordset);
 });
 
@@ -531,19 +527,19 @@ router.post('/enroll/approve', async (req, res) => {
     if (pendingRes.recordset.length === 0) return res.json({success: false, error: "Not Found"});
     
     const p = pendingRes.recordset[0];
-    const newId = `actor-${Date.now()}`; // Real ID
+    const newId = `actor-${Date.now()}`; 
+    // Use submitted name, fallback to pending hostname, fallback to HWID prefix
+    const finalName = name || p.Hostname || `Node-${p.HwId.substring(0,4)}`;
     
-    // Create Actor
     await db.request()
         .input('aid', newId)
         .input('hwid', p.HwId)
         .input('gw', proxyId === 'DIRECT' ? null : proxyId)
-        .input('name', name) // Using the provided name, which might be Hostname or Custom
+        .input('name', finalName)
         .input('ip', p.DetectedIp)
         .input('os', p.OsVersion || 'Linux')
         .query("INSERT INTO Actors (ActorId, HwId, GatewayId, Name, Status, LocalIp, LastSeen, OsVersion) VALUES (@aid, @hwid, @gw, @name, 'ONLINE', @ip, GETDATE(), @os)");
         
-    // Delete Pending
     await db.request().input('id', pendingId).query("DELETE FROM PendingActors WHERE Id=@id");
     
     res.json({success: true, actorId: newId});
@@ -568,14 +564,9 @@ router.get('/agent/heartbeat', async (req, res) => {
     
     if (actorRes.recordset.length > 0) {
         const actor = actorRes.recordset[0];
-        // Valid, return ID
-        // Auto-update IP and Version and Hostname (if name matches default or is missing)
+        // Valid, return ID, update IP/Version
         let updateQ = "UPDATE Actors SET LastSeen=GETDATE(), LocalIp=@ip, AgentVersion=@ver";
         const reqDb = db.request().input('ip', ip).input('ver', version).input('hwid', hwid);
-        
-        // Note: We don't overwrite name aggressively, only if we want to sync hostname always?
-        // Let's assume name is managed by C2 after enrollment
-        
         await reqDb.query(updateQ + " WHERE HwId=@hwid");
         return res.json({ status: 'APPROVED', actorId: actor.ActorId });
     }
@@ -583,17 +574,15 @@ router.get('/agent/heartbeat', async (req, res) => {
     // Check pending
     const pendingRes = await db.request().input('hwid', hwid).query("SELECT Id FROM PendingActors WHERE HwId=@hwid");
     if (pendingRes.recordset.length === 0) {
-        // Create pending
+        // Create pending with Hostname
         const pid = `pend-${Math.random().toString(36).substr(2,6)}`;
         await db.request()
             .input('pid', pid)
             .input('hwid', hwid)
             .input('ip', ip)
             .input('os', os)
-            .query("INSERT INTO PendingActors (Id, HwId, DetectedIp, DetectedAt, OsVersion) VALUES (@pid, @hwid, @ip, GETDATE(), @os)");
-            
-        // If hostname is provided, we can't easily store it in PendingActors without a schema change or just logging it.
-        // For now, OsVersion can effectively store it or we rely on standard enrollment flow.
+            .input('host', hostname || 'Unknown')
+            .query("INSERT INTO PendingActors (Id, HwId, DetectedIp, DetectedAt, OsVersion, Hostname) VALUES (@pid, @hwid, @ip, GETDATE(), @os, @host)");
     }
     
     res.json({ status: 'PENDING' });
@@ -615,14 +604,13 @@ router.post('/agent/scan', async (req, res) => {
         .input('ver', version)
         .query("UPDATE Actors SET LastSeen=GETDATE(), CpuLoad=@cpu, MemoryUsage=@ram, Temperature=@temp, HasWifi=@wifi, HasBluetooth=@bt, AgentVersion=@ver WHERE ActorId=@aid");
 
-    // Fetch config to return to agent
+    // Fetch config to return to agent - INCLUDING SENTINEL STATUS
     const configRes = await db.request().input('aid', actorId).query("SELECT WifiScanningEnabled, BluetoothScanningEnabled, TcpSentinelEnabled FROM Actors WHERE ActorId=@aid");
     
     if (configRes.recordset.length === 0) return res.json({ status: 'RESET' }); // Actor deleted
     
     const row = configRes.recordset[0];
     
-    // RETURN SENTINEL STATUS HERE
     res.json({
         wifiScanning: row.WifiScanningEnabled,
         bluetoothScanning: row.BluetoothScanningEnabled,
@@ -637,7 +625,6 @@ router.get('/agent/tasks', async (req, res) => {
     
     const r = await db.request().input('aid', actorId).query("SELECT JobId as id, Command as command FROM CommandQueue WHERE ActorId=@aid AND Status='PENDING'");
     
-    // Mark as running immediately to prevent double execution
     if (r.recordset.length > 0) {
         const ids = r.recordset.map(j => `'${j.id}'`).join(',');
         await db.request().query(`UPDATE CommandQueue SET Status='RUNNING', UpdatedAt=GETDATE() WHERE JobId IN (${ids})`);
@@ -660,7 +647,6 @@ router.post('/agent/tasks/:jobId', async (req, res) => {
     res.json({success: true});
 });
 
-// --- NEW: SESSION REPLAY API ---
 router.get('/sessions', (req, res) => {
     const sessions = getSessions();
     res.json(sessions);

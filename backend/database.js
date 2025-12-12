@@ -72,7 +72,7 @@ export const runSchemaMigrations = async () => {
         await req.query(`IF OBJECT_ID('EnrollmentTokens','U') IS NULL CREATE TABLE EnrollmentTokens (Token NVARCHAR(50) PRIMARY KEY, Type NVARCHAR(20), TargetId NVARCHAR(50), ConfigJson NVARCHAR(MAX), CreatedAt DATETIME, IsUsed BIT)`);
         
         // Ensure PendingActors has all columns
-        await req.query(`IF OBJECT_ID('PendingActors','U') IS NULL CREATE TABLE PendingActors (Id NVARCHAR(50) PRIMARY KEY, HwId NVARCHAR(100), DetectedIp NVARCHAR(50), TargetGatewayId NVARCHAR(50), DetectedAt DATETIME, OsVersion NVARCHAR(100))`);
+        await req.query(`IF OBJECT_ID('PendingActors','U') IS NULL CREATE TABLE PendingActors (Id NVARCHAR(50) PRIMARY KEY, HwId NVARCHAR(100), DetectedIp NVARCHAR(50), TargetGatewayId NVARCHAR(50), DetectedAt DATETIME, OsVersion NVARCHAR(100), Hostname NVARCHAR(100))`);
         
         // Recon Tables - using larger sizes for Security and SSID to prevent truncation
         await req.query(`IF OBJECT_ID('WifiNetworks','U') IS NULL CREATE TABLE WifiNetworks (Id NVARCHAR(50) PRIMARY KEY, Ssid NVARCHAR(200), Bssid NVARCHAR(50), SignalStrength INT, Security NVARCHAR(100), Channel INT, ActorId NVARCHAR(50), ActorName NVARCHAR(100), LastSeen DATETIME)`);
@@ -84,6 +84,7 @@ export const runSchemaMigrations = async () => {
         try { await req.query("IF NOT EXISTS (SELECT * FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME = 'Actors' AND COLUMN_NAME = 'TcpSentinelEnabled') ALTER TABLE Actors ADD TcpSentinelEnabled BIT DEFAULT 0"); } catch(e) {}
         try { await req.query("IF NOT EXISTS (SELECT * FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME = 'Actors' AND COLUMN_NAME = 'PhysicalAddress') ALTER TABLE Actors ADD PhysicalAddress NVARCHAR(200)"); } catch(e) {}
         try { await req.query("IF NOT EXISTS (SELECT * FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME = 'PendingActors' AND COLUMN_NAME = 'OsVersion') ALTER TABLE PendingActors ADD OsVersion NVARCHAR(100)"); } catch(e) {}
+        try { await req.query("IF NOT EXISTS (SELECT * FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME = 'PendingActors' AND COLUMN_NAME = 'Hostname') ALTER TABLE PendingActors ADD Hostname NVARCHAR(100)"); } catch(e) {}
         try { await req.query("IF NOT EXISTS (SELECT * FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME = 'Gateways' AND COLUMN_NAME = 'Lat') ALTER TABLE Gateways ADD Lat FLOAT"); } catch(e) {}
         try { await req.query("IF NOT EXISTS (SELECT * FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME = 'Gateways' AND COLUMN_NAME = 'Lng') ALTER TABLE Gateways ADD Lng FLOAT"); } catch(e) {}
         

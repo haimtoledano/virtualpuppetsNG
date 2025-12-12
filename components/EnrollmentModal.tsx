@@ -1,8 +1,9 @@
+
 import React, { useState, useEffect } from 'react';
 import { PendingActor, ProxyGateway, ProvisioningStatus } from '../types';
 import { generateEnrollmentToken as mockGenerateToken, simulateDeviceCallHome } from '../services/mockService';
 import { registerGateway, generateEnrollmentToken } from '../services/dbService';
-import { Copy, Terminal, Server, CheckCircle, Loader, X, PlusCircle, Router, Bot, RefreshCw, Trash2, Cpu } from 'lucide-react';
+import { Copy, Terminal, Server, CheckCircle, Loader, X, PlusCircle, Router, Bot, RefreshCw, Trash2, Cpu, Laptop } from 'lucide-react';
 
 interface EnrollmentModalProps {
   isOpen: boolean;
@@ -23,7 +24,8 @@ const PendingDeviceRow: React.FC<{
     onApprove: (id: string, proxyId: string, name: string) => void;
     onReject?: (id: string) => void;
 }> = ({ device, gateways, onApprove, onReject }) => {
-    const [name, setName] = useState(`Linux-${device.id.split('_')[1] || 'Node'}`);
+    // Default name to Hostname if available, else standard fallback
+    const [name, setName] = useState(device.hostname || `Linux-${device.id.split('_')[1] || 'Node'}`);
     const [proxyId, setProxyId] = useState<string>(gateways.length > 0 ? gateways[0].id : 'DIRECT');
 
     return (
@@ -40,12 +42,20 @@ const PendingDeviceRow: React.FC<{
                     <div className="text-xs text-slate-500 font-mono mt-1">
                         IP: {device.detectedIp} • Detected: {new Date(device.detectedAt).toLocaleTimeString()}
                     </div>
-                    {device.osVersion && (
-                        <div className="text-[10px] text-emerald-400 font-bold mt-1 flex items-center">
-                            <Cpu className="w-3 h-3 mr-1" />
-                            {device.osVersion}
-                        </div>
-                    )}
+                    <div className="flex gap-2 mt-1">
+                        {device.osVersion && (
+                            <div className="text-[10px] text-emerald-400 font-bold flex items-center">
+                                <Cpu className="w-3 h-3 mr-1" />
+                                {device.osVersion}
+                            </div>
+                        )}
+                        {device.hostname && (
+                            <div className="text-[10px] text-blue-400 font-bold flex items-center">
+                                <Laptop className="w-3 h-3 mr-1" />
+                                {device.hostname}
+                            </div>
+                        )}
+                    </div>
                 </div>
             </div>
 
