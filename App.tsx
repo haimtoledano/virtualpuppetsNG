@@ -285,144 +285,146 @@ export default function App() {
   const selectedActor = actors.find(a => a.id === selectedActorId);
   const selectedActorGateway = selectedActor ? gateways.find(g => g.id === selectedActor.proxyId) : undefined;
 
-  const renderContent = () => {
-    return (
+  return (
         <Suspense fallback={<PageLoader />}>
-            {selectedActor ? (
-                <ActorDetail 
-                    actor={selectedActor} 
-                    gateway={selectedActorGateway} 
-                    logs={logs.filter(l => l.actorId === selectedActorId)} 
-                    onBack={() => { setSelectedActorId(null); setAutoForensicTarget(null); }} 
-                    isProduction={isProduction}
-                    currentUser={currentUser}
-                    onUpdatePreferences={handleUpdateUserPreferences}
-                    autoRunForensic={autoForensicTarget === selectedActor.id}
-                />
-            ) : (
-                <>
-                    {activeTab === 'dashboard' && <Dashboard gateways={gateways} actors={actors} logs={logs} onActorSelect={setSelectedActorId} onQuickForensic={handleQuickForensic} />}
-                    {activeTab === 'map' && <WarRoomMap gateways={gateways} actors={actors} />}
-                    {activeTab === 'reports' && <Reports currentUser={currentUser} logs={logs} actors={actors} />}
-                    {activeTab === 'gateways' && <GatewayManager gateways={gateways} onRefresh={loadProductionData} domain={systemConfig?.domain || 'vpp.io'} isProduction={isProduction} />}
-                    {activeTab === 'wireless' && <WirelessRecon isProduction={isProduction} actors={actors} />}
-                    {activeTab === 'settings' && (
-                        <Settings 
-                            isProduction={isProduction} 
-                            onToggleProduction={toggleProductionMode} 
-                            currentUser={currentUser} 
-                            onConfigUpdate={loadProductionData}
-                            actors={actors}
-                            gateways={gateways}
-                            onRestore={handleRestoreState}
-                        />
-                    )}
-                    {activeTab === 'actors' && (
-                        <div className="space-y-6 animate-fade-in pb-10">
-                            <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
-                                <h2 className="text-2xl font-bold text-slate-200">Global Fleet</h2>
-                                <div className="flex space-x-2">
-                                     <button 
-                                        onClick={handleFleetUpdate}
-                                        disabled={isUpdatingFleet}
-                                        className="bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white px-4 py-2 rounded-lg flex items-center font-bold text-xs border border-slate-700 transition-all disabled:opacity-50"
-                                     >
-                                         <RefreshCw className={`w-3 h-3 mr-2 ${isUpdatingFleet ? 'animate-spin' : ''}`} />
-                                         {isUpdatingFleet ? 'PUSHING UPDATE...' : `UPDATE ALL AGENTS (v${targetVersion})`}
-                                     </button>
-                                     <button 
-                                        onClick={() => setIsEnrollmentOpen(true)} 
-                                        className="bg-blue-600 hover:bg-blue-500 text-white px-4 py-2 rounded-lg flex items-center font-bold text-sm shadow-lg shadow-blue-900/20"
-                                     >
-                                         <Plus className="w-4 h-4 mr-2" />Enroll New Device
-                                     </button>
-                                </div>
-                            </div>
+            <div className="min-h-screen bg-cyber-900 text-slate-200 font-sans selection:bg-blue-500/30 flex">
+                
+                {/* Sidebar Navigation */}
+                <div className={`fixed left-0 top-0 bottom-0 w-16 bg-slate-900 border-r border-slate-700 flex flex-col items-center py-6 space-y-6 z-50 transition-all ${currentUser ? 'translate-x-0' : '-translate-x-full'}`}>
+                    <div className="bg-blue-600/20 p-2 rounded-lg mb-4">
+                        <Zap className="w-6 h-6 text-blue-400" />
+                    </div>
+                    
+                    <button onClick={() => setActiveTab('dashboard')} className={`p-3 rounded-lg transition-colors ${activeTab === 'dashboard' ? 'bg-slate-800 text-blue-400' : 'text-slate-500 hover:text-white'}`} title="Dashboard">
+                        <LayoutDashboard className="w-5 h-5" />
+                    </button>
+                    <button onClick={() => setActiveTab('map')} className={`p-3 rounded-lg transition-colors ${activeTab === 'map' ? 'bg-slate-800 text-blue-400' : 'text-slate-500 hover:text-white'}`} title="War Room Map">
+                        <Globe className="w-5 h-5" />
+                    </button>
+                    <button onClick={() => setActiveTab('actors')} className={`p-3 rounded-lg transition-colors ${activeTab === 'actors' ? 'bg-slate-800 text-blue-400' : 'text-slate-500 hover:text-white'}`} title="Fleet">
+                        <Server className="w-5 h-5" />
+                    </button>
+                    <button onClick={() => setActiveTab('gateways')} className={`p-3 rounded-lg transition-colors ${activeTab === 'gateways' ? 'bg-slate-800 text-blue-400' : 'text-slate-500 hover:text-white'}`} title="Gateways">
+                        <Network className="w-5 h-5" />
+                    </button>
+                    <button onClick={() => setActiveTab('wireless')} className={`p-3 rounded-lg transition-colors ${activeTab === 'wireless' ? 'bg-slate-800 text-blue-400' : 'text-slate-500 hover:text-white'}`} title="Wireless Recon">
+                        <Radio className="w-5 h-5" />
+                    </button>
+                    <button onClick={() => setActiveTab('reports')} className={`p-3 rounded-lg transition-colors ${activeTab === 'reports' ? 'bg-slate-800 text-blue-400' : 'text-slate-500 hover:text-white'}`} title="Reports">
+                        <FileText className="w-5 h-5" />
+                    </button>
+                    <div className="flex-1"></div>
+                    <button onClick={() => setActiveTab('settings')} className={`p-3 rounded-lg transition-colors ${activeTab === 'settings' ? 'bg-slate-800 text-blue-400' : 'text-slate-500 hover:text-white'}`} title="Settings">
+                        <SettingsIcon className="w-5 h-5" />
+                    </button>
+                    <button onClick={handleLogout} className="p-3 rounded-lg text-slate-500 hover:text-red-400 hover:bg-slate-800 transition-colors" title="Logout">
+                        <LogOut className="w-5 h-5" />
+                    </button>
+                </div>
 
-                            {/* Software Version Banner */}
-                            <div className="bg-gradient-to-r from-blue-900/20 to-slate-800 border border-blue-500/30 rounded-lg p-3 flex justify-between items-center text-sm">
-                                <div className="flex items-center text-blue-300">
-                                    <Zap className="w-4 h-4 mr-2" />
-                                    <span className="font-bold mr-2">Agent Versioning:</span>
-                                    <span>Latest Stable: <span className="text-white font-mono">v{targetVersion}</span></span>
-                                </div>
-                                <div className="flex items-center text-xs text-slate-400">
-                                    <span className="mr-3">{actors.filter(a => a.agentVersion !== targetVersion).length} agents outdated</span>
-                                    {actors.length > 0 && <span className="bg-emerald-500/20 text-emerald-400 px-2 py-0.5 rounded">System Healthy</span>}
-                                </div>
-                            </div>
-
-                            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                                {actors.map(actor => (
-                                    <div key={actor.id} onClick={() => setSelectedActorId(actor.id)} className={`cursor-pointer bg-slate-800 p-6 rounded-xl border hover:border-blue-500 transition-all shadow-lg ${actor.status === 'COMPROMISED' ? 'border-red-500 shadow-red-500/20' : 'border-slate-700'}`}>
-                                        <div className="flex justify-between items-start mb-2">
-                                            <h3 className="text-lg font-bold text-slate-200">{actor.name}</h3>
-                                            <span className={`text-[10px] px-1.5 py-0.5 rounded ${actor.agentVersion !== targetVersion ? 'bg-yellow-500/10 text-yellow-500' : 'bg-slate-700 text-slate-400'}`}>
-                                                v{actor.agentVersion || '1.0.0'}
-                                            </span>
+                {/* Main Content Area */}
+                <div className={`flex-1 flex flex-col transition-all duration-300 ${currentUser ? 'ml-16' : ''} h-screen overflow-hidden`}>
+                    <div className="flex-1 overflow-y-auto p-6">
+                        {selectedActor ? (
+                            <ActorDetail 
+                                actor={selectedActor} 
+                                gateway={selectedActorGateway} 
+                                logs={logs.filter(l => l.actorId === selectedActorId)} 
+                                onBack={() => { setSelectedActorId(null); setAutoForensicTarget(null); }} 
+                                isProduction={isProduction}
+                                currentUser={currentUser}
+                                onUpdatePreferences={handleUpdateUserPreferences}
+                                autoRunForensic={autoForensicTarget === selectedActor.id}
+                            />
+                        ) : (
+                            <>
+                                {activeTab === 'dashboard' && <Dashboard gateways={gateways} actors={actors} logs={logs} onActorSelect={setSelectedActorId} onQuickForensic={handleQuickForensic} />}
+                                {activeTab === 'map' && <WarRoomMap gateways={gateways} actors={actors} />}
+                                {activeTab === 'reports' && <Reports currentUser={currentUser} logs={logs} actors={actors} />}
+                                {activeTab === 'gateways' && <GatewayManager gateways={gateways} onRefresh={loadProductionData} domain={systemConfig?.domain || 'vpp.io'} isProduction={isProduction} />}
+                                {activeTab === 'wireless' && <WirelessRecon isProduction={isProduction} actors={actors} />}
+                                {activeTab === 'settings' && (
+                                    <Settings 
+                                        isProduction={isProduction} 
+                                        onToggleProduction={toggleProductionMode} 
+                                        currentUser={currentUser} 
+                                        onConfigUpdate={loadProductionData}
+                                        actors={actors}
+                                        gateways={gateways}
+                                        onRestore={handleRestoreState}
+                                    />
+                                )}
+                                {activeTab === 'actors' && (
+                                    <div className="space-y-6 animate-fade-in pb-10">
+                                        <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
+                                            <h2 className="text-2xl font-bold text-slate-200">Global Fleet</h2>
+                                            <div className="flex space-x-2">
+                                                <button 
+                                                    onClick={handleFleetUpdate}
+                                                    disabled={isUpdatingFleet}
+                                                    className="bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white px-4 py-2 rounded-lg flex items-center font-bold text-xs border border-slate-700 transition-all disabled:opacity-50"
+                                                >
+                                                    <RefreshCw className={`w-3 h-3 mr-2 ${isUpdatingFleet ? 'animate-spin' : ''}`} />
+                                                    {isUpdatingFleet ? 'PUSHING UPDATE...' : `UPDATE ALL AGENTS (v${targetVersion})`}
+                                                </button>
+                                                <button 
+                                                    onClick={() => setIsEnrollmentOpen(true)} 
+                                                    className="bg-blue-600 hover:bg-blue-500 text-white px-4 py-2 rounded-lg flex items-center font-bold text-sm shadow-lg shadow-blue-900/20"
+                                                >
+                                                    <Plus className="w-4 h-4 mr-2" />Enroll New Device
+                                                </button>
+                                            </div>
                                         </div>
-                                        <p className="text-sm text-slate-500 font-mono mb-4">{actor.localIp}</p>
-                                        <div className="flex justify-between text-xs text-slate-400">
-                                            <span>Status: <span className={actor.status === 'ONLINE' ? 'text-emerald-400' : actor.status === 'COMPROMISED' ? 'text-red-500 font-bold animate-pulse' : 'text-red-400'}>{actor.status}</span></span>
-                                            <span className="text-slate-500">{gateways.find(g => g.id === actor.proxyId)?.name || 'Direct'}</span>
+
+                                        {/* Software Version Banner */}
+                                        <div className="bg-gradient-to-r from-blue-900/20 to-slate-800 border border-blue-500/30 rounded-lg p-3 flex justify-between items-center text-sm">
+                                            <div className="flex items-center text-blue-300">
+                                                <Zap className="w-4 h-4 mr-2" />
+                                                <span className="font-bold mr-2">Agent Versioning:</span>
+                                                <span>Latest Stable: <span className="text-white font-mono">v{targetVersion}</span></span>
+                                            </div>
+                                            <div className="flex items-center text-xs text-slate-400">
+                                                <span className="mr-3">{actors.filter(a => a.agentVersion !== targetVersion).length} agents outdated</span>
+                                                {actors.length > 0 && <span className="bg-emerald-500/20 text-emerald-400 px-2 py-0.5 rounded">System Healthy</span>}
+                                            </div>
+                                        </div>
+
+                                        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                                            {actors.map(actor => (
+                                                <div key={actor.id} onClick={() => setSelectedActorId(actor.id)} className={`cursor-pointer bg-slate-800 p-6 rounded-xl border hover:border-blue-500 transition-all shadow-lg ${actor.status === 'COMPROMISED' ? 'border-red-500 shadow-red-500/20' : 'border-slate-700'}`}>
+                                                    <div className="flex justify-between items-start mb-2">
+                                                        <h3 className="text-lg font-bold text-slate-200">{actor.name}</h3>
+                                                        <span className={`text-[10px] px-1.5 py-0.5 rounded ${actor.agentVersion !== targetVersion ? 'bg-yellow-500/10 text-yellow-500' : 'bg-slate-700 text-slate-400'}`}>
+                                                            v{actor.agentVersion || '1.0.0'}
+                                                        </span>
+                                                    </div>
+                                                    <p className="text-sm text-slate-500 font-mono mb-4">{actor.localIp}</p>
+                                                    <div className="flex justify-between text-xs text-slate-400">
+                                                        <span>Status: <span className={actor.status === 'ONLINE' ? 'text-emerald-400' : actor.status === 'COMPROMISED' ? 'text-red-500 font-bold animate-pulse' : 'text-red-400'}>{actor.status}</span></span>
+                                                        <span className="text-slate-500">{gateways.find(g => g.id === actor.proxyId)?.name || 'Direct'}</span>
+                                                    </div>
+                                                </div>
+                                            ))}
                                         </div>
                                     </div>
-                                ))}
-                            </div>
-                        </div>
-                    )}
-                </>
-            )}
-            
-            <EnrollmentModal 
-                isOpen={isEnrollmentOpen} 
-                onClose={() => setIsEnrollmentOpen(false)}
-                gateways={gateways}
-                pendingActors={pendingActors}
-                setPendingActors={setPendingActors}
-                onApprove={handleAdoptDevice}
-                onReject={handleRejectDevice}
-                domain={systemConfig?.domain || 'vpp.io'}
-                isProduction={isProduction}
-                onGatewayRegistered={loadProductionData}
-            />
-
-            {/* Sidebar Navigation (Example, normally separate component) */}
-            <div className={`fixed left-0 top-0 bottom-0 w-16 bg-slate-900 border-r border-slate-700 flex flex-col items-center py-6 space-y-6 z-50 transition-all ${currentUser ? 'translate-x-0' : '-translate-x-full'}`}>
-                <div className="bg-blue-600/20 p-2 rounded-lg mb-4">
-                    <Zap className="w-6 h-6 text-blue-400" />
+                                )}
+                            </>
+                        )}
+                    </div>
                 </div>
-                
-                <button onClick={() => setActiveTab('dashboard')} className={`p-3 rounded-lg transition-colors ${activeTab === 'dashboard' ? 'bg-slate-800 text-blue-400' : 'text-slate-500 hover:text-white'}`} title="Dashboard">
-                    <LayoutDashboard className="w-5 h-5" />
-                </button>
-                <button onClick={() => setActiveTab('map')} className={`p-3 rounded-lg transition-colors ${activeTab === 'map' ? 'bg-slate-800 text-blue-400' : 'text-slate-500 hover:text-white'}`} title="War Room Map">
-                    <Globe className="w-5 h-5" />
-                </button>
-                <button onClick={() => setActiveTab('actors')} className={`p-3 rounded-lg transition-colors ${activeTab === 'actors' ? 'bg-slate-800 text-blue-400' : 'text-slate-500 hover:text-white'}`} title="Fleet">
-                    <Server className="w-5 h-5" />
-                </button>
-                <button onClick={() => setActiveTab('gateways')} className={`p-3 rounded-lg transition-colors ${activeTab === 'gateways' ? 'bg-slate-800 text-blue-400' : 'text-slate-500 hover:text-white'}`} title="Gateways">
-                    <Network className="w-5 h-5" />
-                </button>
-                <button onClick={() => setActiveTab('wireless')} className={`p-3 rounded-lg transition-colors ${activeTab === 'wireless' ? 'bg-slate-800 text-blue-400' : 'text-slate-500 hover:text-white'}`} title="Wireless Recon">
-                    <Radio className="w-5 h-5" />
-                </button>
-                <button onClick={() => setActiveTab('reports')} className={`p-3 rounded-lg transition-colors ${activeTab === 'reports' ? 'bg-slate-800 text-blue-400' : 'text-slate-500 hover:text-white'}`} title="Reports">
-                    <FileText className="w-5 h-5" />
-                </button>
-                <div className="flex-1"></div>
-                <button onClick={() => setActiveTab('settings')} className={`p-3 rounded-lg transition-colors ${activeTab === 'settings' ? 'bg-slate-800 text-blue-400' : 'text-slate-500 hover:text-white'}`} title="Settings">
-                    <SettingsIcon className="w-5 h-5" />
-                </button>
-                <button onClick={handleLogout} className="p-3 rounded-lg text-slate-500 hover:text-red-400 hover:bg-slate-800 transition-colors" title="Logout">
-                    <LogOut className="w-5 h-5" />
-                </button>
-            </div>
-
-            {/* Main Content Padding Fix */}
-            <div className={`transition-all duration-300 ${currentUser ? 'ml-16' : ''}`}>
-               {/* This div just ensures spacing for the fixed sidebar */}
+            
+                <EnrollmentModal 
+                    isOpen={isEnrollmentOpen} 
+                    onClose={() => setIsEnrollmentOpen(false)}
+                    gateways={gateways}
+                    pendingActors={pendingActors}
+                    setPendingActors={setPendingActors}
+                    onApprove={handleAdoptDevice}
+                    onReject={handleRejectDevice}
+                    domain={systemConfig?.domain || 'vpp.io'}
+                    isProduction={isProduction}
+                    onGatewayRegistered={loadProductionData}
+                />
             </div>
         </Suspense>
     );
