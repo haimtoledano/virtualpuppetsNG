@@ -1,14 +1,144 @@
 
 import React, { useState, useEffect, useRef } from 'react';
-import { Shield, Activity, Globe, Lock, Cpu, ArrowRight, Terminal, BarChart2, Zap, Server, Code, Wifi, Eye } from 'lucide-react';
+import { Shield, Activity, Globe, Lock, Cpu, ArrowRight, Terminal, BarChart2, Zap, Server, Code, Wifi, Eye, Printer, Camera, Smartphone, Laptop, Database } from 'lucide-react';
 
 interface LandingPageProps {
   onLoginClick: () => void;
 }
 
+const PERSONAS = [
+    { icon: Laptop, label: "Workstation", id: "WIN-11-ENT", color: "text-blue-400" },
+    { icon: Printer, label: "Office Printer", id: "HP-JET-4050", color: "text-emerald-400" },
+    { icon: Camera, label: "IP Camera", id: "AXIS-SEC-01", color: "text-red-400" },
+    { icon: Smartphone, label: "Android", id: "PIXEL-NODE", color: "text-purple-400" },
+    { icon: Database, label: "SQL Server", id: "ORACLE-DB", color: "text-yellow-400" },
+    { icon: Server, label: "Domain Controller", id: "DC-01-CORP", color: "text-cyan-400" },
+];
+
+const SLOGANS = [
+    { pre: "Master the", post: "Digital Chaos" },
+    { pre: "Deceive.", post: "Detect. Defend." },
+    { pre: "Architect of", post: "False Realities" },
+    { pre: "The Art of", post: "Cyber Illusion" },
+    { pre: "Your Trap.", post: "Their Nightmare." },
+    { pre: "Silent Watchers,", post: "Invisible Nets" },
+    { pre: "Chaos is", post: "Your Weapon" },
+    { pre: "Puppeteer of the", post: "Dark Web" },
+    { pre: "Orchestrate", post: "The Breach" },
+    { pre: "Where Hackers", post: "Go to Fail" }
+];
+
 const LandingPage: React.FC<LandingPageProps> = ({ onLoginClick }) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [mousePos, setMousePos] = useState({ x: 0, y: 0 });
+  const [headline, setHeadline] = useState(SLOGANS[0]);
+
+  // --- SYNCHRONIZED PUPPET STATE ---
+  const [globalIndex, setGlobalIndex] = useState(0);
+  const [isGlobalGlitching, setIsGlobalGlitching] = useState(false);
+
+  // Set random slogan on mount
+  useEffect(() => {
+      const randomSlogan = SLOGANS[Math.floor(Math.random() * SLOGANS.length)];
+      setHeadline(randomSlogan);
+  }, []);
+
+  // --- GLOBAL TIMER (5 Seconds) ---
+  useEffect(() => {
+      const interval = setInterval(() => {
+          // 1. Start Glitch
+          setIsGlobalGlitching(true);
+
+          // 2. Change Data halfway through glitch
+          setTimeout(() => {
+              setGlobalIndex(prev => (prev + 1) % PERSONAS.length);
+              
+              // 3. Stop Glitch
+              setTimeout(() => {
+                  setIsGlobalGlitching(false);
+              }, 300);
+          }, 300);
+
+      }, 5000); // Exactly 5 seconds
+
+      return () => clearInterval(interval);
+  }, []);
+
+  // --- SUB-COMPONENT FOR PUPPET ---
+  const VirtualPuppet = ({ 
+    offsetIndex = 0, 
+    scale = 1, 
+    opacity = 1, 
+    zIndex = 10,
+    left = "50%", 
+    top = "0px",
+    blur = false
+  }: { offsetIndex?: number, scale?: number, opacity?: number, zIndex?: number, left?: string, top?: string, blur?: boolean }) => {
+    
+    // Determine local persona based on global index + fixed offset
+    // This ensures they all change at once, but show different things
+    const localIndex = (globalIndex + offsetIndex) % PERSONAS.length;
+    const Persona = PERSONAS[localIndex];
+    const Icon = Persona.icon;
+    
+    return (
+        <div 
+            className="absolute origin-top"
+            style={{
+                left: left,
+                top: top,
+                transform: `translateX(-50%) scale(${scale})`, 
+                zIndex: zIndex,
+                opacity: opacity,
+                filter: blur ? 'blur(2px)' : 'none',
+            }}
+        >
+             {/* Strings */}
+             <svg className="absolute -top-[600px] left-1/2 -translate-x-1/2 w-64 h-[800px] pointer-events-none overflow-visible" viewBox="0 0 256 800">
+                <defs>
+                    <linearGradient id={`stringGrad-${offsetIndex}`} x1="0%" y1="0%" x2="0%" y2="100%">
+                        <stop offset="0%" stopColor="#60a5fa" stopOpacity="0.0" />
+                        <stop offset="50%" stopColor="#60a5fa" stopOpacity="0.3" />
+                        <stop offset="100%" stopColor="#93c5fd" stopOpacity={1.0 * opacity} />
+                    </linearGradient>
+                </defs>
+                <line x1="96" y1="0" x2="128" y2="200" stroke={`url(#stringGrad-${offsetIndex})`} strokeWidth="1" strokeDasharray="4,4" opacity="0.6" />
+                <line x1="160" y1="0" x2="128" y2="200" stroke={`url(#stringGrad-${offsetIndex})`} strokeWidth="1" strokeDasharray="4,4" opacity="0.6" />
+                <line x1="112" y1="0" x2="128" y2="200" stroke={`url(#stringGrad-${offsetIndex})`} strokeWidth="1.5" />
+                <line x1="144" y1="0" x2="128" y2="200" stroke={`url(#stringGrad-${offsetIndex})`} strokeWidth="1.5" />
+            </svg>
+
+            {/* Body Container - Glitch applies here based on GLOBAL state */}
+            <div className={`relative mt-[200px] transition-all duration-200 ${isGlobalGlitching ? 'animate-glitch' : 'animate-float'}`}>
+                 {/* Holographic Circle */}
+                 <div className="relative w-32 h-32 flex items-center justify-center">
+                    <div className="absolute inset-0 border-2 border-dashed border-blue-500/30 rounded-full animate-[spin_10s_linear_infinite]"></div>
+                    <div className="absolute inset-2 border border-blue-400/20 rounded-full animate-[spin_8s_linear_infinite_reverse]"></div>
+                    <div className={`absolute inset-0 bg-gradient-to-b from-slate-900 to-black rounded-full opacity-90 border border-slate-700 shadow-[0_0_30px_rgba(59,130,246,${0.15 * opacity})]`}></div>
+                    
+                    <div className="absolute inset-0 rounded-full overflow-hidden opacity-30">
+                        <div className="w-full h-1/2 bg-gradient-to-b from-transparent via-blue-400 to-transparent animate-scan-fast absolute top-0 -translate-y-full"></div>
+                    </div>
+
+                    <div className="relative z-10 flex flex-col items-center justify-center">
+                        <Icon className={`w-12 h-12 mb-2 ${Persona.color} drop-shadow-[0_0_8px_rgba(255,255,255,0.2)] transition-colors duration-300`} />
+                        <div className="bg-black/60 px-2 py-0.5 rounded border border-slate-800 backdrop-blur-sm">
+                            <span className={`text-[10px] font-mono font-bold tracking-wider ${Persona.color} transition-colors duration-300`}>{Persona.id}</span>
+                        </div>
+                    </div>
+                 </div>
+                 
+                 {/* Label */}
+                 <div className="mt-6 flex flex-col items-center">
+                    <div className="h-4 w-0.5 bg-slate-700 mb-1"></div>
+                    <div className={`px-3 py-1 rounded-full border bg-slate-900/80 backdrop-blur text-xs font-bold tracking-wide uppercase shadow-lg transition-all duration-300 ${isGlobalGlitching ? 'border-red-500 text-red-400 scale-110' : 'border-blue-500/50 text-blue-300'}`}>
+                        {isGlobalGlitching ? 'MORPHING...' : Persona.label}
+                    </div>
+                 </div>
+            </div>
+        </div>
+    );
+  };
 
   // --- INTERACTIVE NEURAL NETWORK BACKGROUND (CANVAS) ---
   useEffect(() => {
@@ -23,7 +153,7 @@ const LandingPage: React.FC<LandingPageProps> = ({ onLoginClick }) => {
     canvas.height = height;
 
     const particles: { x: number; y: number; vx: number; vy: number; size: number }[] = [];
-    const particleCount = Math.min(100, Math.floor((width * height) / 15000)); // Responsive count
+    const particleCount = Math.min(100, Math.floor((width * height) / 15000)); 
 
     for (let i = 0; i < particleCount; i++) {
       particles.push({
@@ -39,23 +169,17 @@ const LandingPage: React.FC<LandingPageProps> = ({ onLoginClick }) => {
 
     const render = () => {
       ctx.clearRect(0, 0, width, height);
-      
-      // Update & Draw Particles
       particles.forEach((p, i) => {
         p.x += p.vx;
         p.y += p.vy;
-
-        // Bounce off walls
         if (p.x < 0 || p.x > width) p.vx *= -1;
         if (p.y < 0 || p.y > height) p.vy *= -1;
 
-        // Draw Dot
         ctx.beginPath();
         ctx.arc(p.x, p.y, p.size, 0, Math.PI * 2);
-        ctx.fillStyle = 'rgba(59, 130, 246, 0.5)'; // Blue-500
+        ctx.fillStyle = 'rgba(59, 130, 246, 0.5)';
         ctx.fill();
 
-        // Connect to Mouse (The "Puppet Strings" Effect)
         const dxMouse = mousePos.x - p.x;
         const dyMouse = mousePos.y - p.y;
         const distMouse = Math.sqrt(dxMouse * dxMouse + dyMouse * dyMouse);
@@ -65,20 +189,17 @@ const LandingPage: React.FC<LandingPageProps> = ({ onLoginClick }) => {
             ctx.beginPath();
             ctx.moveTo(p.x, p.y);
             ctx.lineTo(mousePos.x, mousePos.y);
-            // Opacity based on distance
             const alpha = 1 - distMouse / connectRange;
-            ctx.strokeStyle = `rgba(96, 165, 250, ${alpha * 0.6})`; // Light Blue Line
+            ctx.strokeStyle = `rgba(96, 165, 250, ${alpha * 0.6})`;
             ctx.lineWidth = 1;
             ctx.stroke();
             
-            // "Active" node effect
             ctx.beginPath();
             ctx.arc(p.x, p.y, p.size * 1.5, 0, Math.PI * 2);
             ctx.fillStyle = `rgba(96, 165, 250, ${alpha})`; 
             ctx.fill();
         }
 
-        // Connect to nearby particles (The "Network" Effect)
         for (let j = i + 1; j < particles.length; j++) {
             const p2 = particles[j];
             const dx = p.x - p2.x;
@@ -90,13 +211,12 @@ const LandingPage: React.FC<LandingPageProps> = ({ onLoginClick }) => {
                 ctx.moveTo(p.x, p.y);
                 ctx.lineTo(p2.x, p2.y);
                 const alpha = 1 - dist / 100;
-                ctx.strokeStyle = `rgba(59, 130, 246, ${alpha * 0.2})`; // Faint connection
+                ctx.strokeStyle = `rgba(59, 130, 246, ${alpha * 0.2})`;
                 ctx.lineWidth = 0.5;
                 ctx.stroke();
             }
         }
       });
-
       animationFrameId = requestAnimationFrame(render);
     };
 
@@ -114,12 +234,10 @@ const LandingPage: React.FC<LandingPageProps> = ({ onLoginClick }) => {
         window.removeEventListener('resize', handleResize);
         cancelAnimationFrame(animationFrameId);
     };
-  }, [mousePos]); // Re-bind not strictly necessary for mousePos if using ref, but safe for React
+  }, [mousePos]); 
 
-  // Track mouse for canvas interaction
   useEffect(() => {
       const handleMouseMove = (e: MouseEvent) => {
-          // Adjust for scroll if necessary, though fixed canvas handles this usually
           setMousePos({ x: e.clientX, y: e.clientY });
       };
       window.addEventListener('mousemove', handleMouseMove);
@@ -175,9 +293,9 @@ const LandingPage: React.FC<LandingPageProps> = ({ onLoginClick }) => {
             </div>
             
             <h1 className="text-5xl md:text-7xl font-bold text-white tracking-tight leading-none">
-              Master the <br />
+              {headline.pre} <br />
               <span className="text-transparent bg-clip-text bg-gradient-to-r from-blue-400 via-cyan-400 to-emerald-400 relative">
-                Digital Chaos
+                {headline.post}
                 <span className="absolute -bottom-2 left-0 w-full h-1 bg-gradient-to-r from-blue-500 to-transparent opacity-50"></span>
               </span>
             </h1>
@@ -202,42 +320,44 @@ const LandingPage: React.FC<LandingPageProps> = ({ onLoginClick }) => {
             </div>
         </div>
 
-        {/* Right: 3D Wireframe Cube (CSS) */}
-        <div className="flex-1 flex justify-center items-center relative h-[400px] w-full perspective-container">
-            {/* The Cube Container */}
-            <div className="cube-wrapper">
-                <div className="cube animate-spin-3d">
-                    {/* Outer Cube Faces */}
-                    <div className="face front"></div>
-                    <div className="face back"></div>
-                    <div className="face right"></div>
-                    <div className="face left"></div>
-                    <div className="face top"></div>
-                    <div className="face bottom"></div>
-                    
-                    {/* Inner Core (The Trap) */}
-                    <div className="inner-core">
-                        <div className="core-face front"></div>
-                        <div className="core-face back"></div>
-                        <div className="core-face right"></div>
-                        <div className="core-face left"></div>
-                        <div className="core-face top"></div>
-                        <div className="core-face bottom"></div>
-                    </div>
-                </div>
-                
-                {/* Floating Labels attached to the graphic */}
-                <div className="absolute top-0 right-0 bg-slate-900/80 border border-slate-700 px-3 py-1 rounded text-[10px] font-mono text-blue-300 animate-float-delayed backdrop-blur-md">
-                    Port 22: OPEN
-                </div>
-                <div className="absolute bottom-10 left-0 bg-slate-900/80 border border-slate-700 px-3 py-1 rounded text-[10px] font-mono text-red-400 animate-float backdrop-blur-md flex items-center">
-                    <div className="w-2 h-2 bg-red-500 rounded-full mr-2 animate-ping"></div>
-                    Intrusion Detected
-                </div>
-            </div>
+        {/* Right: The Virtual Puppet Visualizer (FLEET) - Fixed Layout */}
+        <div className="flex-1 relative h-[600px] w-full overflow-visible">
             
-            {/* Floor Reflection/Shadow */}
-            <div className="absolute bottom-0 w-40 h-40 bg-blue-500/20 blur-3xl rounded-full transform rotateX(90deg) translate-y-20"></div>
+            {/* 1. Left Puppet (Higher & Smaller) */}
+            <VirtualPuppet 
+                offsetIndex={2} 
+                scale={0.75} 
+                opacity={0.8} 
+                zIndex={10} 
+                left="20%"
+                top="0px" 
+                blur={false}
+            />
+
+            {/* 2. Middle Puppet (Lower & Larger) - The V-Tip */}
+            <VirtualPuppet 
+                offsetIndex={0} 
+                scale={1.2} 
+                opacity={1} 
+                zIndex={20} 
+                left="50%" 
+                top="120px" 
+                blur={false}
+            />
+
+            {/* 3. Right Puppet (Higher & Smaller) */}
+            <VirtualPuppet 
+                offsetIndex={4} 
+                scale={0.75} 
+                opacity={0.8} 
+                zIndex={10} 
+                left="80%" 
+                top="0px" 
+                blur={false}
+            />
+            
+            {/* Floor Shadow (Shared) - Widened */}
+            <div className="absolute bottom-20 left-1/2 -translate-x-1/2 w-4/5 h-8 bg-blue-500/10 blur-xl rounded-full animate-shadow-pulse transform scale-x-125"></div>
         </div>
 
       </header>
@@ -308,78 +428,50 @@ const LandingPage: React.FC<LandingPageProps> = ({ onLoginClick }) => {
           <p>&copy; {new Date().getFullYear()} VIRTUAL PUPPETS // CYBER DEFENSE DIVISION</p>
       </footer>
 
-      {/* --- CSS ANIMATIONS FOR 3D CUBE --- */}
+      {/* --- CSS ANIMATIONS --- */}
       <style>{`
         .perspective-container {
             perspective: 1000px;
         }
-        .cube-wrapper {
-            position: relative;
-            transform-style: preserve-3d;
-            transform: rotateX(-15deg) rotateY(15deg);
-        }
-        .cube {
-            width: 150px;
-            height: 150px;
-            position: relative;
-            transform-style: preserve-3d;
-            animation: spin 10s infinite linear;
-        }
         
-        /* Outer Cube Wireframe */
-        .face {
-            position: absolute;
-            width: 150px;
-            height: 150px;
-            border: 1px solid rgba(59, 130, 246, 0.5);
-            background: rgba(59, 130, 246, 0.05);
-            box-shadow: 0 0 20px rgba(59, 130, 246, 0.1) inset;
+        /* REFINED GLITCH: Subtler movement, added opacity flicker */
+        @keyframes glitch {
+            0% { transform: translateX(-50%) translate(0); opacity: 1; }
+            25% { transform: translateX(-50%) translate(-1px, 1px); opacity: 0.9; }
+            50% { transform: translateX(-50%) translate(0); opacity: 1; }
+            75% { transform: translateX(-50%) translate(1px, -1px); opacity: 0.9; }
+            100% { transform: translateX(-50%) translate(0); opacity: 1; }
         }
-        .face.front  { transform: translateZ(75px); }
-        .face.back   { transform: rotateY(180deg) translateZ(75px); }
-        .face.right  { transform: rotateY(90deg) translateZ(75px); }
-        .face.left   { transform: rotateY(-90deg) translateZ(75px); }
-        .face.top    { transform: rotateX(90deg) translateZ(75px); }
-        .face.bottom { transform: rotateX(-90deg) translateZ(75px); }
+        .animate-glitch {
+            animation: glitch 0.2s linear infinite;
+        }
 
-        /* Inner Core (The "Trap") */
-        .inner-core {
-            position: absolute;
-            top: 50px;
-            left: 50px;
-            width: 50px;
-            height: 50px;
-            transform-style: preserve-3d;
-            animation: spin-reverse 5s infinite linear;
+        @keyframes dash-flow {
+            to { stroke-dashoffset: -20; }
         }
-        .core-face {
-            position: absolute;
-            width: 50px;
-            height: 50px;
-            background: rgba(239, 68, 68, 0.3); /* Red */
-            border: 1px solid rgba(239, 68, 68, 0.6);
+        .animate-dash-flow {
+            animation: dash-flow 1s linear infinite;
         }
-        .core-face.front  { transform: translateZ(25px); }
-        .core-face.back   { transform: rotateY(180deg) translateZ(25px); }
-        .core-face.right  { transform: rotateY(90deg) translateZ(25px); }
-        .core-face.left   { transform: rotateY(-90deg) translateZ(25px); }
-        .core-face.top    { transform: rotateX(90deg) translateZ(25px); }
-        .core-face.bottom { transform: rotateX(-90deg) translateZ(25px); }
+        .animate-dash-flow-reverse {
+            animation: dash-flow 1s linear infinite reverse;
+        }
 
-        @keyframes spin {
-            from { transform: rotateX(0deg) rotateY(0deg); }
-            to { transform: rotateX(360deg) rotateY(360deg); }
+        @keyframes scan-fast {
+            0% { top: -100%; opacity: 0; }
+            50% { opacity: 0.5; }
+            100% { top: 200%; opacity: 0; }
         }
-        @keyframes spin-reverse {
-            from { transform: rotateX(360deg) rotateY(360deg); }
-            to { transform: rotateX(0deg) rotateY(0deg); }
+        .animate-scan-fast {
+            animation: scan-fast 2s linear infinite;
         }
-        @keyframes float {
-            0%, 100% { transform: translateY(0); }
-            50% { transform: translateY(-10px); }
+
+        @keyframes shadow-pulse {
+            0%, 100% { transform: translateX(-50%) scale(1); opacity: 0.5; }
+            50% { transform: translateX(-50%) scale(1.2); opacity: 0.2; }
         }
-        .animate-float { animation: float 4s ease-in-out infinite; }
-        .animate-float-delayed { animation: float 4s ease-in-out 2s infinite; }
+        .animate-shadow-pulse {
+            animation: shadow-pulse 6s ease-in-out infinite;
+        }
       `}</style>
 
     </div>
