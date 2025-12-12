@@ -73,6 +73,53 @@ done
 EOF_TRAP
 chmod +x $AGENT_DIR/trap_relay.sh
 
+# Create Sentinel Watcher Script (Reads Kernel Logs for IPTables alerts)
+cat <<'EOF_SENT' > $AGENT_DIR/sentinel_watch.sh
+#!/bin/bash
+AGENT_DIR="/opt/vpp-agent"
+SERVER=$(cat "$AGENT_DIR/.server")
+# Wait for ID
+while [ ! -f "$AGENT_DIR/vpp-id" ]; do sleep 1; done
+ACTOR_ID=$(cat "$AGENT_DIR/vpp-id")
+LOG_FILE="/var/log/vpp-agent.log"
+
+# Determine Kernel Log File
+KLOG=""
+if [ -f "/var/log/kern.log" ]; then KLOG="/var/log/kern.log"
+elif [ -f "/var/log/syslog" ]; then KLOG="/var/log/syslog"
+elif [ -f "/var/log/messages" ]; then KLOG="/var/log/messages"
+fi
+
+if [ -z "$KLOG" ]; then
+    echo "[SENTINEL-WATCH] Error: No kernel log found (kern.log/syslog/messages)." >> $LOG_FILE
+    exit 1
+fi
+
+echo "[SENTINEL-WATCH] Monitoring $KLOG for alerts..." >> $LOG_FILE
+
+# Monitor Log
+tail -F -n 0 "$KLOG" 2>/dev/null | grep --line-buffered "SENTINEL:" | while read line; do
+    # 1. Log to Agent Log
+    echo "[SENTINEL-DETECTED] $line" >> $LOG_FILE
+    
+    # 2. Extract Source IP
+    SRC_IP=$(echo "$line" | grep -o 'SRC=[0-9.]*' | cut -d= -f2)
+    if [ -z "$SRC_IP" ]; then SRC_IP="0.0.0.0"; fi
+    
+    # 3. Send to C2
+    PAYLOAD=$(jq -n \\
+      --arg aid "$ACTOR_ID" \\
+      --arg lvl "CRITICAL" \\
+      --arg proc "sentinel_fw" \\
+      --arg msg "$line" \
+      --arg ip "$SRC_IP" \\
+      '{actorId: $aid, level: $lvl, process: $proc, message: $msg, sourceIp: $ip}')
+
+    curl -s -m 5 -X POST -H "Content-Type: application/json" -d "$PAYLOAD" "$SERVER/api/agent/log"
+done
+EOF_SENT
+chmod +x $AGENT_DIR/sentinel_watch.sh
+
 # Create Python Parser for Robust WiFi Scanning
 cat <<'EOF_PY' > $AGENT_DIR/wifi_scan.py
 import subprocess, json, sys, os
@@ -151,17 +198,16 @@ sys.stdout.flush()
 EOF_PY
 
 # Create Python Script for Bluetooth Scanning
-# Note: Triple backslashes needed for proper escaping in JS template string -> Bash -> Python file
 cat <<'EOF_PY_BT' > $AGENT_DIR/bt_scan.py
 import subprocess, json, sys, time, select, re
 
 def scan_bluetooth():
     devices = {}
     try:
-        # Start bluetoothctl in interactive mode with replace errors for decoding
+        # Start bluetoothctl in interactive mode
         proc = subprocess.Popen(['bluetoothctl'], stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, bufsize=1, errors='replace')
         
-        # Send scan on command - Double escaped newline for JS string safety
+        # Send scan on command
         proc.stdin.write('scan on\\n')
         proc.stdin.flush()
         
@@ -174,7 +220,7 @@ def scan_bluetooth():
                 if not line: break
                 
                 clean_line = line.strip()
-                # Remove ANSI color codes - Escaped backslashes for JS string regex (r'\\x1b')
+                # Remove ANSI color codes
                 clean_line = re.sub(r'\\x1b\\[[0-9;]*m', '', clean_line)
                 
                 if 'Device' in clean_line:
@@ -419,16 +465,27 @@ while true; do
         if [ "$(cat $AGENT_DIR/.sentinel)" != "on" ]; then
             log "[SENTINEL] Activating Paranoid Mode..."
             echo "on" > $AGENT_DIR/.sentinel
-            # Add logging rule for NEW TCP connections to INPUT chain
-            # This logs SYN packets
             iptables -I INPUT 1 -p tcp --syn -j LOG --log-prefix "SENTINEL: " --log-level 4
+            
+            # Start Watcher Background Process
+            nohup bash $AGENT_DIR/sentinel_watch.sh >/dev/null 2>&1 &
+            echo $! > $AGENT_DIR/.sentinel_pid
         fi
     else
         if [ "$(cat $AGENT_DIR/.sentinel)" == "on" ]; then
             log "[SENTINEL] Deactivating Paranoid Mode..."
             echo "off" > $AGENT_DIR/.sentinel
-            # Remove rule (simple method, assumes it's top)
             iptables -D INPUT -p tcp --syn -j LOG --log-prefix "SENTINEL: " --log-level 4 || true
+            
+            # Stop Watcher
+            if [ -f "$AGENT_DIR/.sentinel_pid" ]; then
+                PID=$(cat "$AGENT_DIR/.sentinel_pid")
+                kill $PID 2>/dev/null || true
+                pkill -P $PID || true
+                rm "$AGENT_DIR/.sentinel_pid"
+            fi
+            # Safety cleanup
+            pkill -f "sentinel_watch.sh" || true
         fi
     fi
     
