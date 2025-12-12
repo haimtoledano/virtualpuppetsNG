@@ -2,7 +2,7 @@
 import React, { useMemo, useState } from 'react';
 import { Actor, ActorStatus, LogEntry, LogLevel, ProxyGateway, DevicePersona } from '../types';
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid, LineChart, Line } from 'recharts';
-import { ShieldAlert, Server, Activity, Terminal as TerminalIcon, AlertTriangle, Network, Router, Cpu, Info, Globe, Skull, Cloud, Zap, Camera, Printer, Box, Eye, Lock, MapPin } from 'lucide-react';
+import { ShieldAlert, Server, Activity, Terminal as TerminalIcon, AlertTriangle, Network, Router, Cpu, Info, Globe, Skull, Cloud, Zap, Camera, Printer, Box, Eye, Lock, MapPin, Wifi } from 'lucide-react';
 import Terminal from './Terminal';
 
 interface DashboardProps {
@@ -70,6 +70,12 @@ const Dashboard: React.FC<DashboardProps> = ({ gateways, actors, logs, onActorSe
         case 'SERVER': return Server;
         default: return Box; 
     }
+  };
+
+  // Helper to generate consistent internal IP
+  const getInternalIp = (id: string) => {
+      const hash = id.split('').reduce((acc, char) => acc + char.charCodeAt(0), 0);
+      return `10.0.${hash % 10}.${hash % 250 + 1}`;
   };
 
   // Helper for rendering actor squares
@@ -337,6 +343,7 @@ const Dashboard: React.FC<DashboardProps> = ({ gateways, actors, logs, onActorSe
           const isCompromised = actor.status === ActorStatus.COMPROMISED;
           const gateway = gateways.find(g => g.id === actor.proxyId);
           const location = actor.physicalAddress || gateway?.location || 'Cloud / Direct';
+          const lanIp = getInternalIp(actor.id);
 
           // Fixed styling to float above everything using fixed positioning from captured rect
           return (
@@ -354,8 +361,12 @@ const Dashboard: React.FC<DashboardProps> = ({ gateways, actors, logs, onActorSe
                 </div>
                 <div className="space-y-1.5 mb-2">
                     <div className="flex items-center justify-between text-[10px]">
-                        <span className="text-slate-500 flex items-center"><Globe className="w-3 h-3 mr-1.5"/> IP Address</span>
+                        <span className="text-slate-500 flex items-center"><Globe className="w-3 h-3 mr-1.5"/> WAN IP</span>
                         <span className="font-mono text-emerald-400">{actor.localIp}</span>
+                    </div>
+                    <div className="flex items-center justify-between text-[10px]">
+                        <span className="text-slate-500 flex items-center"><Wifi className="w-3 h-3 mr-1.5"/> LAN IP</span>
+                        <span className="font-mono text-slate-300">{lanIp}</span>
                     </div>
                     <div className="flex items-center justify-between text-[10px]">
                         <span className="text-slate-500 flex items-center"><MapPin className="w-3 h-3 mr-1.5"/> Location</span>
