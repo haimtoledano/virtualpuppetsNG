@@ -372,12 +372,14 @@ perform_recon() {
 # --- INITIALIZATION ---
 HWID=$(get_hwid)
 OS_NAME=$(get_os_name)
-log "Agent Started (v$VERSION). HWID: $HWID"
+HOSTNAME=$(hostname)
+log "Agent Started (v$VERSION). HWID: $HWID Host: $HOSTNAME"
 
 # Validation & Enrollment
 while [ ! -f "$AGENT_DIR/vpp-id" ]; do
     CUR_VER=$(cat "$AGENT_DIR/.version" 2>/dev/null || echo "1.0.0")
-    RESP=$(curl -s -m 10 -G --data-urlencode "hwid=$HWID" --data-urlencode "os=$OS_NAME" --data-urlencode "version=$CUR_VER" "$SERVER/api/agent/heartbeat")
+    # Added hostname to query
+    RESP=$(curl -s -m 10 -G --data-urlencode "hwid=$HWID" --data-urlencode "os=$OS_NAME" --data-urlencode "version=$CUR_VER" --data-urlencode "hostname=$HOSTNAME" "$SERVER/api/agent/heartbeat")
     STATUS=$(echo "$RESP" | jq -r '.status')
     
     if [ "$STATUS" == "APPROVED" ]; then 
@@ -410,6 +412,25 @@ while true; do
     
     SCAN_WIFI=$(echo "$OUT" | jq -r '.wifiScanning')
     SCAN_BT=$(echo "$OUT" | jq -r '.bluetoothScanning')
+    SENTINEL=$(echo "$OUT" | jq -r '.sentinelEnabled')
+    
+    # Process Sentinel Status
+    if [ "$SENTINEL" == "true" ]; then
+        if [ "$(cat $AGENT_DIR/.sentinel)" != "on" ]; then
+            log "[SENTINEL] Activating Paranoid Mode..."
+            echo "on" > $AGENT_DIR/.sentinel
+            # Add logging rule for NEW TCP connections to INPUT chain
+            # This logs SYN packets
+            iptables -I INPUT 1 -p tcp --syn -j LOG --log-prefix "SENTINEL: " --log-level 4
+        fi
+    else
+        if [ "$(cat $AGENT_DIR/.sentinel)" == "on" ]; then
+            log "[SENTINEL] Deactivating Paranoid Mode..."
+            echo "off" > $AGENT_DIR/.sentinel
+            # Remove rule (simple method, assumes it's top)
+            iptables -D INPUT -p tcp --syn -j LOG --log-prefix "SENTINEL: " --log-level 4 || true
+        fi
+    fi
     
     # Task Polling
     TASKS=$(curl -s -m 10 -G --data-urlencode "actorId=$ACTOR_ID" "$SERVER/api/agent/tasks")
@@ -433,6 +454,9 @@ while true; do
              RESULT="Recon Manual Trigger Completed"
         elif [[ "$CMD" == *"vpp-agent --forensic"* ]]; then
              RESULT=$(bash $AGENT_DIR/agent.sh --forensic)
+        elif [[ "$CMD" == *"vpp-agent --set-sentinel"* ]]; then
+             # Handled by main loop state now, just ack
+             RESULT="Sentinel config updated."
         else
              RESULT=$(eval "$CMD" 2>&1)
         fi

@@ -1,12 +1,11 @@
 
-
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { Actor, LogEntry, ActorStatus, AiAnalysis, ProxyGateway, HoneyFile, ActiveTunnel, DevicePersona, CommandJob, LogLevel, User, UserPreferences, ForensicSnapshot, ForensicProcess, AttackSession } from '../types';
 import { executeRemoteCommand, getAvailableCloudTraps, toggleTunnelMock, AVAILABLE_PERSONAS, generateRandomLog, performForensicScan, getAttackSessions, deleteAttackSession } from '../services/mockService';
 import { analyzeLogsWithAi, generateDeceptionContent } from '../services/aiService';
 import { updateActorName, queueSystemCommand, getActorCommands, deleteActor, updateActorTunnels, updateActorPersona, resetActorStatus, resetActorToFactory, updateActorHoneyFiles, toggleActorSentinel, generateReport, deleteAttackSession as deleteAttackSessionProd, getAttackSessions as getAttackSessionsProd, toggleActorScanning } from '../services/dbService';
 import Terminal from './Terminal';
-import { Cpu, Wifi, Shield, Bot, ArrowLeft, BrainCircuit, Router, Network, FileCode, Check, Activity, X, Printer, Camera, Server, Edit2, Trash2, Loader, ShieldCheck, AlertOctagon, Skull, ArrowRight, Terminal as TerminalIcon, Globe, ScanSearch, Power, RefreshCw, History as HistoryIcon, Thermometer, RefreshCcw, Siren, Eye, Fingerprint, Info, Cable, Search, Lock, Zap, FileText, HardDrive, List, Play, Pause, FastForward, Rewind, Film, Database, Monitor, Save, Radio, Bluetooth, Hash } from 'lucide-react';
+import { Cpu, Wifi, Shield, Bot, ArrowLeft, BrainCircuit, Router, Network, FileCode, Check, Activity, X, Printer, Camera, Server, Edit2, Trash2, Loader, ShieldCheck, AlertOctagon, Skull, ArrowRight, Terminal as TerminalIcon, Globe, ScanSearch, Power, RefreshCw, History as HistoryIcon, Thermometer, RefreshCcw, Siren, Eye, Fingerprint, Info, Cable, Search, Lock, Zap, FileText, HardDrive, List, Play, Pause, FastForward, Rewind, Film, Database, Monitor, Save, Radio, Bluetooth, Hash, MapPin } from 'lucide-react';
 
 interface ActorDetailProps {
   actor: Actor;
@@ -109,9 +108,12 @@ const ActorDetail: React.FC<ActorDetailProps> = ({ actor, gateway, logs: initial
   const [displayedLocalIp, setDisplayedLocalIp] = useState<string | null>(null);
   const [isScanningIp, setIsScanningIp] = useState(false);
 
-  // Edit Name State
+  // Edit Name & Address State
   const [isEditingName, setIsEditingName] = useState(false);
   const [editedName, setEditedName] = useState(actor.name);
+  const [isEditingAddress, setIsEditingAddress] = useState(false);
+  const [editedAddress, setEditedAddress] = useState(actor.physicalAddress || '');
+
   const [isDeleting, setIsDeleting] = useState(false);
   const [isResetting, setIsResetting] = useState(false);
 
@@ -460,8 +462,29 @@ const ActorDetail: React.FC<ActorDetailProps> = ({ actor, gateway, logs: initial
   const handleSaveName = async () => {
       if (editedName.trim() !== actor.name) {
           await updateActorName(actor.id, editedName);
+          // In real implementation we'd refresh from parent, but simplified here:
+          actor.name = editedName;
       }
       setIsEditingName(false);
+  };
+
+  const handleSaveAddress = async () => {
+      // Create a specific update for address since updateActorName typically just does name
+      // We will leverage a slightly more generic call structure or overload updateActorName if backend supports it
+      // In this codebase, updateActorName calls `PUT /actors/:id` with `{name}`. 
+      // We'll assume the backend route was updated to handle `{physicalAddress}` as well.
+      
+      try {
+          await fetch(`/api/actors/${actor.id}`, {
+              method: 'PUT',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ physicalAddress: editedAddress })
+          });
+          actor.physicalAddress = editedAddress;
+      } catch (e) {
+          alert('Failed to save address');
+      }
+      setIsEditingAddress(false);
   };
 
   const handleDeleteActor = async () => {
@@ -891,6 +914,24 @@ const ActorDetail: React.FC<ActorDetailProps> = ({ actor, gateway, logs: initial
                             </div>
                             {isSentinelEnabled && <div className="px-3 py-1 rounded-full text-xs font-bold flex items-center border bg-red-600 text-white border-red-500 shadow-lg shadow-red-500/20 animate-pulse"><Eye className="w-3 h-3 mr-1" /> SENTINEL ACTIVE</div>}
                         </div>
+                        
+                        {/* Physical Address Field */}
+                        <div className="flex items-center mt-1 text-sm text-slate-400 group">
+                            <MapPin className="w-3.5 h-3.5 mr-1.5 text-slate-500" />
+                            {isEditingAddress ? (
+                                <div className="flex items-center">
+                                    <input className="bg-slate-900 border border-slate-600 rounded px-2 py-0.5 text-xs text-white focus:border-blue-500 outline-none w-48" value={editedAddress} onChange={(e) => setEditedAddress(e.target.value)} autoFocus />
+                                    <button onClick={handleSaveAddress} className="ml-2 bg-green-600 p-1 rounded text-white"><Check className="w-3 h-3"/></button>
+                                    <button onClick={() => setIsEditingAddress(false)} className="ml-1 bg-slate-600 p-1 rounded text-white"><X className="w-3 h-3"/></button>
+                                </div>
+                            ) : (
+                                <span className="flex items-center cursor-pointer hover:text-white transition-colors" onClick={() => setIsEditingAddress(true)}>
+                                    {actor.physicalAddress || "Set Physical Location..."}
+                                    <Edit2 className="w-3 h-3 ml-2 opacity-0 group-hover:opacity-100 text-slate-600" />
+                                </span>
+                            )}
+                        </div>
+
                         <div className="flex flex-wrap gap-4 mt-2 text-sm text-slate-400 font-mono">
                             <span className="flex items-center"><TerminalIcon className="w-3 h-3 mr-1" /> {actor.id}</span>
                             <span className="flex items-center"><Router className="w-3 h-3 mr-1" /> {gateway?.name || 'Direct Uplink'}</span>

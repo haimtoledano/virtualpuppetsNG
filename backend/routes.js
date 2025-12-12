@@ -425,6 +425,7 @@ router.post('/agent/recon', async (req, res) => {
 
                      const id = `wifi-${actorId}-${net.bssid.replace(/:/g,'')}`;
                      
+                     // Use MERGE to upsert logic
                      await db.request()
                         .input('id', id)
                         .input('ssid', net.ssid)
@@ -436,4 +437,238 @@ router.post('/agent/recon', async (req, res) => {
                         .input('aname', resolvedActorName) // Use resolved name
                         .query(`
                             MERGE WifiNetworks AS target
-                            USING (SELECT @id AS Id) AS source ON
+                            USING (SELECT @id AS Id) AS source ON target.Id = source.Id
+                            WHEN MATCHED THEN
+                                UPDATE SET LastSeen = GETDATE(), SignalStrength = @sig
+                            WHEN NOT MATCHED THEN
+                                INSERT (Id, Ssid, Bssid, SignalStrength, Security, Channel, ActorId, ActorName, LastSeen)
+                                VALUES (@id, @ssid, @bssid, @sig, @sec, @ch, @aid, @aname, GETDATE());
+                        `);
+                     successCount++;
+                 } catch (err) {
+                     console.error("SQL Error on Wifi Item:", err.message);
+                     failCount++;
+                 }
+             }
+             res.json({success: true, processed: successCount, failed: failCount});
+
+        } else if (type === 'BLUETOOTH') {
+             let successCount = 0;
+             
+             for (const dev of data) {
+                 try {
+                     if(!dev.mac) continue;
+                     const id = `bt-${actorId}-${dev.mac.replace(/:/g,'')}`;
+                     
+                     await db.request()
+                        .input('id', id)
+                        .input('name', dev.name || 'Unknown')
+                        .input('mac', dev.mac)
+                        .input('rssi', dev.rssi || -99)
+                        .input('type', dev.type || 'CLASSIC')
+                        .input('aid', actorId)
+                        .input('aname', resolvedActorName) // Use resolved name
+                        .query(`
+                            MERGE BluetoothDevices AS target
+                            USING (SELECT @id AS Id) AS source ON target.Id = source.Id
+                            WHEN MATCHED THEN
+                                UPDATE SET LastSeen = GETDATE(), Rssi = @rssi
+                            WHEN NOT MATCHED THEN
+                                INSERT (Id, Name, Mac, Rssi, Type, ActorId, ActorName, LastSeen)
+                                VALUES (@id, @name, @mac, @rssi, @type, @aid, @aname, GETDATE());
+                        `);
+                     successCount++;
+                 } catch (err) { console.error("SQL Error BT:", err.message); }
+             }
+             res.json({success: true, processed: successCount});
+        } else {
+            res.json({success: false, error: "Unknown Type"});
+        }
+    } catch (e) {
+        console.error("[API-RECON] Critical Error", e);
+        res.json({success: false, error: e.message});
+    }
+});
+
+// --- AGENT ENROLLMENT & HEARTBEAT ---
+router.get('/setup', (req, res) => {
+    const token = req.query.token;
+    if (!token) return res.send('echo "Error: Token required"');
+    
+    // Serve the bash installer
+    const host = req.get('host');
+    const protocol = req.protocol;
+    const serverUrl = `${protocol}://${host}`;
+    
+    // Inject server URL and Token into script
+    const script = generateAgentScript(serverUrl, token);
+    res.setHeader('Content-Type', 'text/x-shellscript');
+    res.send(script);
+});
+
+router.post('/enroll/generate', async (req, res) => {
+    const { type, targetId, config } = req.body;
+    const token = `tok-${Math.random().toString(36).substr(2,8)}`;
+    const db = getDbPool();
+    if (db) {
+        await db.request().input('t', token).input('type', type).input('tid', targetId).input('cfg', JSON.stringify(config || {})).query("INSERT INTO EnrollmentTokens (Token, Type, TargetId, ConfigJson, CreatedAt, IsUsed) VALUES (@t, @type, @tid, @cfg, GETDATE(), 0)");
+    }
+    res.json({ token });
+});
+
+router.get('/enroll/pending', async (req, res) => {
+    const db = getDbPool(); if(!db) return res.json([]);
+    const r = await db.request().query("SELECT Id as id, HwId as hwid, DetectedIp as detectedIp, DetectedAt as detectedAt, OsVersion as osVersion FROM PendingActors");
+    res.json(r.recordset);
+});
+
+router.post('/enroll/approve', async (req, res) => {
+    const { pendingId, proxyId, name } = req.body;
+    const db = getDbPool(); if(!db) return res.json({success: false});
+    
+    // Get pending details
+    const pendingRes = await db.request().input('id', pendingId).query("SELECT * FROM PendingActors WHERE Id=@id");
+    if (pendingRes.recordset.length === 0) return res.json({success: false, error: "Not Found"});
+    
+    const p = pendingRes.recordset[0];
+    const newId = `actor-${Date.now()}`; // Real ID
+    
+    // Create Actor
+    await db.request()
+        .input('aid', newId)
+        .input('hwid', p.HwId)
+        .input('gw', proxyId === 'DIRECT' ? null : proxyId)
+        .input('name', name) // Using the provided name, which might be Hostname or Custom
+        .input('ip', p.DetectedIp)
+        .input('os', p.OsVersion || 'Linux')
+        .query("INSERT INTO Actors (ActorId, HwId, GatewayId, Name, Status, LocalIp, LastSeen, OsVersion) VALUES (@aid, @hwid, @gw, @name, 'ONLINE', @ip, GETDATE(), @os)");
+        
+    // Delete Pending
+    await db.request().input('id', pendingId).query("DELETE FROM PendingActors WHERE Id=@id");
+    
+    res.json({success: true, actorId: newId});
+});
+
+router.delete('/enroll/pending/:id', async (req, res) => {
+    const db = getDbPool(); if(!db) return res.json({success: false});
+    await db.request().input('id', req.params.id).query("DELETE FROM PendingActors WHERE Id=@id");
+    res.json({success: true});
+});
+
+// --- HEARTBEAT & TASKS ---
+router.get('/agent/heartbeat', async (req, res) => {
+    const { hwid, os, version, hostname } = req.query; // Hostname support
+    const ip = getClientIp(req);
+    const db = getDbPool();
+    
+    if (!db) return res.status(503).json({});
+
+    // Check if enrolled
+    const actorRes = await db.request().input('hwid', hwid).query("SELECT ActorId, Name FROM Actors WHERE HwId=@hwid");
+    
+    if (actorRes.recordset.length > 0) {
+        const actor = actorRes.recordset[0];
+        // Valid, return ID
+        // Auto-update IP and Version and Hostname (if name matches default or is missing)
+        let updateQ = "UPDATE Actors SET LastSeen=GETDATE(), LocalIp=@ip, AgentVersion=@ver";
+        const reqDb = db.request().input('ip', ip).input('ver', version).input('hwid', hwid);
+        
+        // Note: We don't overwrite name aggressively, only if we want to sync hostname always?
+        // Let's assume name is managed by C2 after enrollment
+        
+        await reqDb.query(updateQ + " WHERE HwId=@hwid");
+        return res.json({ status: 'APPROVED', actorId: actor.ActorId });
+    }
+
+    // Check pending
+    const pendingRes = await db.request().input('hwid', hwid).query("SELECT Id FROM PendingActors WHERE HwId=@hwid");
+    if (pendingRes.recordset.length === 0) {
+        // Create pending
+        const pid = `pend-${Math.random().toString(36).substr(2,6)}`;
+        await db.request()
+            .input('pid', pid)
+            .input('hwid', hwid)
+            .input('ip', ip)
+            .input('os', os)
+            .query("INSERT INTO PendingActors (Id, HwId, DetectedIp, DetectedAt, OsVersion) VALUES (@pid, @hwid, @ip, GETDATE(), @os)");
+            
+        // If hostname is provided, we can't easily store it in PendingActors without a schema change or just logging it.
+        // For now, OsVersion can effectively store it or we rely on standard enrollment flow.
+    }
+    
+    res.json({ status: 'PENDING' });
+});
+
+router.post('/agent/scan', async (req, res) => {
+    const { actorId, cpu, ram, temp, hasWifi, hasBluetooth, version } = req.body;
+    const db = getDbPool();
+    if (!db) return res.status(503).json({});
+
+    // Heartbeat update with metrics
+    await db.request()
+        .input('aid', actorId)
+        .input('cpu', parseFloat(cpu) || 0)
+        .input('ram', parseFloat(ram) || 0)
+        .input('temp', parseFloat(temp) || 0)
+        .input('wifi', hasWifi === 'true' || hasWifi === true)
+        .input('bt', hasBluetooth === 'true' || hasBluetooth === true)
+        .input('ver', version)
+        .query("UPDATE Actors SET LastSeen=GETDATE(), CpuLoad=@cpu, MemoryUsage=@ram, Temperature=@temp, HasWifi=@wifi, HasBluetooth=@bt, AgentVersion=@ver WHERE ActorId=@aid");
+
+    // Fetch config to return to agent
+    const configRes = await db.request().input('aid', actorId).query("SELECT WifiScanningEnabled, BluetoothScanningEnabled, TcpSentinelEnabled FROM Actors WHERE ActorId=@aid");
+    
+    if (configRes.recordset.length === 0) return res.json({ status: 'RESET' }); // Actor deleted
+    
+    const row = configRes.recordset[0];
+    
+    // RETURN SENTINEL STATUS HERE
+    res.json({
+        wifiScanning: row.WifiScanningEnabled,
+        bluetoothScanning: row.BluetoothScanningEnabled,
+        sentinelEnabled: row.TcpSentinelEnabled // SENTINEL FIX
+    });
+});
+
+router.get('/agent/tasks', async (req, res) => {
+    const { actorId } = req.query;
+    const db = getDbPool();
+    if (!db) return res.json([]);
+    
+    const r = await db.request().input('aid', actorId).query("SELECT JobId as id, Command as command FROM CommandQueue WHERE ActorId=@aid AND Status='PENDING'");
+    
+    // Mark as running immediately to prevent double execution
+    if (r.recordset.length > 0) {
+        const ids = r.recordset.map(j => `'${j.id}'`).join(',');
+        await db.request().query(`UPDATE CommandQueue SET Status='RUNNING', UpdatedAt=GETDATE() WHERE JobId IN (${ids})`);
+    }
+    
+    res.json(r.recordset);
+});
+
+router.post('/agent/tasks/:jobId', async (req, res) => {
+    const { jobId } = req.params;
+    const { output, status } = req.body;
+    const db = getDbPool();
+    if (!db) return res.json({});
+    
+    await db.request()
+        .input('jid', jobId)
+        .input('out', output)
+        .input('stat', status)
+        .query("UPDATE CommandQueue SET Status=@stat, Output=@out, UpdatedAt=GETDATE() WHERE JobId=@jid");
+    res.json({success: true});
+});
+
+// --- NEW: SESSION REPLAY API ---
+router.get('/sessions', (req, res) => {
+    const sessions = getSessions();
+    res.json(sessions);
+});
+
+router.delete('/sessions/:id', (req, res) => {
+    deleteSession(req.params.id);
+    res.json({ success: true });
+});
+
+export default router;
