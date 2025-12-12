@@ -1,7 +1,7 @@
 
-import React from 'react';
+import React, { useMemo } from 'react';
 import { ProxyGateway, Actor, ActorStatus } from '../types';
-import { Network } from 'lucide-react';
+import { Network, Cloud } from 'lucide-react';
 
 interface WarRoomMapProps {
     gateways: ProxyGateway[];
@@ -26,6 +26,41 @@ const WarRoomMap: React.FC<WarRoomMapProps> = ({ gateways, actors }) => {
         return { x, y };
     };
 
+    // Calculate display groups (Real Gateways + Virtual Direct Gateway)
+    const renderData = useMemo(() => {
+        const groups: Record<string, Actor[]> = {};
+        const gatewayIds = new Set(gateways.map(g => g.id));
+
+        // 1. Group Actors
+        actors.forEach(actor => {
+            // If actor has a valid proxyId in our gateway list, use it. Otherwise 'DIRECT'.
+            const targetId = (actor.proxyId && gatewayIds.has(actor.proxyId)) ? actor.proxyId : 'DIRECT';
+            
+            if (!groups[targetId]) groups[targetId] = [];
+            groups[targetId].push(actor);
+        });
+
+        // 2. Build Render List
+        const list = [...gateways];
+
+        // If we have direct actors, add a virtual gateway for them
+        if (groups['DIRECT'] && groups['DIRECT'].length > 0) {
+            list.push({
+                id: 'DIRECT',
+                name: 'CLOUD UPLINK',
+                location: 'Direct Connection',
+                status: 'ONLINE',
+                ip: 'Global',
+                version: 'N/A',
+                connectedActors: groups['DIRECT'].length,
+                lat: 25, // Arbitrary "Ocean" location for visualization
+                lng: -40
+            } as ProxyGateway);
+        }
+
+        return { list, groups };
+    }, [gateways, actors]);
+
     return (
         <div className="bg-black rounded-xl border border-slate-700 shadow-2xl relative overflow-hidden h-[600px] animate-fade-in flex flex-col">
             {/* Header / HUD */}
@@ -36,6 +71,7 @@ const WarRoomMap: React.FC<WarRoomMapProps> = ({ gateways, actors }) => {
                 </h2>
                 <div className="flex items-center space-x-4 mt-2 text-xs font-mono text-slate-400">
                     <span className="flex items-center"><span className="w-2 h-2 rounded-full bg-emerald-500 mr-2 shadow-[0_0_8px_rgba(16,185,129,0.8)]"></span> GATEWAY ONLINE</span>
+                    <span className="flex items-center"><span className="w-2 h-2 rounded-full bg-cyan-500 mr-2 shadow-[0_0_8px_rgba(6,182,212,0.8)]"></span> CLOUD DIRECT</span>
                     <span className="flex items-center"><span className="w-2 h-2 rounded-full bg-red-500 mr-2 animate-ping"></span> THREAT DETECTED</span>
                 </div>
             </div>
@@ -84,38 +120,98 @@ const WarRoomMap: React.FC<WarRoomMapProps> = ({ gateways, actors }) => {
                          <animate attributeName="x" from="-40" to="760" dur="4s" repeatCount="indefinite" />
                     </rect>
 
-                    {/* 4. Gateways Markers */}
-                    {gateways.map(gw => {
-                        // Use default lat/lng if missing (e.g. 0,0)
+                    {/* 4. Connectivity Lines & Actors */}
+                    {renderData.list.map(gw => {
                         const lat = gw.lat || 0;
                         const lng = gw.lng || 0;
-                        const pos = project(lat, lng);
-                        const gwActors = actors.filter(a => a.proxyId === gw.id);
+                        const gwPos = project(lat, lng);
+                        const gwActors = renderData.groups[gw.id] || [];
                         const hasCompromise = gwActors.some(a => a.status === ActorStatus.COMPROMISED);
-                        const color = hasCompromise ? '#ef4444' : (gw.status === 'ONLINE' ? '#10b981' : '#64748b');
+                        
+                        // Color Logic: Direct = Cyan, Regular = Emerald, Compromised = Red
+                        const baseColor = gw.id === 'DIRECT' ? '#06b6d4' : '#10b981'; 
+                        const gwColor = hasCompromise ? '#ef4444' : (gw.status === 'ONLINE' ? baseColor : '#64748b');
 
                         return (
-                            <g key={gw.id} className="cursor-pointer group">
-                                {/* Ripple Effect */}
-                                <circle cx={pos.x} cy={pos.y} r="4" fill="none" stroke={color} strokeWidth="1">
-                                    <animate attributeName="r" from="4" to="20" dur="2s" repeatCount="indefinite" />
-                                    <animate attributeName="opacity" from="1" to="0" dur="2s" repeatCount="indefinite" />
-                                </circle>
-                                
-                                {/* Core Dot */}
-                                <circle cx={pos.x} cy={pos.y} r="3" fill={color} stroke="#0f172a" strokeWidth="1" className="hover:r-5 transition-all" />
+                            <g key={gw.id}>
+                                {/* Draw Connections to Satellites (Actors) */}
+                                {gwActors.map((actor, idx) => {
+                                    // Distribute actors in a circle around the gateway
+                                    const count = gwActors.length;
+                                    // Expand radius slightly if many actors to avoid clutter
+                                    const radius = count > 10 ? 35 : 25; 
+                                    const angle = (idx / count) * 2 * Math.PI;
+                                    const actorX = gwPos.x + radius * Math.cos(angle);
+                                    const actorY = gwPos.y + radius * Math.sin(angle);
+                                    const isCompromised = actor.status === 'COMPROMISED';
+                                    const actorColor = isCompromised ? '#ef4444' : (gw.id === 'DIRECT' ? '#38bdf8' : '#3b82f6');
 
-                                {/* Connector Line to 'Ground' (Visual flair) */}
-                                <line x1={pos.x} y1={pos.y} x2={pos.x} y2={pos.y + 10} stroke={color} strokeWidth="1" opacity="0.5" />
+                                    return (
+                                        <g key={actor.id} className="group/actor">
+                                            {/* Link Line */}
+                                            <line 
+                                                x1={gwPos.x} y1={gwPos.y} 
+                                                x2={actorX} y2={actorY} 
+                                                stroke={actorColor} 
+                                                strokeWidth={0.5} 
+                                                opacity={0.3} 
+                                            />
+                                            
+                                            {/* Actor Dot */}
+                                            <circle 
+                                                cx={actorX} cy={actorY} 
+                                                r={isCompromised ? 3 : 1.5} 
+                                                fill={actorColor}
+                                                className="cursor-pointer transition-all duration-300 hover:r-4"
+                                            >
+                                                {isCompromised && (
+                                                    <animate attributeName="opacity" values="1;0.2;1" dur="1s" repeatCount="indefinite" />
+                                                )}
+                                            </circle>
 
-                                {/* Tooltip Group */}
-                                <g className="opacity-0 group-hover:opacity-100 transition-opacity duration-300 pointer-events-none">
-                                    <path d={`M${pos.x},${pos.y-10} L${pos.x+10},${pos.y-30} H${pos.x+130} v40 H${pos.x+10} Z`} fill="rgba(15, 23, 42, 0.9)" stroke={color} strokeWidth="1" />
-                                    <text x={pos.x + 20} y={pos.y - 18} fill="#fff" fontSize="10" fontWeight="bold">{gw.name.toUpperCase()}</text>
-                                    <text x={pos.x + 20} y={pos.y - 6} fill="#94a3b8" fontSize="8" fontFamily="monospace">IP: {gw.ip}</text>
-                                    <text x={pos.x + 20} y={pos.y + 4} fill={hasCompromise ? '#ef4444' : '#10b981'} fontSize="8" fontWeight="bold">
-                                        STATUS: {hasCompromise ? 'CRITICAL' : gw.status}
-                                    </text>
+                                            {/* Ping Animation for Compromised Nodes */}
+                                            {isCompromised && (
+                                                <circle cx={actorX} cy={actorY} r="3" fill="none" stroke={actorColor} strokeWidth="0.5">
+                                                    <animate attributeName="r" from="3" to="12" dur="1.5s" repeatCount="indefinite" />
+                                                    <animate attributeName="opacity" from="0.8" to="0" dur="1.5s" repeatCount="indefinite" />
+                                                </circle>
+                                            )}
+
+                                            {/* Hover Info for Actor */}
+                                            <g className="opacity-0 group-hover/actor:opacity-100 transition-opacity duration-200 pointer-events-none z-50">
+                                                <rect x={actorX + 5} y={actorY - 15} width="80" height="24" fill="rgba(0,0,0,0.8)" rx="2" stroke={actorColor} strokeWidth="0.5" />
+                                                <text x={actorX + 10} y={actorY - 4} fill="white" fontSize="6" fontWeight="bold" fontFamily="monospace">{actor.name}</text>
+                                                <text x={actorX + 10} y={actorY + 4} fill={isCompromised ? "#ef4444" : "#94a3b8"} fontSize="5" fontFamily="monospace">{actor.status}</text>
+                                            </g>
+                                        </g>
+                                    );
+                                })}
+
+                                {/* Gateway Marker (Center) */}
+                                <g className="cursor-pointer group/gw">
+                                    {/* Pulse Ring */}
+                                    <circle cx={gwPos.x} cy={gwPos.y} r="4" fill="none" stroke={gwColor} strokeWidth="1">
+                                        <animate attributeName="r" from="4" to="15" dur="3s" repeatCount="indefinite" />
+                                        <animate attributeName="opacity" from="0.6" to="0" dur="3s" repeatCount="indefinite" />
+                                    </circle>
+                                    
+                                    {/* Core Dot */}
+                                    <circle cx={gwPos.x} cy={gwPos.y} r="3" fill={gwColor} stroke="#0f172a" strokeWidth="1" className="hover:r-5 transition-all" />
+
+                                    {/* Icon for Cloud */}
+                                    {gw.id === 'DIRECT' && (
+                                        <text x={gwPos.x - 3} y={gwPos.y + 2.5} fontSize="8" fill="#000" style={{pointerEvents:'none'}}>C</text>
+                                    )}
+
+                                    {/* Tooltip Group for Gateway */}
+                                    <g className="opacity-0 group-hover/gw:opacity-100 transition-opacity duration-300 pointer-events-none z-50">
+                                        <path d={`M${gwPos.x},${gwPos.y-10} L${gwPos.x+10},${gwPos.y-30} H${gwPos.x+130} v40 H${gwPos.x+10} Z`} fill="rgba(15, 23, 42, 0.9)" stroke={gwColor} strokeWidth="1" />
+                                        <text x={gwPos.x + 20} y={gwPos.y - 18} fill="#fff" fontSize="10" fontWeight="bold">{gw.name.toUpperCase()}</text>
+                                        <text x={gwPos.x + 20} y={gwPos.y - 6} fill="#94a3b8" fontSize="8" fontFamily="monospace">Nodes: {gwActors.length}</text>
+                                        <text x={gwPos.x + 20} y={gwPos.y + 4} fill={hasCompromise ? '#ef4444' : '#10b981'} fontSize="8" fontWeight="bold">
+                                            STATUS: {hasCompromise ? 'CRITICAL' : gw.status}
+                                        </text>
+                                    </g>
                                 </g>
                             </g>
                         );
@@ -127,7 +223,7 @@ const WarRoomMap: React.FC<WarRoomMapProps> = ({ gateways, actors }) => {
             <div className="bg-slate-900 border-t border-slate-700 p-4 flex justify-between items-center text-xs font-mono">
                 <div className="text-slate-500">
                     <span className="text-blue-400">COORDINATES:</span> 32.0853° N, 34.7818° E (HQ)<br/>
-                    <span className="text-blue-400">NETWORK MESH:</span> FULLY CONVERGED
+                    <span className="text-blue-400">NETWORK MESH:</span> {renderData.groups['DIRECT']?.length > 0 ? 'HYBRID (CLOUD+EDGE)' : 'FULLY CONVERGED'}
                 </div>
                 <div className="flex space-x-6">
                     <div>
