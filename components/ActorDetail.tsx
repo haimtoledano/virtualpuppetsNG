@@ -796,13 +796,18 @@ const ActorDetail: React.FC<ActorDetailProps> = ({ actor, gateway, logs: initial
           let attackerIp = log.sourceIp;
           let destPort = undefined;
 
+          // 0. Sentinel Specific Match (High Priority)
+          const sentinelMatch = log.message.match(/detected from\s+.*?:(\d+)\s+->\s+:(\d+)/i);
+
           // 1. Generic Complex Match (Existing)
           const complexMatch = log.message.match(/from\s+(?:[0-9a-f.:]+|\[.*?\]):(\d+)\s+(?:to|->)\s+(?:[0-9a-f.:]+|\[.*?\])?:(\d+)/i);
           
           // 2. Specific Trap Match (New robust format)
           const trapMatch = log.message.match(/->\s+:(\d+)/); 
 
-          if (complexMatch) {
+          if (sentinelMatch) {
+              destPort = sentinelMatch[2];
+          } else if (complexMatch) {
               const p1 = parseInt(complexMatch[1]);
               const p2 = parseInt(complexMatch[2]);
               if (p2 > 30000 && p1 < 30000) {
@@ -994,8 +999,12 @@ const ActorDetail: React.FC<ActorDetailProps> = ({ actor, gateway, logs: initial
                                 <div className="flex-1 mx-4 relative h-8 flex items-center">
                                     <div className="w-full h-0.5 bg-slate-700 relative overflow-hidden"><div className="absolute inset-0 bg-red-500/50 animate-progress"></div></div>
                                     <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
-                                        <span className="bg-slate-900 px-2 text-[10px] text-red-300 font-mono border border-red-900 rounded z-10">{threat.protocol.toUpperCase()}</span>
-                                        {threat.port && <div className="text-[9px] text-red-400 font-bold bg-slate-900/80 px-1 rounded z-10 -mt-px pt-0.5">:{threat.port}</div>}
+                                        <span className="bg-slate-900 px-2 text-[10px] text-red-300 font-mono border border-red-900 rounded z-10 shadow-sm">{threat.protocol.toUpperCase()}</span>
+                                        {threat.port && (
+                                            <div className="text-[9px] text-red-400 font-bold bg-slate-900/90 px-1.5 py-0.5 rounded-b border-x border-b border-red-900/50 z-0 -mt-1 pt-1.5 shadow-sm">
+                                                :{threat.port}
+                                            </div>
+                                        )}
                                     </div>
                                     <ArrowRight className="absolute right-0 text-slate-700 w-4 h-4" />
                                 </div>
@@ -1089,7 +1098,7 @@ const ActorDetail: React.FC<ActorDetailProps> = ({ actor, gateway, logs: initial
                                <label className="relative inline-flex items-center cursor-pointer">
                                   <input type="checkbox" checked={btEnabled} onChange={handleToggleBluetooth} disabled={!actor.hasBluetooth} className="sr-only peer" />
                                   <div className="w-9 h-5 bg-slate-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-blue-600"></div>
-                               </label>
+                                </label>
                                {!actor.hasBluetooth && <span className="text-[9px] text-red-400 mt-1">Hardware Missing</span>}
                            </div>
                        </div>
