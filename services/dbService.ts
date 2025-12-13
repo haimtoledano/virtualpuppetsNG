@@ -1,5 +1,5 @@
 
-import { Actor, ProxyGateway, User, DbConfig, LogEntry, SystemConfig, Report, CommandJob, PendingActor, DevicePersona, WifiNetwork, BluetoothDevice, AttackSession } from '../types';
+import { Actor, ProxyGateway, User, DbConfig, LogEntry, SystemConfig, Report, CommandJob, PendingActor, DevicePersona, WifiNetwork, BluetoothDevice, AttackSession, RolePermissions, Permission } from '../types';
 
 const API_BASE = '/api';
 
@@ -45,6 +45,17 @@ export const getSystemConfig = async (): Promise<SystemConfig | null> => {
         return await res.json();
     } catch { return null; }
 };
+
+// --- DEFAULT PERMISSIONS HELPER ---
+export const getDefaultPermissions = (): RolePermissions => ({
+    ADMIN: [
+        'VIEW_DASHBOARD', 'VIEW_MAP', 'VIEW_ACTORS', 'VIEW_GATEWAYS', 'VIEW_WIRELESS', 'VIEW_REPORTS', 'VIEW_SETTINGS',
+        'MANAGE_ACTORS', 'MANAGE_GATEWAYS', 'MANAGE_REPORTS'
+    ],
+    VIEWER: [
+        'VIEW_DASHBOARD', 'VIEW_MAP', 'VIEW_ACTORS', 'VIEW_REPORTS'
+    ]
+});
 
 export const dbQuery = async <T>(table: string): Promise<T> => {
     try {

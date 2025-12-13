@@ -1,9 +1,9 @@
 
 import React, { useState, useEffect, useCallback, Suspense } from 'react';
 import { generateInitialActors, generateRandomLog, generateGateways } from './services/mockService';
-import { dbQuery, getSystemConfig, getPendingActors, approvePendingActor, rejectPendingActor, getSystemLogs, sendAuditLog, triggerFleetUpdate } from './services/dbService';
+import { dbQuery, getSystemConfig, getPendingActors, approvePendingActor, rejectPendingActor, getSystemLogs, sendAuditLog, triggerFleetUpdate, getDefaultPermissions } from './services/dbService';
 import { saveUserPreferences } from './services/authService';
-import { Actor, LogEntry, ProxyGateway, PendingActor, ActorStatus, User, SystemConfig, UserPreferences, LogLevel } from './types';
+import { Actor, LogEntry, ProxyGateway, PendingActor, ActorStatus, User, SystemConfig, UserPreferences, LogLevel, Permission } from './types';
 import { LayoutDashboard, Settings as SettingsIcon, Network, Plus, LogOut, User as UserIcon, FileText, Globe, Router, Radio, Loader, RefreshCw, Zap, Server, ChevronLeft, ChevronRight, Camera, Printer, Box, Eye, Cpu, HelpCircle } from 'lucide-react';
 
 // Lazy Load Components
@@ -38,7 +38,9 @@ const VpLogo = ({ className = "w-10 h-10" }: { className?: string }) => (
     </svg>
 );
 
-const NavItem = ({ icon: Icon, label, active, onClick, expanded, hasAlert }: { icon: any, label: string, active: boolean, onClick: () => void, expanded: boolean, hasAlert?: boolean }) => (
+const NavItem = ({ icon: Icon, label, active, onClick, expanded, hasAlert, visible = true }: { icon: any, label: string, active: boolean, onClick: () => void, expanded: boolean, hasAlert?: boolean, visible?: boolean }) => {
+    if (!visible) return null;
+    return (
     <button 
         onClick={onClick} 
         className={`w-full flex items-center ${expanded ? 'px-4 py-3 justify-start' : 'p-3 justify-center'} rounded-lg transition-all duration-200 group relative ${active ? 'bg-blue-600/10 text-blue-400 border border-blue-500/20' : 'text-slate-500 hover:text-slate-200 hover:bg-slate-800'}`}
@@ -60,7 +62,7 @@ const NavItem = ({ icon: Icon, label, active, onClick, expanded, hasAlert }: { i
             </div>
         )}
     </button>
-);
+)};
 
 export default function App() {
   const [isProduction, setIsProduction] = useState(() => localStorage.getItem('vpp_mode') === 'PRODUCTION');
@@ -83,6 +85,17 @@ export default function App() {
 
   // Derived target version (default 2.7.0 if not set)
   const targetVersion = systemConfig?.targetAgentVersion || '2.7.0';
+
+  // --- PERMISSION LOGIC ---
+  const hasPermission = useCallback((perm: Permission) => {
+      if (!currentUser) return false;
+      if (currentUser.role === 'SUPERADMIN') return true;
+      
+      const rolePerms = systemConfig?.rolePermissions || getDefaultPermissions();
+      const myPerms = rolePerms[currentUser.role as 'ADMIN' | 'VIEWER'] || [];
+      
+      return myPerms.includes(perm);
+  }, [currentUser, systemConfig]);
 
   useEffect(() => {
       if (!currentUser || !isProduction) return;
@@ -374,20 +387,20 @@ export default function App() {
                         {isSidebarExpanded ? <ChevronLeft className="w-3 h-3" /> : <ChevronRight className="w-3 h-3" />}
                     </button>
                     
-                    {/* Menu Items */}
+                    {/* Menu Items (Filtered by Permissions) */}
                     <div className="flex-1 py-6 px-3 space-y-2 overflow-y-auto scrollbar-thin scrollbar-thumb-slate-800 overflow-x-hidden">
-                        <NavItem icon={LayoutDashboard} label="Dashboard" active={activeTab === 'dashboard'} onClick={() => setActiveTab('dashboard')} expanded={isSidebarExpanded} />
-                        <NavItem icon={Globe} label="War Room Map" active={activeTab === 'map'} onClick={() => setActiveTab('map')} expanded={isSidebarExpanded} />
-                        <NavItem icon={Server} label="Fleet Matrix" active={activeTab === 'actors'} onClick={() => setActiveTab('actors')} expanded={isSidebarExpanded} />
-                        <NavItem icon={Network} label="Gateway Infra" active={activeTab === 'gateways'} onClick={() => setActiveTab('gateways')} expanded={isSidebarExpanded} />
-                        <NavItem icon={Radio} label="Wireless Recon" active={activeTab === 'wireless'} onClick={() => setActiveTab('wireless')} expanded={isSidebarExpanded} />
-                        <NavItem icon={FileText} label="Intel Reports" active={activeTab === 'reports'} onClick={() => setActiveTab('reports')} expanded={isSidebarExpanded} />
+                        <NavItem visible={hasPermission('VIEW_DASHBOARD')} icon={LayoutDashboard} label="Dashboard" active={activeTab === 'dashboard'} onClick={() => setActiveTab('dashboard')} expanded={isSidebarExpanded} />
+                        <NavItem visible={hasPermission('VIEW_MAP')} icon={Globe} label="War Room Map" active={activeTab === 'map'} onClick={() => setActiveTab('map')} expanded={isSidebarExpanded} />
+                        <NavItem visible={hasPermission('VIEW_ACTORS')} icon={Server} label="Fleet Matrix" active={activeTab === 'actors'} onClick={() => setActiveTab('actors')} expanded={isSidebarExpanded} />
+                        <NavItem visible={hasPermission('VIEW_GATEWAYS')} icon={Network} label="Gateway Infra" active={activeTab === 'gateways'} onClick={() => setActiveTab('gateways')} expanded={isSidebarExpanded} />
+                        <NavItem visible={hasPermission('VIEW_WIRELESS')} icon={Radio} label="Wireless Recon" active={activeTab === 'wireless'} onClick={() => setActiveTab('wireless')} expanded={isSidebarExpanded} />
+                        <NavItem visible={hasPermission('VIEW_REPORTS')} icon={FileText} label="Intel Reports" active={activeTab === 'reports'} onClick={() => setActiveTab('reports')} expanded={isSidebarExpanded} />
                     </div>
 
                     {/* Footer Actions */}
                     <div className="p-3 border-t border-slate-800/50 space-y-2 mb-2 bg-slate-950/50 shrink-0">
                         <NavItem icon={HelpCircle} label="Help & Support" active={activeTab === 'help'} onClick={() => setActiveTab('help')} expanded={isSidebarExpanded} hasAlert={true} />
-                        <NavItem icon={SettingsIcon} label="System Settings" active={activeTab === 'settings'} onClick={() => setActiveTab('settings')} expanded={isSidebarExpanded} />
+                        <NavItem visible={hasPermission('VIEW_SETTINGS')} icon={SettingsIcon} label="System Settings" active={activeTab === 'settings'} onClick={() => setActiveTab('settings')} expanded={isSidebarExpanded} />
                         <button 
                             onClick={handleLogout} 
                             className={`w-full flex items-center ${isSidebarExpanded ? 'px-4 py-3 justify-start' : 'p-3 justify-center'} rounded-lg transition-all duration-200 text-slate-500 hover:text-red-400 hover:bg-red-950/30 group`}
@@ -407,25 +420,50 @@ export default function App() {
                 <div className={`flex-1 flex flex-col transition-all duration-300 ease-in-out ${currentUser ? (isSidebarExpanded ? 'ml-64' : 'ml-20') : ''} h-screen overflow-hidden bg-slate-900/90 relative z-10 backdrop-blur-[2px]`}>
                     <div className="flex-1 overflow-y-auto p-6 scroll-smooth">
                         {selectedActor ? (
-                            <ActorDetail 
-                                actor={selectedActor} 
-                                gateway={selectedActorGateway} 
-                                logs={logs.filter(l => l.actorId === selectedActorId)} 
-                                onBack={() => { setSelectedActorId(null); setAutoForensicTarget(null); }} 
-                                isProduction={isProduction}
-                                currentUser={currentUser}
-                                onUpdatePreferences={handleUpdateUserPreferences}
-                                autoRunForensic={autoForensicTarget === selectedActor.id}
-                            />
+                            <div className="relative">
+                                {/* Permission Gate for Actor Detail - Fallback if direct access tried */}
+                                {!hasPermission('VIEW_ACTORS') ? (
+                                    <div className="text-center p-10 text-red-400">Access Denied: Insufficient Permissions</div>
+                                ) : (
+                                    <ActorDetail 
+                                        actor={selectedActor} 
+                                        gateway={selectedActorGateway} 
+                                        logs={logs.filter(l => l.actorId === selectedActorId)} 
+                                        onBack={() => { setSelectedActorId(null); setAutoForensicTarget(null); }} 
+                                        isProduction={isProduction}
+                                        currentUser={currentUser}
+                                        onUpdatePreferences={handleUpdateUserPreferences}
+                                        autoRunForensic={autoForensicTarget === selectedActor.id}
+                                        // Pass specific capability flag
+                                        // Since ActorDetail props interface doesn't have it yet, we just enforce logic here or add it
+                                        // For minimal updates, we will rely on checking permissions inside components if we update them, 
+                                        // OR update ActorDetail props. Let's update ActorDetail props.
+                                    />
+                                )}
+                            </div>
                         ) : (
                             <>
-                                {activeTab === 'dashboard' && <Dashboard gateways={gateways} actors={actors} logs={logs} onActorSelect={setSelectedActorId} onQuickForensic={handleQuickForensic} />}
-                                {activeTab === 'map' && <WarRoomMap gateways={gateways} actors={actors} />}
-                                {activeTab === 'reports' && <Reports currentUser={currentUser} logs={logs} actors={actors} />}
-                                {activeTab === 'gateways' && <GatewayManager gateways={gateways} onRefresh={loadProductionData} domain={systemConfig?.domain || 'vpp.io'} isProduction={isProduction} />}
-                                {activeTab === 'wireless' && <WirelessRecon isProduction={isProduction} actors={actors} />}
+                                {activeTab === 'dashboard' && hasPermission('VIEW_DASHBOARD') && <Dashboard gateways={gateways} actors={actors} logs={logs} onActorSelect={setSelectedActorId} onQuickForensic={handleQuickForensic} />}
+                                {activeTab === 'map' && hasPermission('VIEW_MAP') && <WarRoomMap gateways={gateways} actors={actors} />}
+                                {activeTab === 'reports' && hasPermission('VIEW_REPORTS') && (
+                                    <Reports 
+                                        currentUser={currentUser} 
+                                        logs={logs} 
+                                        actors={actors} 
+                                        // Pass ReadOnly prop? We need to update Reports component
+                                    />
+                                )}
+                                {activeTab === 'gateways' && hasPermission('VIEW_GATEWAYS') && (
+                                    <GatewayManager 
+                                        gateways={gateways} 
+                                        onRefresh={loadProductionData} 
+                                        domain={systemConfig?.domain || 'vpp.io'} 
+                                        isProduction={isProduction} 
+                                    />
+                                )}
+                                {activeTab === 'wireless' && hasPermission('VIEW_WIRELESS') && <WirelessRecon isProduction={isProduction} actors={actors} />}
                                 {activeTab === 'help' && <HelpCenter />}
-                                {activeTab === 'settings' && (
+                                {activeTab === 'settings' && hasPermission('VIEW_SETTINGS') && (
                                     <Settings 
                                         isProduction={isProduction} 
                                         onToggleProduction={toggleProductionMode} 
@@ -436,26 +474,28 @@ export default function App() {
                                         onRestore={handleRestoreState}
                                     />
                                 )}
-                                {activeTab === 'actors' && (
+                                {activeTab === 'actors' && hasPermission('VIEW_ACTORS') && (
                                     <div className="space-y-6 animate-fade-in pb-10">
                                         <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
                                             <h2 className="text-2xl font-bold text-slate-200">Global Fleet</h2>
-                                            <div className="flex space-x-2">
-                                                <button 
-                                                    onClick={handleFleetUpdate}
-                                                    disabled={isUpdatingFleet}
-                                                    className="bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white px-4 py-2 rounded-lg flex items-center font-bold text-xs border border-slate-700 transition-all disabled:opacity-50"
-                                                >
-                                                    <RefreshCw className={`w-3 h-3 mr-2 ${isUpdatingFleet ? 'animate-spin' : ''}`} />
-                                                    {isUpdatingFleet ? 'PUSHING UPDATE...' : `UPDATE ALL AGENTS (v${targetVersion})`}
-                                                </button>
-                                                <button 
-                                                    onClick={() => setIsEnrollmentOpen(true)} 
-                                                    className="bg-blue-600 hover:bg-blue-500 text-white px-4 py-2 rounded-lg flex items-center font-bold text-sm shadow-lg shadow-blue-900/20"
-                                                >
-                                                    <Plus className="w-4 h-4 mr-2" />Enroll New Device
-                                                </button>
-                                            </div>
+                                            {hasPermission('MANAGE_ACTORS') && (
+                                                <div className="flex space-x-2">
+                                                    <button 
+                                                        onClick={handleFleetUpdate}
+                                                        disabled={isUpdatingFleet}
+                                                        className="bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white px-4 py-2 rounded-lg flex items-center font-bold text-xs border border-slate-700 transition-all disabled:opacity-50"
+                                                    >
+                                                        <RefreshCw className={`w-3 h-3 mr-2 ${isUpdatingFleet ? 'animate-spin' : ''}`} />
+                                                        {isUpdatingFleet ? 'PUSHING UPDATE...' : `UPDATE ALL AGENTS (v${targetVersion})`}
+                                                    </button>
+                                                    <button 
+                                                        onClick={() => setIsEnrollmentOpen(true)} 
+                                                        className="bg-blue-600 hover:bg-blue-500 text-white px-4 py-2 rounded-lg flex items-center font-bold text-sm shadow-lg shadow-blue-900/20"
+                                                    >
+                                                        <Plus className="w-4 h-4 mr-2" />Enroll New Device
+                                                    </button>
+                                                </div>
+                                            )}
                                         </div>
 
                                         {/* Software Version Banner */}
@@ -538,18 +578,21 @@ export default function App() {
                     </div>
                 </div>
             
-                <EnrollmentModal 
-                    isOpen={isEnrollmentOpen} 
-                    onClose={() => setIsEnrollmentOpen(false)}
-                    gateways={gateways}
-                    pendingActors={pendingActors}
-                    setPendingActors={setPendingActors}
-                    onApprove={handleAdoptDevice}
-                    onReject={handleRejectDevice}
-                    domain={systemConfig?.domain || 'vpp.io'}
-                    isProduction={isProduction}
-                    onGatewayRegistered={loadProductionData}
-                />
+                {/* Only render enrollment modal if permissions allow */}
+                {hasPermission('MANAGE_ACTORS') && (
+                    <EnrollmentModal 
+                        isOpen={isEnrollmentOpen} 
+                        onClose={() => setIsEnrollmentOpen(false)}
+                        gateways={gateways}
+                        pendingActors={pendingActors}
+                        setPendingActors={setPendingActors}
+                        onApprove={handleAdoptDevice}
+                        onReject={handleRejectDevice}
+                        domain={systemConfig?.domain || 'vpp.io'}
+                        isProduction={isProduction}
+                        onGatewayRegistered={loadProductionData}
+                    />
+                )}
             </div>
         </Suspense>
     );

@@ -1,7 +1,7 @@
 
 import React, { useState, useEffect } from 'react';
-import { User, DbConfig, UserRole, SystemConfig, AiConfig, AiProvider, SyslogConfig, Actor, ProxyGateway } from '../types';
-import { dbQuery, getSystemConfig, updateSystemConfig, connectToDatabase } from '../services/dbService';
+import { User, DbConfig, UserRole, SystemConfig, AiConfig, AiProvider, SyslogConfig, Actor, ProxyGateway, Permission, RolePermissions } from '../types';
+import { dbQuery, getSystemConfig, updateSystemConfig, connectToDatabase, getDefaultPermissions } from '../services/dbService';
 import { createUser, deleteUser, hashPassword, updateUser, resetUserMfa } from '../services/authService';
 import { testAiConnection } from '../services/aiService';
 import { Settings as SettingsIcon, Database, Users, Shield, Trash2, AlertTriangle, Plus, Lock, Bot, Cloud, Server, Building, Globe, Save, RefreshCw, Edit, ShieldAlert, X, Check, ShieldCheck, FileText, Key, Activity, HardDrive, Download, Upload, Clock, Box } from 'lucide-react';
@@ -23,8 +23,22 @@ interface Snapshot {
     data: any;
 }
 
+const PERMISSIONS_LIST: { id: Permission; label: string; type: 'SCREEN' | 'FUNC' }[] = [
+    { id: 'VIEW_DASHBOARD', label: 'Screen: Dashboard', type: 'SCREEN' },
+    { id: 'VIEW_MAP', label: 'Screen: War Room Map', type: 'SCREEN' },
+    { id: 'VIEW_ACTORS', label: 'Screen: Fleet Matrix', type: 'SCREEN' },
+    { id: 'VIEW_GATEWAYS', label: 'Screen: Gateway Infra', type: 'SCREEN' },
+    { id: 'VIEW_WIRELESS', label: 'Screen: Wireless Recon', type: 'SCREEN' },
+    { id: 'VIEW_REPORTS', label: 'Screen: Reports', type: 'SCREEN' },
+    { id: 'VIEW_SETTINGS', label: 'Screen: Settings', type: 'SCREEN' },
+    { id: 'MANAGE_ACTORS', label: 'Func: Manage Actors (Enroll/Delete/Control)', type: 'FUNC' },
+    { id: 'MANAGE_GATEWAYS', label: 'Func: Manage Gateways (Create/Delete)', type: 'FUNC' },
+    { id: 'MANAGE_REPORTS', label: 'Func: Create/Delete Reports', type: 'FUNC' },
+    { id: 'MANAGE_SYSTEM', label: 'Func: Modify System Config', type: 'FUNC' },
+];
+
 const Settings: React.FC<SettingsProps> = ({ isProduction, onToggleProduction, currentUser, onConfigUpdate, actors, gateways, onRestore }) => {
-  const [activeTab, setActiveTab] = useState<'GENERAL' | 'SNAPSHOTS' | 'DATABASE' | 'USERS' | 'AI' | 'AUDIT' | 'CORE'>('GENERAL');
+  const [activeTab, setActiveTab] = useState<'GENERAL' | 'SNAPSHOTS' | 'DATABASE' | 'USERS' | 'AI' | 'AUDIT' | 'CORE' | 'ACCESS'>('GENERAL');
   
   const [users, setUsers] = useState<User[]>([]);
   const [newUser, setNewUser] = useState({ username: '', password: '', role: 'VIEWER' as UserRole });
@@ -54,6 +68,9 @@ const Settings: React.FC<SettingsProps> = ({ isProduction, onToggleProduction, c
       enabled: false
   });
 
+  // Permissions Form State
+  const [rolePermissions, setRolePermissions] = useState<RolePermissions>(getDefaultPermissions());
+
   // Core Setup Forms (SuperAdmin)
   const [orgForm, setOrgForm] = useState({ companyName: '', domain: '', logoUrl: '' });
   const [dbForm, setDbForm] = useState({ server: '', database: '', username: '', password: '' });
@@ -67,13 +84,19 @@ const Settings: React.FC<SettingsProps> = ({ isProduction, onToggleProduction, c
                 const data = await dbQuery<User[]>('users');
                 setUsers(data);
             }
-            // Load System Config for AI & Core
+            // Load System Config for AI & Core & Permissions
             const cfg = await getSystemConfig();
             if (cfg) {
                 setSysConfig(cfg);
                 setTargetVersion(cfg.targetAgentVersion || '2.7.0');
                 
-                if (activeTab === 'AI' || activeTab === 'CORE' || activeTab === 'AUDIT' || activeTab === 'SNAPSHOTS') {
+                if (cfg.rolePermissions) {
+                    setRolePermissions(cfg.rolePermissions);
+                } else {
+                    setRolePermissions(getDefaultPermissions());
+                }
+
+                if (activeTab === 'AI' || activeTab === 'CORE' || activeTab === 'AUDIT' || activeTab === 'SNAPSHOTS' || activeTab === 'ACCESS') {
                     // Hydrate all forms to prevent saving empty defaults
                     if (cfg.aiConfig) {
                         setAiForm(cfg.aiConfig);
@@ -202,6 +225,33 @@ const Settings: React.FC<SettingsProps> = ({ isProduction, onToggleProduction, c
       alert("Syslog Configuration Saved. Events will be forwarded.");
   };
 
+  const handleSavePermissions = async () => {
+      if (!sysConfig) return;
+      const updatedConfig: SystemConfig = {
+          ...sysConfig,
+          rolePermissions: rolePermissions
+      };
+      await fetch('/api/config/system', {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify(updatedConfig)
+      });
+      setSysConfig(updatedConfig);
+      onConfigUpdate?.();
+      alert("Access Control Policy Saved. Changes apply immediately.");
+  };
+
+  const togglePermission = (role: 'ADMIN' | 'VIEWER', perm: Permission) => {
+      const current = rolePermissions[role];
+      let updated: Permission[];
+      if (current.includes(perm)) {
+          updated = current.filter(p => p !== perm);
+      } else {
+          updated = [...current, perm];
+      }
+      setRolePermissions({ ...rolePermissions, [role]: updated });
+  };
+
   const handleSaveFleetPolicy = async () => {
       if (!sysConfig) return;
       const updatedConfig: SystemConfig = {
@@ -228,7 +278,8 @@ const Settings: React.FC<SettingsProps> = ({ isProduction, onToggleProduction, c
               setupCompletedAt: new Date().toISOString(),
               aiConfig: sysConfig?.aiConfig || aiForm,
               syslogConfig: sysConfig?.syslogConfig || syslogForm,
-              targetAgentVersion: targetVersion
+              targetAgentVersion: targetVersion,
+              rolePermissions: rolePermissions
           };
 
           await updateSystemConfig(updated);
@@ -377,6 +428,12 @@ const Settings: React.FC<SettingsProps> = ({ isProduction, onToggleProduction, c
                         className={`px-4 py-2 text-sm font-bold border-b-2 transition-colors whitespace-nowrap ${activeTab === 'AUDIT' ? 'border-blue-500 text-blue-400' : 'border-transparent text-slate-500 hover:text-white'}`}
                     >
                         Audit & Logs
+                    </button>
+                    <button 
+                        onClick={() => setActiveTab('ACCESS')}
+                        className={`px-4 py-2 text-sm font-bold border-b-2 transition-colors whitespace-nowrap ${activeTab === 'ACCESS' ? 'border-yellow-500 text-yellow-400' : 'border-transparent text-slate-500 hover:text-white'}`}
+                    >
+                        Access Control
                     </button>
                 </>
             )}
@@ -602,6 +659,73 @@ const Settings: React.FC<SettingsProps> = ({ isProduction, onToggleProduction, c
                         className="w-full bg-emerald-600 hover:bg-emerald-500 text-white font-bold py-3 rounded-lg transition-colors mt-4 shadow-lg shadow-emerald-600/20 disabled:opacity-50"
                     >
                         <Save className="w-4 h-4 inline mr-2" /> SAVE LOGGING CONFIG
+                    </button>
+                </div>
+            </div>
+        )}
+
+        {/* Access Control (Permission) Tab */}
+        {activeTab === 'ACCESS' && isSuperAdmin && (
+            <div className="bg-slate-800 rounded-xl border border-slate-700 p-6 shadow-lg space-y-6">
+                <div className="flex items-start mb-6">
+                     <ShieldCheck className="w-10 h-10 text-yellow-500 mr-4" />
+                     <div>
+                         <h3 className="text-xl font-bold text-white">Role Access Control</h3>
+                         <p className="text-slate-400 text-sm">Define screen visibility and functional capabilities for lower-tier roles.</p>
+                     </div>
+                </div>
+
+                <div className="overflow-x-auto rounded-lg border border-slate-700">
+                    <table className="w-full text-left text-sm">
+                        <thead className="bg-slate-900 text-slate-400 uppercase font-bold text-xs">
+                            <tr>
+                                <th className="p-4 border-r border-slate-800">Capability</th>
+                                <th className="p-4 text-center border-r border-slate-800 bg-slate-900/50">
+                                    <span className="text-blue-400">ADMIN</span>
+                                </th>
+                                <th className="p-4 text-center bg-slate-900/50">
+                                    <span className="text-slate-400">VIEWER</span>
+                                </th>
+                            </tr>
+                        </thead>
+                        <tbody className="divide-y divide-slate-800">
+                            {/* Screens Header */}
+                            <tr className="bg-slate-800/50"><td colSpan={3} className="px-4 py-2 text-xs font-bold text-slate-500 uppercase tracking-widest">Screens & Views</td></tr>
+                            {PERMISSIONS_LIST.filter(p => p.type === 'SCREEN').map(perm => (
+                                <tr key={perm.id} className="hover:bg-slate-700/20">
+                                    <td className="p-4 font-medium text-slate-300 border-r border-slate-800">{perm.label}</td>
+                                    <td className="p-4 text-center border-r border-slate-800">
+                                        <input type="checkbox" checked={rolePermissions.ADMIN.includes(perm.id)} onChange={() => togglePermission('ADMIN', perm.id)} className="w-4 h-4 rounded bg-slate-700 border-slate-600 text-blue-600 focus:ring-blue-500 focus:ring-offset-slate-900" />
+                                    </td>
+                                    <td className="p-4 text-center">
+                                        <input type="checkbox" checked={rolePermissions.VIEWER.includes(perm.id)} onChange={() => togglePermission('VIEWER', perm.id)} className="w-4 h-4 rounded bg-slate-700 border-slate-600 text-blue-600 focus:ring-blue-500 focus:ring-offset-slate-900" />
+                                    </td>
+                                </tr>
+                            ))}
+                            
+                            {/* Functions Header */}
+                            <tr className="bg-slate-800/50"><td colSpan={3} className="px-4 py-2 text-xs font-bold text-slate-500 uppercase tracking-widest">Functionality</td></tr>
+                            {PERMISSIONS_LIST.filter(p => p.type === 'FUNC').map(perm => (
+                                <tr key={perm.id} className="hover:bg-slate-700/20">
+                                    <td className="p-4 font-medium text-slate-300 border-r border-slate-800">{perm.label}</td>
+                                    <td className="p-4 text-center border-r border-slate-800">
+                                        <input type="checkbox" checked={rolePermissions.ADMIN.includes(perm.id)} onChange={() => togglePermission('ADMIN', perm.id)} className="w-4 h-4 rounded bg-slate-700 border-slate-600 text-blue-600 focus:ring-blue-500 focus:ring-offset-slate-900" />
+                                    </td>
+                                    <td className="p-4 text-center">
+                                        <input type="checkbox" checked={rolePermissions.VIEWER.includes(perm.id)} onChange={() => togglePermission('VIEWER', perm.id)} className="w-4 h-4 rounded bg-slate-700 border-slate-600 text-blue-600 focus:ring-blue-500 focus:ring-offset-slate-900" />
+                                    </td>
+                                </tr>
+                            ))}
+                        </tbody>
+                    </table>
+                </div>
+                
+                <div className="flex justify-end">
+                    <button 
+                        onClick={handleSavePermissions}
+                        className="bg-yellow-600 hover:bg-yellow-500 text-white font-bold py-3 px-8 rounded-lg transition-colors shadow-lg shadow-yellow-600/20"
+                    >
+                        <Save className="w-4 h-4 inline mr-2" /> SAVE PERMISSIONS
                     </button>
                 </div>
             </div>

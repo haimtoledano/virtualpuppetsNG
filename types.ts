@@ -1,4 +1,5 @@
 
+
 export enum ActorStatus {
   ONLINE = 'ONLINE',
   OFFLINE = 'OFFLINE',
@@ -171,6 +172,26 @@ export interface SyslogConfig {
     enabled: boolean;
 }
 
+// --- PERMISSION TYPES ---
+export type Permission = 
+    | 'VIEW_DASHBOARD' 
+    | 'VIEW_MAP' 
+    | 'VIEW_ACTORS' 
+    | 'VIEW_GATEWAYS' 
+    | 'VIEW_WIRELESS' 
+    | 'VIEW_REPORTS' 
+    | 'VIEW_SETTINGS'
+    | 'MANAGE_ACTORS' 
+    | 'MANAGE_GATEWAYS' 
+    | 'MANAGE_REPORTS' 
+    | 'MANAGE_SYSTEM';
+
+export interface RolePermissions {
+    ADMIN: Permission[];
+    VIEWER: Permission[];
+    // SUPERADMIN always has all
+}
+
 export interface SystemConfig {
   companyName: string;
   domain: string;
@@ -179,6 +200,7 @@ export interface SystemConfig {
   aiConfig?: AiConfig; 
   syslogConfig?: SyslogConfig; // New field for Syslog
   targetAgentVersion?: string; // New field for dynamic version control
+  rolePermissions?: RolePermissions; // New field for RBAC
 }
 
 export interface AuthState {
@@ -298,7 +320,7 @@ export interface AttackSession {
     id: string;
     actorId: string;
     attackerIp: string;
-    protocol: 'SSH' | 'TELNET' | 'FTP' | 'REDIS' | 'HTTP' | 'VNC';
+    protocol: 'SSH' | 'TELNET' | 'FTP' | 'REDIS' | 'HTTP' | 'VNC' | 'SQL';
     startTime: Date;
     durationSeconds: number;
     frames: SessionFrame[];
