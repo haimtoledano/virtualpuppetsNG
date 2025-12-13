@@ -235,9 +235,15 @@ export interface ReportContent {
       incidentTime: string;
       vector: string;
       mitigation: string;
+      title?: string;
       // Derived from filters
       affectedSystems?: string[];
       eventCount?: number;
+      // New fields for charts and logs
+      evidenceLogs?: any[];
+      timeline?: any[];
+      topSources?: any[];
+      protocolDistribution?: any[];
   };
   
   // New: Forensic Snapshot Data

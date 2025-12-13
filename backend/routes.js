@@ -376,37 +376,74 @@ router.post('/reports/generate', async (req, res) => {
         // Handle INCIDENT_LOG generation
         if (type === 'INCIDENT_LOG' && incidentFilters) {
             const reqDb = db.request();
-            let query = "SELECT COUNT(*) as count FROM Logs WHERE 1=1";
+            let baseWhere = "1=1";
             
-            // 1. Date Filter
-            if (incidentFilters.dateRange === 'LAST_24H') query += " AND Timestamp >= DATEADD(hour, -24, GETDATE())";
-            else if (incidentFilters.dateRange === 'LAST_7D') query += " AND Timestamp >= DATEADD(day, -7, GETDATE())";
-            else if (incidentFilters.dateRange === 'LAST_30D') query += " AND Timestamp >= DATEADD(day, -30, GETDATE())";
+            // Build Dynamic Where Clause
+            if (incidentFilters.dateRange === 'LAST_24H') baseWhere += " AND Timestamp >= DATEADD(hour, -24, GETDATE())";
+            else if (incidentFilters.dateRange === 'LAST_7D') baseWhere += " AND Timestamp >= DATEADD(day, -7, GETDATE())";
+            else if (incidentFilters.dateRange === 'LAST_30D') baseWhere += " AND Timestamp >= DATEADD(day, -30, GETDATE())";
             
-            // 2. IP Filter
             if (incidentFilters.attackerIp) {
-                query += " AND SourceIp = @ip";
+                baseWhere += " AND SourceIp = @ip";
                 reqDb.input('ip', incidentFilters.attackerIp);
             }
-            // 3. Actor Filter
             if (incidentFilters.targetActor) {
-                query += " AND ActorId = @aid";
+                baseWhere += " AND ActorId = @aid";
                 reqDb.input('aid', incidentFilters.targetActor);
             }
-            // 4. Protocol Filter
             if (incidentFilters.protocol) {
-                query += " AND Process = @proc";
+                baseWhere += " AND Process = @proc";
                 reqDb.input('proc', incidentFilters.protocol);
             }
 
-            const countRes = await reqDb.query(query);
+            // 1. Total Count
+            const countRes = await reqDb.query(`SELECT COUNT(*) as count FROM Logs WHERE ${baseWhere}`);
+            
+            // 2. Timeline Aggregation (Attack Velocity)
+            // Group by Hour for granular view
+            const timelineRes = await reqDb.query(`
+                SELECT FORMAT(Timestamp, 'yyyy-MM-dd HH:00') as timeSlice, COUNT(*) as count 
+                FROM Logs 
+                WHERE ${baseWhere} 
+                GROUP BY FORMAT(Timestamp, 'yyyy-MM-dd HH:00') 
+                ORDER BY timeSlice ASC
+            `);
+
+            // 3. Top Source IPs (if not filtered by IP)
+            const topSourcesRes = await reqDb.query(`
+                SELECT TOP 5 SourceIp, COUNT(*) as count 
+                FROM Logs 
+                WHERE ${baseWhere} AND SourceIp != '0.0.0.0' 
+                GROUP BY SourceIp 
+                ORDER BY count DESC
+            `);
+
+            // 4. Protocols/Vectors Distribution
+            const protocolRes = await reqDb.query(`
+                SELECT Process as name, COUNT(*) as value 
+                FROM Logs 
+                WHERE ${baseWhere} 
+                GROUP BY Process
+            `);
+
+            // 5. Evidence Locker (Sample Logs)
+            const logsRes = await reqDb.query(`
+                SELECT TOP 20 Timestamp, ActorId, Level, Process, Message, SourceIp 
+                FROM Logs 
+                WHERE ${baseWhere} 
+                ORDER BY Timestamp DESC
+            `);
             
             // Populate incident details with real stats
             finalContent.incidentDetails = {
                 ...finalContent.incidentDetails,
                 eventCount: countRes.recordset[0].count,
                 vector: incidentFilters.protocol ? `Protocol: ${incidentFilters.protocol}` : 'Multi-Vector',
-                mitigation: 'See attached log dump.'
+                mitigation: 'Analysis complete. See forensic data below.',
+                timeline: timelineRes.recordset,
+                topSources: topSourcesRes.recordset,
+                protocolDistribution: protocolRes.recordset,
+                evidenceLogs: logsRes.recordset
             };
         }
         

@@ -1,9 +1,12 @@
+
+
 import React, { useState, useEffect, useRef } from 'react';
 import { Report, SystemConfig, User, LogEntry, Actor } from '../types';
 import { getReports, generateReport, getSystemConfig, deleteReport } from '../services/dbService';
 import { generateCustomAiReport } from '../services/aiService';
-import { FileText, Download, Loader, Eye, X, Printer, ShieldCheck, Plus, AlertTriangle, PenTool, Search, Calendar, Server, Filter, Bot, BarChart2, Trash2, Cpu, Network, Key, Save } from 'lucide-react';
+import { FileText, Download, Loader, Eye, X, Printer, ShieldCheck, Plus, AlertTriangle, PenTool, Search, Calendar, Server, Filter, Bot, BarChart2, Trash2, Cpu, Network, Key, Save, AlertOctagon, Target, Hash, Activity } from 'lucide-react';
 import mermaid from 'mermaid';
+import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip, ResponsiveContainer, PieChart, Pie, Cell, Legend } from 'recharts';
 
 interface ReportsProps {
     currentUser?: User | null;
@@ -178,6 +181,99 @@ const Reports: React.FC<ReportsProps> = ({ currentUser, logs = [], actors = [] }
           });
       };
 
+      const renderIncidentCharts = (content: any) => {
+          const timeline = content.incidentDetails?.timeline || [];
+          const protocols = content.incidentDetails?.protocolDistribution || [];
+          const pieColors = ['#0088FE', '#00C49F', '#FFBB28', '#FF8042', '#8884d8'];
+
+          // Fix date rendering for short chart
+          const formattedTimeline = timeline.map((t: any) => ({
+              ...t,
+              time: t.timeSlice ? t.timeSlice.split(' ')[1].substr(0, 5) : '00:00'
+          }));
+
+          return (
+              <div className="space-y-8 my-8 print:break-inside-avoid">
+                  {/* Timeline Chart */}
+                  {timeline.length > 0 && (
+                      <div className="bg-slate-50 border border-slate-200 p-4 rounded-lg">
+                          <h4 className="text-xs font-bold text-slate-500 uppercase mb-4 flex items-center">
+                              <Activity className="w-4 h-4 mr-2" /> Threat Velocity (Events/Hour)
+                          </h4>
+                          <div className="h-48 w-full">
+                              <ResponsiveContainer width="100%" height="100%">
+                                  <AreaChart data={formattedTimeline}>
+                                      <defs>
+                                          <linearGradient id="colorCount" x1="0" y1="0" x2="0" y2="1">
+                                              <stop offset="5%" stopColor="#ef4444" stopOpacity={0.8}/>
+                                              <stop offset="95%" stopColor="#ef4444" stopOpacity={0}/>
+                                          </linearGradient>
+                                      </defs>
+                                      <XAxis dataKey="time" stroke="#94a3b8" fontSize={10} tickLine={false} />
+                                      <YAxis stroke="#94a3b8" fontSize={10} tickLine={false} />
+                                      <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" vertical={false} />
+                                      <RechartsTooltip contentStyle={{ backgroundColor: '#fff', borderColor: '#e2e8f0', fontSize: '12px' }} />
+                                      <Area type="monotone" dataKey="count" stroke="#ef4444" fillOpacity={1} fill="url(#colorCount)" />
+                                  </AreaChart>
+                              </ResponsiveContainer>
+                          </div>
+                      </div>
+                  )}
+
+                  {/* Protocol Distribution */}
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                      {protocols.length > 0 && (
+                          <div className="bg-slate-50 border border-slate-200 p-4 rounded-lg">
+                              <h4 className="text-xs font-bold text-slate-500 uppercase mb-4 flex items-center">
+                                  <Target className="w-4 h-4 mr-2" /> Attack Surface (By Protocol)
+                              </h4>
+                              <div className="h-48 w-full">
+                                  <ResponsiveContainer width="100%" height="100%">
+                                      <PieChart>
+                                          <Pie data={protocols} cx="50%" cy="50%" innerRadius={40} outerRadius={70} fill="#8884d8" paddingAngle={5} dataKey="value">
+                                              {protocols.map((entry: any, index: number) => (
+                                                  <Cell key={`cell-${index}`} fill={pieColors[index % pieColors.length]} />
+                                              ))}
+                                          </Pie>
+                                          <Legend verticalAlign="middle" align="right" layout="vertical" iconSize={8} wrapperStyle={{ fontSize: '10px' }} />
+                                          <RechartsTooltip />
+                                      </PieChart>
+                                  </ResponsiveContainer>
+                              </div>
+                          </div>
+                      )}
+
+                      {/* Top Attackers List */}
+                      {content.incidentDetails?.topSources && (
+                          <div className="bg-slate-50 border border-slate-200 p-4 rounded-lg flex flex-col">
+                              <h4 className="text-xs font-bold text-slate-500 uppercase mb-3 flex items-center">
+                                  <AlertOctagon className="w-4 h-4 mr-2" /> Top Threat Sources
+                              </h4>
+                              <div className="flex-1 overflow-auto">
+                                  <table className="w-full text-xs text-left">
+                                      <thead className="bg-slate-200 text-slate-600">
+                                          <tr><th className="p-2">IP Address</th><th className="p-2 text-right">Volume</th></tr>
+                                      </thead>
+                                      <tbody>
+                                          {content.incidentDetails.topSources.map((src: any, i: number) => (
+                                              <tr key={i} className="border-b border-slate-200 last:border-0">
+                                                  <td className="p-2 font-mono">{src.SourceIp}</td>
+                                                  <td className="p-2 text-right font-bold text-red-600">{src.count}</td>
+                                              </tr>
+                                          ))}
+                                          {content.incidentDetails.topSources.length === 0 && (
+                                              <tr><td colSpan={2} className="p-4 text-center text-slate-400 italic">No IP data available</td></tr>
+                                          )}
+                                      </tbody>
+                                  </table>
+                              </div>
+                          </div>
+                      )}
+                  </div>
+              </div>
+          );
+      };
+
       return (
           <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
               <div className="bg-white text-slate-900 w-full max-w-4xl h-[85vh] rounded-lg shadow-2xl flex flex-col overflow-hidden">
@@ -195,8 +291,8 @@ const Reports: React.FC<ReportsProps> = ({ currentUser, logs = [], actors = [] }
                   </div>
                   
                   {/* Document Page */}
-                  <div className="flex-1 overflow-y-auto bg-slate-500 p-8">
-                      <div className="bg-white max-w-3xl mx-auto shadow-xl min-h-[800px] p-12 relative">
+                  <div className="flex-1 overflow-y-auto bg-slate-500 p-8 print:p-0 print:overflow-visible">
+                      <div className="bg-white max-w-3xl mx-auto shadow-xl min-h-[1000px] p-12 relative print:shadow-none print:w-full print:max-w-none">
                           {/* Header */}
                           <div className="flex justify-between items-start border-b-2 border-slate-800 pb-6 mb-8">
                               <div>
@@ -213,6 +309,7 @@ const Reports: React.FC<ReportsProps> = ({ currentUser, logs = [], actors = [] }
 
                           {/* Title */}
                           <div className="text-center mb-10">
+                              <div className="inline-block bg-slate-100 px-4 py-1 rounded-full text-xs font-bold uppercase tracking-widest text-slate-500 mb-4">{report.type.replace('_', ' ')}</div>
                               <h2 className="text-2xl font-bold text-slate-800 uppercase underline decoration-4 decoration-blue-500 underline-offset-4">{report.title}</h2>
                               <p className="text-slate-500 mt-2 italic">Generated by Officer: {report.generatedBy}</p>
                           </div>
@@ -237,36 +334,49 @@ const Reports: React.FC<ReportsProps> = ({ currentUser, logs = [], actors = [] }
                               </div>
                           )}
 
-                          {/* 2. DATA DRIVEN INCIDENT DETAILS */}
+                          {/* 2. INCIDENT LOG - PROFESSIONAL VISUALIZATION */}
                           {report.type === 'INCIDENT_LOG' && (
-                               <div className="bg-red-50 border border-red-100 p-6 mb-8 rounded">
-                                   <h3 className="text-red-700 font-bold uppercase mb-4 flex items-center"><AlertTriangle className="w-5 h-5 mr-2" /> Incident Filters Applied</h3>
-                                   <div className="grid grid-cols-2 gap-4">
-                                       {report.content.incidentFilters?.attackerIp && (
-                                           <div>
-                                               <div className="text-xs text-red-400 font-bold uppercase">Source IP</div>
-                                               <div className="text-slate-800 font-mono">{report.content.incidentFilters.attackerIp}</div>
-                                           </div>
-                                       )}
-                                       {report.content.incidentFilters?.targetActor && (
-                                           <div>
-                                               <div className="text-xs text-red-400 font-bold uppercase">Target Actor ID</div>
-                                               <div className="text-slate-800 font-mono">{report.content.incidentFilters.targetActor}</div>
-                                           </div>
-                                       )}
-                                       {report.content.incidentFilters?.protocol && (
-                                            <div>
-                                               <div className="text-xs text-red-400 font-bold uppercase">Protocol</div>
-                                               <div className="text-slate-800 font-mono">{report.content.incidentFilters.protocol}</div>
-                                           </div>
-                                       )}
-                                       {report.content.incidentDetails?.eventCount !== undefined && (
-                                            <div>
-                                               <div className="text-xs text-red-400 font-bold uppercase">Matching Events</div>
-                                               <div className="text-slate-800 font-mono text-xl">{report.content.incidentDetails.eventCount}</div>
-                                           </div>
-                                       )}
+                               <div className="mb-8">
+                                   {/* Executive Summary Box */}
+                                   <div className="bg-slate-50 border border-l-4 border-l-red-500 p-6 mb-8 shadow-sm">
+                                       <h3 className="text-slate-700 font-bold uppercase mb-4 flex items-center"><AlertTriangle className="w-5 h-5 mr-2 text-red-500" /> Executive Summary</h3>
+                                       <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
+                                           <div><div className="text-[10px] text-slate-400 font-bold uppercase">Scope</div><div className="font-bold">{report.content.incidentFilters?.dateRange}</div></div>
+                                           <div><div className="text-[10px] text-slate-400 font-bold uppercase">Total Events</div><div className="font-bold text-red-600">{report.content.incidentDetails?.eventCount?.toLocaleString() || 0}</div></div>
+                                           <div><div className="text-[10px] text-slate-400 font-bold uppercase">Target</div><div className="font-mono text-xs">{report.content.incidentFilters?.targetActor || 'All Nodes'}</div></div>
+                                           <div><div className="text-[10px] text-slate-400 font-bold uppercase">Attacker</div><div className="font-mono text-xs">{report.content.incidentFilters?.attackerIp || 'Any'}</div></div>
+                                       </div>
                                    </div>
+
+                                   {/* Charts */}
+                                   {renderIncidentCharts(report.content)}
+
+                                   {/* Forensic Evidence Log Table */}
+                                   {report.content.incidentDetails?.evidenceLogs && report.content.incidentDetails.evidenceLogs.length > 0 && (
+                                       <div className="mt-8">
+                                           <h3 className="text-sm font-bold uppercase border-b border-slate-300 mb-4 pb-1 flex items-center"><Hash className="w-4 h-4 mr-2"/> Forensic Evidence (Sample)</h3>
+                                           <table className="w-full text-xs text-left border-collapse">
+                                               <thead className="bg-slate-100 text-slate-600">
+                                                   <tr>
+                                                       <th className="p-2 border border-slate-200">Timestamp</th>
+                                                       <th className="p-2 border border-slate-200">Level</th>
+                                                       <th className="p-2 border border-slate-200">Process</th>
+                                                       <th className="p-2 border border-slate-200">Message</th>
+                                                   </tr>
+                                               </thead>
+                                               <tbody>
+                                                   {report.content.incidentDetails.evidenceLogs.map((log: any, i: number) => (
+                                                       <tr key={i}>
+                                                           <td className="p-2 border border-slate-200 font-mono whitespace-nowrap">{new Date(log.Timestamp).toLocaleString()}</td>
+                                                           <td className={`p-2 border border-slate-200 font-bold ${log.Level === 'CRITICAL' ? 'text-red-600' : 'text-slate-600'}`}>{log.Level}</td>
+                                                           <td className="p-2 border border-slate-200 font-mono">{log.Process}</td>
+                                                           <td className="p-2 border border-slate-200 font-mono break-all">{log.Message}</td>
+                                                       </tr>
+                                                   ))}
+                                               </tbody>
+                                           </table>
+                                       </div>
+                                   )}
                                </div>
                           )}
                           
@@ -306,14 +416,16 @@ const Reports: React.FC<ReportsProps> = ({ currentUser, logs = [], actors = [] }
                           )}
 
                           {/* 4. BODY TEXT (Summary or Custom/AI with Mermaid) */}
-                          <div className="mb-8">
-                              <h3 className="text-sm font-bold uppercase border-b border-slate-300 mb-4 pb-1">
-                                  {report.type === 'CUSTOM' ? 'Analyst Notes' : report.type === 'AI_INSIGHT' ? 'AI Assessment & Visualization' : report.type === 'FORENSIC_SNAPSHOT' ? 'Artifact Summary' : 'Executive Summary'}
-                              </h3>
-                              <div className="text-sm leading-relaxed text-slate-700 text-justify font-serif">
-                                  {renderBodyWithMermaid(report.content.customBody || report.content.summaryText || '')}
+                          {report.type !== 'INCIDENT_LOG' && (
+                              <div className="mb-8">
+                                  <h3 className="text-sm font-bold uppercase border-b border-slate-300 mb-4 pb-1">
+                                      {report.type === 'CUSTOM' ? 'Analyst Notes' : report.type === 'AI_INSIGHT' ? 'AI Assessment & Visualization' : report.type === 'FORENSIC_SNAPSHOT' ? 'Artifact Summary' : 'Executive Summary'}
+                                  </h3>
+                                  <div className="text-sm leading-relaxed text-slate-700 text-justify font-serif">
+                                      {renderBodyWithMermaid(report.content.customBody || report.content.summaryText || '')}
+                                  </div>
                               </div>
-                          </div>
+                          )}
 
                           {/* 5. TOP ATTACKERS (Only for Audit) */}
                           {report.type === 'SECURITY_AUDIT' && report.content.topAttackers && (
