@@ -1,5 +1,4 @@
 
-
 export enum ActorStatus {
   ONLINE = 'ONLINE',
   OFFLINE = 'OFFLINE',
@@ -80,6 +79,7 @@ export interface Actor {
   // Security Features
   tcpSentinelEnabled?: boolean; // If true, alerts on ANY connection
   physicalAddress?: string; // New field for physical location
+  spectralScore?: number; // 0-100 Hygiene Score
 }
 
 export enum LogLevel {
@@ -192,15 +192,24 @@ export interface RolePermissions {
     // SUPERADMIN always has all
 }
 
+// --- WIRELESS THREAT CONFIG ---
+export interface WirelessThreatConfig {
+    corpSsid: string;
+    allowedBssids: string[]; // Whitelisted MACs for Corp SSID
+    shadowKeywords: string[]; // e.g. "printer", "iphone"
+    minRssiForAlert: number; // e.g. -75
+}
+
 export interface SystemConfig {
   companyName: string;
   domain: string;
   logoUrl?: string;
   setupCompletedAt: string;
   aiConfig?: AiConfig; 
-  syslogConfig?: SyslogConfig; // New field for Syslog
-  targetAgentVersion?: string; // New field for dynamic version control
-  rolePermissions?: RolePermissions; // New field for RBAC
+  syslogConfig?: SyslogConfig; 
+  targetAgentVersion?: string; 
+  rolePermissions?: RolePermissions;
+  wirelessConfig?: WirelessThreatConfig; // NEW
 }
 
 export interface AuthState {

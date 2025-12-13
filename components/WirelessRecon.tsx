@@ -1,9 +1,9 @@
 
 import React, { useState, useEffect, useMemo } from 'react';
-import { WifiNetwork, BluetoothDevice, Actor } from '../types';
-import { getWifiNetworks, getBluetoothDevices } from '../services/dbService';
+import { WifiNetwork, BluetoothDevice, Actor, WirelessThreatConfig, SystemConfig } from '../types';
+import { getWifiNetworks, getBluetoothDevices, getSystemConfig, updateSystemConfig } from '../services/dbService';
 import { generateMockWifi, generateMockBluetooth } from '../services/mockService';
-import { Wifi, Bluetooth, Search, Lock, Monitor, Radio, RefreshCw, AlertTriangle, ChevronLeft, ChevronRight, Layers, ArrowUp, ArrowDown, GripVertical, Factory, Ruler, Signal, Tag, Shield } from 'lucide-react';
+import { Wifi, Bluetooth, Search, Lock, Monitor, Radio, RefreshCw, AlertTriangle, ChevronLeft, ChevronRight, Layers, ArrowUp, ArrowDown, GripVertical, Factory, Ruler, Signal, Tag, Shield, Activity, Save, Settings, Info, Siren } from 'lucide-react';
 
 interface WirelessReconProps {
     isProduction: boolean;
@@ -63,29 +63,20 @@ const resolveVendor = (mac: string) => {
     if (!mac) return 'Unknown';
     const cleanMac = mac.toUpperCase().replace(/-/g, ':');
     const prefix = cleanMac.substring(0, 8);
-    
-    // Check DB
     if (OUI_DB[prefix]) return OUI_DB[prefix];
-    
-    // Check Locally Administered Bit (2nd least significant bit of first byte)
-    // 2, 6, A, E as second char usually indicates randomized/local
     const firstByte = parseInt(cleanMac.substring(0, 2), 16);
     if (!isNaN(firstByte) && (firstByte & 0b10)) {
         return 'Randomized / Private';
     }
-    
     return 'Generic / Unknown';
 };
 
 const estimateDistance = (rssi: number) => {
     if (rssi === 0 || rssi < -100) return 'Unknown';
-    // Rough FSPL calculation
-    // txPower ~ -40dBm (reference at 1m), n ~ 2.5 (indoor/mixed)
     const txPower = -40;
     const n = 2.5; 
     const ratio = (txPower - rssi) / (10 * n);
     const dist = Math.pow(10, ratio);
-    
     if (dist < 1.0) return '< 1m';
     if (dist > 50) return '> 50m';
     return `~${dist.toFixed(1)}m`;
@@ -94,27 +85,31 @@ const estimateDistance = (rssi: number) => {
 const getBand = (channel: number) => {
     if (channel >= 1 && channel <= 14) return '2.4 GHz';
     if (channel >= 36 && channel <= 177) return '5 GHz';
-    if (channel > 177) return '6 GHz'; // Rough check
+    if (channel > 177) return '6 GHz';
     return 'Unknown';
 };
 
 const WirelessRecon: React.FC<WirelessReconProps> = ({ isProduction, actors }) => {
-    const [activeTab, setActiveTab] = useState<'WIFI' | 'BLUETOOTH'>('WIFI');
+    const [activeTab, setActiveTab] = useState<'WIFI' | 'BLUETOOTH' | 'ANALYSIS'>('WIFI');
     const [wifiList, setWifiList] = useState<WifiNetwork[]>([]);
     const [btList, setBtList] = useState<BluetoothDevice[]>([]);
     const [search, setSearch] = useState('');
     const [isLoading, setIsLoading] = useState(false);
     const [currentPage, setCurrentPage] = useState(1);
-
-    // Sorting State
     const [sortConfig, setSortConfig] = useState<{ key: string, direction: 'asc' | 'desc' }>({ key: 'signal', direction: 'desc' });
-
-    // Column Order State
     const [wifiColumns, setWifiColumns] = useState(DEFAULT_WIFI_COLUMNS);
     const [btColumns, setBtColumns] = useState(DEFAULT_BT_COLUMNS);
-    
-    // Drag State
     const [draggedColumnIndex, setDraggedColumnIndex] = useState<number | null>(null);
+
+    // Analysis Config State
+    const [threatConfig, setThreatConfig] = useState<WirelessThreatConfig>({
+        corpSsid: '',
+        allowedBssids: [],
+        shadowKeywords: ['printer', 'hp', 'canon', 'direct', 'iphone', 'android'],
+        minRssiForAlert: -75
+    });
+    const [isSavingConfig, setIsSavingConfig] = useState(false);
+    const [sysConfig, setSysConfig] = useState<SystemConfig | null>(null);
 
     const activeColumns = activeTab === 'WIFI' ? wifiColumns : btColumns;
     const setActiveColumns = activeTab === 'WIFI' ? setWifiColumns : setBtColumns;
@@ -123,21 +118,30 @@ const WirelessRecon: React.FC<WirelessReconProps> = ({ isProduction, actors }) =
         setIsLoading(true);
         try {
             if (isProduction) {
-                if (activeTab === 'WIFI') {
+                // Load Threat Config on refresh
+                const cfg = await getSystemConfig();
+                if (cfg) {
+                    setSysConfig(cfg);
+                    if (cfg.wirelessConfig) setThreatConfig(cfg.wirelessConfig);
+                }
+
+                if (activeTab === 'WIFI' || activeTab === 'ANALYSIS') {
                     const data = await getWifiNetworks();
                     setWifiList(data);
-                } else {
+                }
+                if (activeTab === 'BLUETOOTH') {
                     const data = await getBluetoothDevices();
                     setBtList(data);
                 }
             } else {
                 // Mock Mode
-                if (activeTab === 'WIFI') {
+                if (activeTab === 'WIFI' || activeTab === 'ANALYSIS') {
                     if (wifiList.length === 0 || force) {
                         const mockData = generateMockWifi(actors);
                         if (mockData.length > 0) setWifiList(mockData);
                     }
-                } else {
+                }
+                if (activeTab === 'BLUETOOTH') {
                     if (btList.length === 0 || force) {
                         const mockData = generateMockBluetooth(actors);
                         if (mockData.length > 0) setBtList(mockData);
@@ -156,19 +160,22 @@ const WirelessRecon: React.FC<WirelessReconProps> = ({ isProduction, actors }) =
         return () => clearInterval(interval);
     }, [activeTab, isProduction]);
 
-    // Reset pagination when tab or search changes
     useEffect(() => {
         setCurrentPage(1);
-        setSortConfig({ key: 'signal', direction: 'desc' }); // Reset sort on tab change
+        setSortConfig({ key: 'signal', direction: 'desc' });
     }, [activeTab, search]);
 
-    useEffect(() => {
-        if (actors.length > 0) {
-            if ((activeTab === 'WIFI' && wifiList.length === 0) || (activeTab === 'BLUETOOTH' && btList.length === 0)) {
-                loadData(true);
-            }
+    const handleSaveThreatConfig = async () => {
+        if (!sysConfig) return;
+        setIsSavingConfig(true);
+        const updatedConfig = { ...sysConfig, wirelessConfig: threatConfig };
+        if (isProduction) {
+            await updateSystemConfig(updatedConfig);
         }
-    }, [actors, activeTab]);
+        setSysConfig(updatedConfig);
+        setIsSavingConfig(false);
+        alert("Threat Detection Policies Updated.");
+    };
 
     const handleSort = (key: string) => {
         setSortConfig(current => {
@@ -186,26 +193,30 @@ const WirelessRecon: React.FC<WirelessReconProps> = ({ isProduction, actors }) =
     };
 
     const handleDragOver = (e: React.DragEvent, index: number) => {
-        e.preventDefault(); // Necessary to allow dropping
+        e.preventDefault();
         e.dataTransfer.dropEffect = "move";
     };
 
     const handleDrop = (e: React.DragEvent, dropIndex: number) => {
         e.preventDefault();
         if (draggedColumnIndex === null || draggedColumnIndex === dropIndex) return;
-
         const newColumns = [...activeColumns];
         const [movedColumn] = newColumns.splice(draggedColumnIndex, 1);
         newColumns.splice(dropIndex, 0, movedColumn);
-        
         setActiveColumns(newColumns);
         setDraggedColumnIndex(null);
     };
 
+    // --- Analysis Logic ---
+    const analysisResults = useMemo(() => {
+        const evilTwins = wifiList.filter(n => threatConfig.corpSsid && n.ssid === threatConfig.corpSsid && !threatConfig.allowedBssids.includes(n.bssid));
+        const shadowIT = wifiList.filter(n => threatConfig.shadowKeywords.some(k => n.ssid?.toLowerCase().includes(k.toLowerCase())) && n.signalStrength > threatConfig.minRssiForAlert);
+        
+        return { evilTwins, shadowIT };
+    }, [wifiList, threatConfig]);
+
     const processData = useMemo(() => {
         let rawList: any[] = activeTab === 'WIFI' ? wifiList : btList;
-        
-        // 1. Deduplication
         const uniqueMap = new Map<string, any>();
 
         rawList.forEach(item => {
@@ -229,33 +240,22 @@ const WirelessRecon: React.FC<WirelessReconProps> = ({ isProduction, actors }) =
         });
 
         const uniqueList = Array.from(uniqueMap.values());
-
-        // 2. Filtering
         const filtered = uniqueList.filter(item => {
             const s = search.toLowerCase();
             if (activeTab === 'WIFI') {
                 const w = item as WifiNetwork;
-                return (w.ssid || '').toLowerCase().includes(s) || 
-                       (w.bssid || '').toLowerCase().includes(s) ||
-                       (w.actorName || '').toLowerCase().includes(s);
+                return (w.ssid || '').toLowerCase().includes(s) || (w.bssid || '').toLowerCase().includes(s) || (w.actorName || '').toLowerCase().includes(s);
             } else {
                 const b = item as BluetoothDevice;
-                return (b.name || '').toLowerCase().includes(s) || 
-                       (b.mac || '').toLowerCase().includes(s) ||
-                       (b.actorName || '').toLowerCase().includes(s);
+                return (b.name || '').toLowerCase().includes(s) || (b.mac || '').toLowerCase().includes(s) || (b.actorName || '').toLowerCase().includes(s);
             }
         });
 
-        // 3. Sorting
         return filtered.sort((a, b) => {
             const dir = sortConfig.direction === 'asc' ? 1 : -1;
-            let valA: any = '';
-            let valB: any = '';
-
-            // Extract values based on column key
+            let valA: any = '', valB: any = '';
             if (activeTab === 'WIFI') {
-                const wA = a as WifiNetwork;
-                const wB = b as WifiNetwork;
+                const wA = a as WifiNetwork, wB = b as WifiNetwork;
                 switch (sortConfig.key) {
                     case 'signal': valA = wA.signalStrength; valB = wB.signalStrength; break;
                     case 'name': valA = wA.ssid || ''; valB = wB.ssid || ''; break;
@@ -268,8 +268,7 @@ const WirelessRecon: React.FC<WirelessReconProps> = ({ isProduction, actors }) =
                     default: return 0;
                 }
             } else {
-                const bA = a as BluetoothDevice;
-                const bB = b as BluetoothDevice;
+                const bA = a as BluetoothDevice, bB = b as BluetoothDevice;
                 switch (sortConfig.key) {
                     case 'signal': valA = bA.rssi; valB = bB.rssi; break;
                     case 'name': valA = bA.name || ''; valB = bB.name || ''; break;
@@ -281,21 +280,14 @@ const WirelessRecon: React.FC<WirelessReconProps> = ({ isProduction, actors }) =
                     default: return 0;
                 }
             }
-
-            // Compare
             if (valA < valB) return -1 * dir;
             if (valA > valB) return 1 * dir;
             return 0;
         });
-
     }, [wifiList, btList, activeTab, search, sortConfig]);
 
-    // Pagination Logic
     const totalPages = Math.ceil(processData.length / ITEMS_PER_PAGE);
-    const paginatedData = processData.slice(
-        (currentPage - 1) * ITEMS_PER_PAGE,
-        currentPage * ITEMS_PER_PAGE
-    );
+    const paginatedData = processData.slice((currentPage - 1) * ITEMS_PER_PAGE, currentPage * ITEMS_PER_PAGE);
 
     const getSignalColor = (dbm: number) => {
         if (dbm > -50) return 'text-emerald-400';
@@ -308,7 +300,6 @@ const WirelessRecon: React.FC<WirelessReconProps> = ({ isProduction, actors }) =
         if (dbm > -80) bars = 2;
         if (dbm > -70) bars = 3;
         if (dbm > -50) bars = 4;
-        
         return (
             <div className="flex items-end space-x-0.5 h-4">
                 <div className={`w-1 rounded-sm ${bars >= 1 ? getSignalColor(dbm) : 'bg-slate-700'} h-1`}></div>
@@ -320,114 +311,32 @@ const WirelessRecon: React.FC<WirelessReconProps> = ({ isProduction, actors }) =
     };
 
     const renderCell = (item: any, columnId: string) => {
+        // ... (Existing renderCell logic for WIFI/BT columns remains mostly same)
+        // Re-using existing logic for brevity since it was perfect
         if (activeTab === 'WIFI') {
             const net = item as WifiNetwork;
             switch (columnId) {
-                case 'signal':
-                    return (
-                        <div className="flex flex-col" title={`${net.signalStrength} dBm`}>
-                            <div className="flex items-center space-x-2">
-                                {getSignalBars(net.signalStrength)}
-                                <span className="text-xs font-mono text-slate-500">{net.signalStrength}</span>
-                            </div>
-                            <div className="flex items-center text-[10px] text-slate-500 mt-0.5">
-                                <Ruler className="w-2.5 h-2.5 mr-1" /> {estimateDistance(net.signalStrength)}
-                            </div>
-                        </div>
-                    );
-                case 'name':
-                    return (
-                        <span className="font-bold text-white">
-                            {net.ssid || <span className="text-slate-600 italic">&lt;Hidden SSID&gt;</span>}
-                        </span>
-                    );
-                case 'mac':
-                    return <span className="font-mono text-slate-400 text-xs bg-slate-900 px-1 rounded">{net.bssid}</span>;
-                case 'vendor':
-                    const vendor = resolveVendor(net.bssid);
-                    return (
-                        <div className="flex items-center text-xs text-slate-300">
-                            <Factory className={`w-3 h-3 mr-1.5 ${vendor.includes('Unknown') ? 'text-slate-600' : 'text-purple-400'}`} />
-                            {vendor}
-                        </div>
-                    );
-                case 'channel':
-                    const band = getBand(net.channel);
-                    return (
-                        <div>
-                            <div className="flex items-center text-xs font-bold text-white">
-                                <Signal className="w-3 h-3 mr-1 text-slate-500"/> {band}
-                            </div>
-                            <span className="text-[10px] text-slate-500 ml-4">Channel {net.channel}</span>
-                        </div>
-                    );
-                case 'security':
-                    return (
-                        <span className={`text-xs font-bold px-2 py-0.5 rounded border ${net.security === 'OPEN' ? 'text-red-400 border-red-900/50 bg-red-900/20' : 'text-emerald-400 border-emerald-900/50 bg-emerald-900/20'}`}>
-                            {net.security === 'OPEN' ? <span className="flex items-center"><Lock className="w-3 h-3 mr-1"/> OPEN</span> : net.security}
-                        </span>
-                    );
-                case 'actor':
-                    return (
-                        <div className="flex items-center text-xs text-slate-300">
-                            <Monitor className="w-3 h-3 mr-1.5 text-cyan-500" />
-                            {net.actorName}
-                        </div>
-                    );
-                case 'time':
-                    return <span className="text-right text-xs text-slate-500 font-mono">{new Date(net.lastSeen).toLocaleTimeString()}</span>;
-                default:
-                    return null;
+                case 'signal': return (<div className="flex flex-col" title={`${net.signalStrength} dBm`}><div className="flex items-center space-x-2">{getSignalBars(net.signalStrength)}<span className="text-xs font-mono text-slate-500">{net.signalStrength}</span></div><div className="flex items-center text-[10px] text-slate-500 mt-0.5"><Ruler className="w-2.5 h-2.5 mr-1" /> {estimateDistance(net.signalStrength)}</div></div>);
+                case 'name': return (<span className="font-bold text-white">{net.ssid || <span className="text-slate-600 italic">&lt;Hidden SSID&gt;</span>}</span>);
+                case 'mac': return <span className="font-mono text-slate-400 text-xs bg-slate-900 px-1 rounded">{net.bssid}</span>;
+                case 'vendor': const vendor = resolveVendor(net.bssid); return (<div className="flex items-center text-xs text-slate-300"><Factory className={`w-3 h-3 mr-1.5 ${vendor.includes('Unknown') ? 'text-slate-600' : 'text-purple-400'}`} />{vendor}</div>);
+                case 'channel': const band = getBand(net.channel); return (<div><div className="flex items-center text-xs font-bold text-white"><Signal className="w-3 h-3 mr-1 text-slate-500"/> {band}</div><span className="text-[10px] text-slate-500 ml-4">Channel {net.channel}</span></div>);
+                case 'security': return (<span className={`text-xs font-bold px-2 py-0.5 rounded border ${net.security === 'OPEN' ? 'text-red-400 border-red-900/50 bg-red-900/20' : 'text-emerald-400 border-emerald-900/50 bg-emerald-900/20'}`}>{net.security === 'OPEN' ? <span className="flex items-center"><Lock className="w-3 h-3 mr-1"/> OPEN</span> : net.security}</span>);
+                case 'actor': return (<div className="flex items-center text-xs text-slate-300"><Monitor className="w-3 h-3 mr-1.5 text-cyan-500" />{net.actorName}</div>);
+                case 'time': return <span className="text-right text-xs text-slate-500 font-mono">{new Date(net.lastSeen).toLocaleTimeString()}</span>;
+                default: return null;
             }
         } else {
             const bt = item as BluetoothDevice;
             switch (columnId) {
-                case 'signal':
-                    return (
-                        <div className="flex flex-col" title={`${bt.rssi} dBm`}>
-                            <div className="flex items-center space-x-2">
-                                {getSignalBars(bt.rssi)}
-                                <span className="text-xs font-mono text-slate-500">{bt.rssi}</span>
-                            </div>
-                            <div className="flex items-center text-[10px] text-slate-500 mt-0.5">
-                                <Ruler className="w-2.5 h-2.5 mr-1" /> {estimateDistance(bt.rssi)}
-                            </div>
-                        </div>
-                    );
-                case 'name':
-                    return (
-                        <span className="font-bold text-white">
-                            {bt.name || <span className="text-slate-600 italic">Unknown Device</span>}
-                        </span>
-                    );
-                case 'mac':
-                     return <span className="font-mono text-slate-400 text-xs bg-slate-900 px-1 rounded">{bt.mac}</span>;
-                case 'vendor':
-                    const vendor = resolveVendor(bt.mac);
-                    return (
-                        <div className="flex items-center text-xs text-slate-300">
-                            <Factory className={`w-3 h-3 mr-1.5 ${vendor.includes('Unknown') ? 'text-slate-600' : 'text-purple-400'}`} />
-                            {vendor}
-                        </div>
-                    );
-                case 'type':
-                    return (
-                         <span className="px-2 py-0.5 rounded bg-blue-900/30 text-blue-400 text-[10px] border border-blue-800 flex items-center w-fit">
-                            <Tag className="w-3 h-3 mr-1" />
-                            {bt.type}
-                        </span>
-                    );
-                case 'actor':
-                    return (
-                        <div className="flex items-center text-xs text-slate-300">
-                            <Monitor className="w-3 h-3 mr-1.5 text-cyan-500" />
-                            {bt.actorName}
-                        </div>
-                    );
-                case 'time':
-                    return <span className="text-right text-xs text-slate-500 font-mono">{new Date(bt.lastSeen).toLocaleTimeString()}</span>;
-                default:
-                    return null;
+                case 'signal': return (<div className="flex flex-col" title={`${bt.rssi} dBm`}><div className="flex items-center space-x-2">{getSignalBars(bt.rssi)}<span className="text-xs font-mono text-slate-500">{bt.rssi}</span></div><div className="flex items-center text-[10px] text-slate-500 mt-0.5"><Ruler className="w-2.5 h-2.5 mr-1" /> {estimateDistance(bt.rssi)}</div></div>);
+                case 'name': return (<span className="font-bold text-white">{bt.name || <span className="text-slate-600 italic">Unknown Device</span>}</span>);
+                case 'mac': return <span className="font-mono text-slate-400 text-xs bg-slate-900 px-1 rounded">{bt.mac}</span>;
+                case 'vendor': const vendor = resolveVendor(bt.mac); return (<div className="flex items-center text-xs text-slate-300"><Factory className={`w-3 h-3 mr-1.5 ${vendor.includes('Unknown') ? 'text-slate-600' : 'text-purple-400'}`} />{vendor}</div>);
+                case 'type': return (<span className="px-2 py-0.5 rounded bg-blue-900/30 text-blue-400 text-[10px] border border-blue-800 flex items-center w-fit"><Tag className="w-3 h-3 mr-1" />{bt.type}</span>);
+                case 'actor': return (<div className="flex items-center text-xs text-slate-300"><Monitor className="w-3 h-3 mr-1.5 text-cyan-500" />{bt.actorName}</div>);
+                case 'time': return <span className="text-right text-xs text-slate-500 font-mono">{new Date(bt.lastSeen).toLocaleTimeString()}</span>;
+                default: return null;
             }
         }
     };
@@ -446,138 +355,167 @@ const WirelessRecon: React.FC<WirelessReconProps> = ({ isProduction, actors }) =
                 </div>
                 
                 <div className="flex bg-slate-800 rounded-lg p-1 border border-slate-700">
-                    <button 
-                        onClick={() => setActiveTab('WIFI')}
-                        className={`px-4 py-2 rounded text-sm font-bold flex items-center transition-all ${activeTab === 'WIFI' ? 'bg-cyan-600 text-white shadow-lg' : 'text-slate-400 hover:text-white'}`}
-                    >
-                        <Wifi className="w-4 h-4 mr-2" />
-                        Wi-Fi Networks
-                    </button>
-                    <button 
-                        onClick={() => setActiveTab('BLUETOOTH')}
-                        className={`px-4 py-2 rounded text-sm font-bold flex items-center transition-all ${activeTab === 'BLUETOOTH' ? 'bg-blue-600 text-white shadow-lg' : 'text-slate-400 hover:text-white'}`}
-                    >
-                        <Bluetooth className="w-4 h-4 mr-2" />
-                        Bluetooth Devices
-                    </button>
+                    <button onClick={() => setActiveTab('WIFI')} className={`px-4 py-2 rounded text-sm font-bold flex items-center transition-all ${activeTab === 'WIFI' ? 'bg-cyan-600 text-white shadow-lg' : 'text-slate-400 hover:text-white'}`}><Wifi className="w-4 h-4 mr-2" /> Wi-Fi Networks</button>
+                    <button onClick={() => setActiveTab('BLUETOOTH')} className={`px-4 py-2 rounded text-sm font-bold flex items-center transition-all ${activeTab === 'BLUETOOTH' ? 'bg-blue-600 text-white shadow-lg' : 'text-slate-400 hover:text-white'}`}><Bluetooth className="w-4 h-4 mr-2" /> Bluetooth Devices</button>
+                    <button onClick={() => setActiveTab('ANALYSIS')} className={`px-4 py-2 rounded text-sm font-bold flex items-center transition-all ${activeTab === 'ANALYSIS' ? 'bg-red-600 text-white shadow-lg' : 'text-slate-400 hover:text-white'}`}><Activity className="w-4 h-4 mr-2" /> Spectral Analysis</button>
                 </div>
             </div>
 
-            {/* Search & Stats Bar */}
-            <div className="bg-slate-800 p-4 rounded-xl border border-slate-700 flex flex-col md:flex-row justify-between items-center gap-4">
-                <div className="relative w-full md:w-96">
-                    <Search className="absolute left-3 top-3 w-4 h-4 text-slate-500" />
-                    <input 
-                        type="text" 
-                        placeholder={`Search ${activeTab === 'WIFI' ? 'SSID, BSSID' : 'Device Name, MAC'}...`}
-                        className="w-full bg-slate-900 border border-slate-600 rounded-lg py-2.5 pl-10 text-sm text-white focus:border-cyan-500 outline-none"
-                        value={search}
-                        onChange={(e) => setSearch(e.target.value)}
-                    />
-                </div>
-                <div className="flex items-center space-x-6 text-sm text-slate-400">
-                    <div className="flex items-center">
-                        <span className="text-white font-bold text-lg mr-2">
-                            {processData.length}
-                        </span>
-                        Unique Targets
+            {/* SPECTRAL ANALYSIS DASHBOARD */}
+            {activeTab === 'ANALYSIS' && (
+                <div className="space-y-6">
+                    {/* 1. Scoreboard */}
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                        <div className="bg-slate-800 rounded-xl border border-slate-700 p-6 shadow-lg flex flex-col justify-center">
+                            <h3 className="text-slate-400 font-bold uppercase text-xs mb-4 flex items-center"><Shield className="w-4 h-4 mr-2"/> Fleet Hygiene Score</h3>
+                            <div className="flex items-center space-x-4">
+                                <div className="text-4xl font-bold text-white">
+                                    {Math.round(actors.reduce((acc, a) => acc + (a.spectralScore || 100), 0) / (actors.length || 1))}
+                                    <span className="text-sm text-slate-500 ml-1">/ 100</span>
+                                </div>
+                                <div className="h-2 flex-1 bg-slate-700 rounded-full overflow-hidden">
+                                    <div className="h-full bg-gradient-to-r from-red-500 via-yellow-500 to-emerald-500" style={{ width: `${Math.round(actors.reduce((acc, a) => acc + (a.spectralScore || 100), 0) / (actors.length || 1))}%` }}></div>
+                                </div>
+                            </div>
+                        </div>
+                        <div className={`rounded-xl border p-6 shadow-lg flex flex-col justify-center ${analysisResults.evilTwins.length > 0 ? 'bg-red-900/20 border-red-500' : 'bg-slate-800 border-slate-700'}`}>
+                            <h3 className={`font-bold uppercase text-xs mb-2 flex items-center ${analysisResults.evilTwins.length > 0 ? 'text-red-400' : 'text-slate-400'}`}><Siren className="w-4 h-4 mr-2"/> Evil Twin Detection</h3>
+                            <div className="text-3xl font-bold text-white">{analysisResults.evilTwins.length} <span className="text-sm font-normal text-slate-400">Threats</span></div>
+                            <p className="text-xs text-slate-500 mt-1">Rogue APs mimicking "{threatConfig.corpSsid}"</p>
+                        </div>
+                        <div className={`rounded-xl border p-6 shadow-lg flex flex-col justify-center ${analysisResults.shadowIT.length > 0 ? 'bg-yellow-900/20 border-yellow-500' : 'bg-slate-800 border-slate-700'}`}>
+                            <h3 className={`font-bold uppercase text-xs mb-2 flex items-center ${analysisResults.shadowIT.length > 0 ? 'text-yellow-400' : 'text-slate-400'}`}><AlertTriangle className="w-4 h-4 mr-2"/> Shadow IT Indicators</h3>
+                            <div className="text-3xl font-bold text-white">{analysisResults.shadowIT.length} <span className="text-sm font-normal text-slate-400">Matches</span></div>
+                            <p className="text-xs text-slate-500 mt-1">Unauthorized hotspots or peripherals</p>
+                        </div>
                     </div>
-                    <button onClick={() => loadData(true)} className="p-2 bg-slate-700 hover:bg-slate-600 rounded-full text-white transition-colors" title="Force Refresh">
-                        <RefreshCw className={`w-4 h-4 ${isLoading ? 'animate-spin' : ''}`} />
-                    </button>
-                </div>
-            </div>
 
-            {/* Production Error Warning */}
-            {isProduction && (wifiList.length === 0 && btList.length === 0) && (
-                <div className="bg-yellow-500/10 border border-yellow-500/30 p-4 rounded-lg flex items-center text-yellow-200 text-sm">
-                    <AlertTriangle className="w-5 h-5 mr-3 text-yellow-500" />
-                    <div>
-                        <span className="font-bold">No Data Available.</span> If scanning is enabled, ensure Agents are online and VPP-Server is reachable.
+                    {/* 2. Detected Threats Table */}
+                    {(analysisResults.evilTwins.length > 0 || analysisResults.shadowIT.length > 0) && (
+                        <div className="bg-slate-900 border border-slate-700 rounded-xl overflow-hidden">
+                            <div className="bg-red-900/20 p-3 border-b border-slate-700 flex items-center text-red-300 font-bold text-sm">
+                                <AlertTriangle className="w-4 h-4 mr-2" /> Live Threats Detected
+                            </div>
+                            <table className="w-full text-left text-xs">
+                                <thead className="bg-slate-900 text-slate-500"><tr><th className="p-3">Type</th><th className="p-3">SSID</th><th className="p-3">BSSID</th><th className="p-3">Signal</th><th className="p-3">Detected By</th></tr></thead>
+                                <tbody className="divide-y divide-slate-800 bg-slate-800/50">
+                                    {analysisResults.evilTwins.map((net, i) => (
+                                        <tr key={i} className="hover:bg-red-900/10">
+                                            <td className="p-3 font-bold text-red-500">EVIL TWIN</td>
+                                            <td className="p-3 text-white">{net.ssid}</td>
+                                            <td className="p-3 font-mono text-slate-400">{net.bssid}</td>
+                                            <td className="p-3 text-red-400 font-bold">{net.signalStrength} dBm</td>
+                                            <td className="p-3 text-blue-300">{net.actorName}</td>
+                                        </tr>
+                                    ))}
+                                    {analysisResults.shadowIT.map((net, i) => (
+                                        <tr key={i} className="hover:bg-yellow-900/10">
+                                            <td className="p-3 font-bold text-yellow-500">SHADOW IT</td>
+                                            <td className="p-3 text-white">{net.ssid}</td>
+                                            <td className="p-3 font-mono text-slate-400">{net.bssid}</td>
+                                            <td className="p-3 text-yellow-400">{net.signalStrength} dBm</td>
+                                            <td className="p-3 text-blue-300">{net.actorName}</td>
+                                        </tr>
+                                    ))}
+                                </tbody>
+                            </table>
+                        </div>
+                    )}
+
+                    {/* 3. Configuration Panel */}
+                    <div className="bg-slate-800 rounded-xl border border-slate-700 p-6 shadow-lg">
+                        <h3 className="text-lg font-bold text-white mb-4 flex items-center"><Settings className="w-5 h-5 mr-2 text-slate-400"/> Threat Policy Configuration</h3>
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                            <div className="space-y-4">
+                                <div>
+                                    <label className="block text-slate-500 text-xs font-bold uppercase mb-1">Corporate SSID</label>
+                                    <input className="w-full bg-slate-900 border border-slate-600 rounded p-2 text-white outline-none text-sm" placeholder="e.g. Corp-Wifi-Secure" value={threatConfig.corpSsid} onChange={e => setThreatConfig({...threatConfig, corpSsid: e.target.value})} />
+                                    <p className="text-[10px] text-slate-500 mt-1">Networks with this name but unknown BSSIDs will be flagged as Evil Twins.</p>
+                                </div>
+                                <div>
+                                    <label className="block text-slate-500 text-xs font-bold uppercase mb-1">Shadow IT Keywords (Comma Separated)</label>
+                                    <input className="w-full bg-slate-900 border border-slate-600 rounded p-2 text-white outline-none text-sm" placeholder="e.g. printer, iphone, direct" value={threatConfig.shadowKeywords.join(', ')} onChange={e => setThreatConfig({...threatConfig, shadowKeywords: e.target.value.split(',').map(s => s.trim())})} />
+                                </div>
+                            </div>
+                            <div className="space-y-4">
+                                <div>
+                                    <label className="block text-slate-500 text-xs font-bold uppercase mb-1">Whitelisted BSSIDs (Comma Separated)</label>
+                                    <textarea className="w-full bg-slate-900 border border-slate-600 rounded p-2 text-white outline-none text-xs font-mono h-24" placeholder="00:11:22:33:44:55, AA:BB:CC..." value={threatConfig.allowedBssids.join(', ')} onChange={e => setThreatConfig({...threatConfig, allowedBssids: e.target.value.split(',').map(s => s.trim())})} />
+                                </div>
+                                <div className="flex justify-end pt-2">
+                                    <button onClick={handleSaveThreatConfig} disabled={isSavingConfig} className="bg-blue-600 hover:bg-blue-500 text-white px-4 py-2 rounded font-bold text-sm flex items-center shadow-lg transition-colors">
+                                        {isSavingConfig ? <RefreshCw className="w-4 h-4 mr-2 animate-spin"/> : <Save className="w-4 h-4 mr-2"/>}
+                                        Save Policy
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
                     </div>
                 </div>
             )}
 
-            {/* Data Grid */}
-            <div className="bg-slate-800 rounded-xl border border-slate-700 overflow-hidden shadow-lg flex flex-col min-h-[400px]">
-                <div className="flex-1 overflow-x-auto">
-                    <table className="w-full text-left text-sm">
-                        <thead className="bg-slate-900 text-slate-400 border-b border-slate-700 select-none">
-                            <tr>
-                                {activeColumns.map((col, index) => (
-                                    <th 
-                                        key={col.id}
-                                        draggable
-                                        onDragStart={(e) => handleDragStart(e, index)}
-                                        onDragOver={(e) => handleDragOver(e, index)}
-                                        onDrop={(e) => handleDrop(e, index)}
-                                        onClick={() => handleSort(col.id)}
-                                        className={`p-4 font-bold uppercase text-xs cursor-pointer hover:bg-slate-800 hover:text-white transition-colors group ${draggedColumnIndex === index ? 'opacity-50 bg-slate-800' : ''}`}
-                                    >
-                                        <div className="flex items-center justify-between">
-                                            <div className="flex items-center">
-                                                <GripVertical className="w-3 h-3 mr-2 text-slate-600 cursor-grab active:cursor-grabbing opacity-0 group-hover:opacity-100 transition-opacity" />
-                                                {col.label}
-                                            </div>
-                                            {sortConfig.key === col.id && (
-                                                sortConfig.direction === 'asc' 
-                                                ? <ArrowUp className="w-3 h-3 text-cyan-400" /> 
-                                                : <ArrowDown className="w-3 h-3 text-cyan-400" />
-                                            )}
-                                        </div>
-                                    </th>
-                                ))}
-                            </tr>
-                        </thead>
-                        <tbody className="divide-y divide-slate-700/50">
-                            {paginatedData.length === 0 ? (
-                                <tr>
-                                    <td colSpan={activeColumns.length} className="p-12 text-center text-slate-500 italic">
-                                        <Layers className="w-10 h-10 mx-auto mb-2 opacity-20" />
-                                        No unique {activeTab === 'WIFI' ? 'Wi-Fi networks' : 'Bluetooth devices'} found.
-                                    </td>
-                                </tr>
-                            ) : (
-                                paginatedData.map((item, idx) => (
-                                    <tr key={`${(item as any).id}-${idx}`} className="hover:bg-slate-700/30 transition-colors group">
-                                        {activeColumns.map(col => (
-                                            <td key={col.id} className="p-4">
-                                                {renderCell(item, col.id)}
-                                            </td>
-                                        ))}
-                                    </tr>
-                                ))
-                            )}
-                        </tbody>
-                    </table>
-                </div>
-
-                {/* Pagination Footer */}
-                {processData.length > 0 && (
-                    <div className="bg-slate-900/50 p-3 border-t border-slate-700 flex justify-between items-center text-xs">
-                        <div className="text-slate-400">
-                            Showing <span className="text-white font-bold">{(currentPage - 1) * ITEMS_PER_PAGE + 1}</span> to <span className="text-white font-bold">{Math.min(currentPage * ITEMS_PER_PAGE, processData.length)}</span> of <span className="text-white font-bold">{processData.length}</span> unique results
+            {/* Standard Search Bar (Only for WIFI/BT tabs) */}
+            {activeTab !== 'ANALYSIS' && (
+                <>
+                    <div className="bg-slate-800 p-4 rounded-xl border border-slate-700 flex flex-col md:flex-row justify-between items-center gap-4">
+                        <div className="relative w-full md:w-96">
+                            <Search className="absolute left-3 top-3 w-4 h-4 text-slate-500" />
+                            <input type="text" placeholder={`Search ${activeTab === 'WIFI' ? 'SSID, BSSID' : 'Device Name, MAC'}...`} className="w-full bg-slate-900 border border-slate-600 rounded-lg py-2.5 pl-10 text-sm text-white focus:border-cyan-500 outline-none" value={search} onChange={(e) => setSearch(e.target.value)} />
                         </div>
-                        <div className="flex items-center space-x-2">
-                            <button 
-                                onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
-                                disabled={currentPage === 1}
-                                className="p-1 rounded bg-slate-800 border border-slate-600 text-slate-300 hover:text-white hover:border-cyan-500 disabled:opacity-50 disabled:hover:border-slate-600 transition-colors"
-                            >
-                                <ChevronLeft className="w-4 h-4" />
-                            </button>
-                            <span className="text-slate-400 font-mono">Page {currentPage} / {totalPages}</span>
-                            <button 
-                                onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
-                                disabled={currentPage === totalPages}
-                                className="p-1 rounded bg-slate-800 border border-slate-600 text-slate-300 hover:text-white hover:border-cyan-500 disabled:opacity-50 disabled:hover:border-slate-600 transition-colors"
-                            >
-                                <ChevronRight className="w-4 h-4" />
-                            </button>
+                        <div className="flex items-center space-x-6 text-sm text-slate-400">
+                            <div className="flex items-center"><span className="text-white font-bold text-lg mr-2">{processData.length}</span> Unique Targets</div>
+                            <button onClick={() => loadData(true)} className="p-2 bg-slate-700 hover:bg-slate-600 rounded-full text-white transition-colors" title="Force Refresh"><RefreshCw className={`w-4 h-4 ${isLoading ? 'animate-spin' : ''}`} /></button>
                         </div>
                     </div>
-                )}
-            </div>
+
+                    {isProduction && (wifiList.length === 0 && btList.length === 0) && (
+                        <div className="bg-yellow-500/10 border border-yellow-500/30 p-4 rounded-lg flex items-center text-yellow-200 text-sm">
+                            <AlertTriangle className="w-5 h-5 mr-3 text-yellow-500" />
+                            <div><span className="font-bold">No Data Available.</span> If scanning is enabled, ensure Agents are online and VPP-Server is reachable.</div>
+                        </div>
+                    )}
+
+                    <div className="bg-slate-800 rounded-xl border border-slate-700 overflow-hidden shadow-lg flex flex-col min-h-[400px]">
+                        <div className="flex-1 overflow-x-auto">
+                            <table className="w-full text-left text-sm">
+                                <thead className="bg-slate-900 text-slate-400 border-b border-slate-700 select-none">
+                                    <tr>
+                                        {activeColumns.map((col, index) => (
+                                            <th key={col.id} draggable onDragStart={(e) => handleDragStart(e, index)} onDragOver={(e) => handleDragOver(e, index)} onDrop={(e) => handleDrop(e, index)} onClick={() => handleSort(col.id)} className={`p-4 font-bold uppercase text-xs cursor-pointer hover:bg-slate-800 hover:text-white transition-colors group ${draggedColumnIndex === index ? 'opacity-50 bg-slate-800' : ''}`}>
+                                                <div className="flex items-center justify-between">
+                                                    <div className="flex items-center"><GripVertical className="w-3 h-3 mr-2 text-slate-600 cursor-grab active:cursor-grabbing opacity-0 group-hover:opacity-100 transition-opacity" />{col.label}</div>
+                                                    {sortConfig.key === col.id && (sortConfig.direction === 'asc' ? <ArrowUp className="w-3 h-3 text-cyan-400" /> : <ArrowDown className="w-3 h-3 text-cyan-400" />)}
+                                                </div>
+                                            </th>
+                                        ))}
+                                    </tr>
+                                </thead>
+                                <tbody className="divide-y divide-slate-700/50">
+                                    {paginatedData.length === 0 ? (
+                                        <tr><td colSpan={activeColumns.length} className="p-12 text-center text-slate-500 italic"><Layers className="w-10 h-10 mx-auto mb-2 opacity-20" />No unique {activeTab === 'WIFI' ? 'Wi-Fi networks' : 'Bluetooth devices'} found.</td></tr>
+                                    ) : (
+                                        paginatedData.map((item, idx) => (
+                                            <tr key={`${(item as any).id}-${idx}`} className="hover:bg-slate-700/30 transition-colors group">
+                                                {activeColumns.map(col => <td key={col.id} className="p-4">{renderCell(item, col.id)}</td>)}
+                                            </tr>
+                                        ))
+                                    )}
+                                </tbody>
+                            </table>
+                        </div>
+                        {processData.length > 0 && (
+                            <div className="bg-slate-900/50 p-3 border-t border-slate-700 flex justify-between items-center text-xs">
+                                <div className="text-slate-400">Showing <span className="text-white font-bold">{(currentPage - 1) * ITEMS_PER_PAGE + 1}</span> to <span className="text-white font-bold">{Math.min(currentPage * ITEMS_PER_PAGE, processData.length)}</span> of <span className="text-white font-bold">{processData.length}</span> unique results</div>
+                                <div className="flex items-center space-x-2">
+                                    <button onClick={() => setCurrentPage(p => Math.max(1, p - 1))} disabled={currentPage === 1} className="p-1 rounded bg-slate-800 border border-slate-600 text-slate-300 hover:text-white hover:border-cyan-500 disabled:opacity-50 disabled:hover:border-slate-600 transition-colors"><ChevronLeft className="w-4 h-4" /></button>
+                                    <span className="text-slate-400 font-mono">Page {currentPage} / {totalPages}</span>
+                                    <button onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))} disabled={currentPage === totalPages} className="p-1 rounded bg-slate-800 border border-slate-600 text-slate-300 hover:text-white hover:border-cyan-500 disabled:opacity-50 disabled:hover:border-slate-600 transition-colors"><ChevronRight className="w-4 h-4" /></button>
+                                </div>
+                            </div>
+                        )}
+                    </div>
+                </>
+            )}
         </div>
     );
 };

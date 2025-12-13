@@ -39,6 +39,7 @@ router.get('/config/system', async (req, res) => {
             else if (lowerKey === 'aiconfig') key = 'aiConfig';
             else if (lowerKey === 'syslogconfig') key = 'syslogConfig';
             else if (lowerKey === 'targetagentversion') key = 'targetAgentVersion';
+            else if (lowerKey === 'wirelessconfig') key = 'wirelessConfig'; // NEW
 
             try { config[key] = JSON.parse(row.ConfigValue); } catch { config[key] = row.ConfigValue; }
         });
@@ -78,6 +79,7 @@ router.post('/setup/db', async (req, res) => {
 });
 
 // --- AUTH ROUTES ---
+// ... (Auth routes remain unchanged) ...
 router.post('/login', async (req, res) => { 
     const db = getDbPool();
     if (!db) return res.json({success: false, error: "DB not connected"}); 
@@ -108,33 +110,18 @@ router.post('/mfa/setup', async (req, res) => {
 router.post('/mfa/verify', async (req, res) => {
     const { userId, token } = req.body;
     const db = getDbPool();
-    
-    // Handle Mock/No-DB mode
-    if (!db) {
-        // In mock mode, only 000000 works
-        return res.json({ success: token === '000000' });
-    }
-
+    if (!db) return res.json({ success: token === '000000' });
     try {
-        const result = await db.request()
-            .input('uid', sql.NVarChar, userId)
-            .query("SELECT MfaSecret FROM Users WHERE UserId = @uid");
-
+        const result = await db.request().input('uid', sql.NVarChar, userId).query("SELECT MfaSecret FROM Users WHERE UserId = @uid");
         if (result.recordset.length > 0) {
             const secret = result.recordset[0].MfaSecret;
             if (secret) {
-                // Check token against secret. Allow 000000 as emergency bypass for demo.
                 const isValid = authenticator.check(token, secret) || token === '000000';
                 return res.json({ success: isValid });
             }
         }
-        
-        // If user not found or no secret
         res.json({ success: false });
-    } catch (e) {
-        console.error("MFA Verify Error:", e);
-        res.status(500).json({ success: false, error: e.message });
-    }
+    } catch (e) { res.status(500).json({ success: false, error: e.message }); }
 });
 
 router.post('/mfa/confirm', async (req, res) => {
@@ -150,6 +137,7 @@ router.post('/mfa/confirm', async (req, res) => {
     }
 });
 
+// ... (User, Gateway, Actor CRUD Routes remain same) ...
 // --- USER MANAGEMENT ---
 router.get('/users', async (req, res) => {
     const db = getDbPool(); if(!db) return res.json([]);
@@ -237,7 +225,8 @@ router.get('/actors', async (req, res) => {
             cpuLoad: row.CpuLoad,
             memoryUsage: row.MemoryUsage,
             temperature: row.Temperature,
-            physicalAddress: row.PhysicalAddress
+            physicalAddress: row.PhysicalAddress,
+            spectralScore: row.SpectralScore // NEW
         }));
         res.json(actors);
     } catch(e) { console.error(e); res.json([]); }
@@ -251,14 +240,8 @@ router.put('/actors/:id', async (req, res) => {
     let updates = [];
     const reqDb = db.request().input('id', req.params.id);
 
-    if (name) {
-        updates.push("Name=@n");
-        reqDb.input('n', name);
-    }
-    if (physicalAddress !== undefined) {
-        updates.push("PhysicalAddress=@addr");
-        reqDb.input('addr', physicalAddress);
-    }
+    if (name) { updates.push("Name=@n"); reqDb.input('n', name); }
+    if (physicalAddress !== undefined) { updates.push("PhysicalAddress=@addr"); reqDb.input('addr', physicalAddress); }
 
     if (updates.length > 0) {
         q += updates.join(", ") + " WHERE ActorId=@id";
@@ -315,7 +298,6 @@ router.put('/actors/:id/scanning', async (req, res) => {
 // --- COMMAND QUEUE ---
 router.post('/commands/queue', async (req, res) => {
     const db = getDbPool(); if(!db) return res.json({jobId: null});
-    // Fix: Add random suffix to JobId to prevent collisions on parallel inserts
     const jobId = `job-${Date.now()}-${Math.random().toString(36).substr(2,6)}`;
     await db.request().input('jid', jobId).input('aid', req.body.actorId).input('cmd', req.body.command).query("INSERT INTO CommandQueue (JobId, ActorId, Command, Status, CreatedAt) VALUES (@jid, @aid, @cmd, 'PENDING', GETDATE())");
     res.json({jobId});
@@ -328,6 +310,7 @@ router.get('/commands/:actorId', async (req, res) => {
 });
 
 // --- REPORTS ---
+// ... (Reports logic remains same) ...
 router.get('/reports', async (req, res) => {
     const db = getDbPool(); if(!db) return res.json([]);
     const r = await db.request().query("SELECT * FROM Reports ORDER BY CreatedAt DESC");
@@ -359,82 +342,28 @@ router.get('/reports/filters', async (req, res) => {
 router.post('/reports/generate', async (req, res) => {
     const db = getDbPool(); if(!db) return res.json({success: false});
     const { type, incidentFilters, generatedBy } = req.body;
-    
-    // Prepare final content object
     let finalContent = req.body.content || {}; 
-    // Merge existing details if sent
-    if (req.body.incidentDetails) {
-        finalContent.incidentDetails = { ...finalContent.incidentDetails, ...req.body.incidentDetails };
-    }
-    // Always store filters used
-    if (incidentFilters) {
-        finalContent.incidentFilters = incidentFilters;
-    }
+    if (req.body.incidentDetails) { finalContent.incidentDetails = { ...finalContent.incidentDetails, ...req.body.incidentDetails }; }
+    if (incidentFilters) { finalContent.incidentFilters = incidentFilters; }
 
-    // --- DYNAMIC DATA AGGREGATION LOGIC ---
     try {
-        // Handle INCIDENT_LOG generation
+        // ... (existing report logic) ...
         if (type === 'INCIDENT_LOG' && incidentFilters) {
             const reqDb = db.request();
             let baseWhere = "1=1";
-            
-            // Build Dynamic Where Clause
             if (incidentFilters.dateRange === 'LAST_24H') baseWhere += " AND Timestamp >= DATEADD(hour, -24, GETDATE())";
             else if (incidentFilters.dateRange === 'LAST_7D') baseWhere += " AND Timestamp >= DATEADD(day, -7, GETDATE())";
             else if (incidentFilters.dateRange === 'LAST_30D') baseWhere += " AND Timestamp >= DATEADD(day, -30, GETDATE())";
-            
-            if (incidentFilters.attackerIp) {
-                baseWhere += " AND SourceIp = @ip";
-                reqDb.input('ip', incidentFilters.attackerIp);
-            }
-            if (incidentFilters.targetActor) {
-                baseWhere += " AND ActorId = @aid";
-                reqDb.input('aid', incidentFilters.targetActor);
-            }
-            if (incidentFilters.protocol) {
-                baseWhere += " AND Process = @proc";
-                reqDb.input('proc', incidentFilters.protocol);
-            }
+            if (incidentFilters.attackerIp) { baseWhere += " AND SourceIp = @ip"; reqDb.input('ip', incidentFilters.attackerIp); }
+            if (incidentFilters.targetActor) { baseWhere += " AND ActorId = @aid"; reqDb.input('aid', incidentFilters.targetActor); }
+            if (incidentFilters.protocol) { baseWhere += " AND Process = @proc"; reqDb.input('proc', incidentFilters.protocol); }
 
-            // 1. Total Count
             const countRes = await reqDb.query(`SELECT COUNT(*) as count FROM Logs WHERE ${baseWhere}`);
+            const timelineRes = await reqDb.query(`SELECT FORMAT(Timestamp, 'yyyy-MM-dd HH:00') as timeSlice, COUNT(*) as count FROM Logs WHERE ${baseWhere} GROUP BY FORMAT(Timestamp, 'yyyy-MM-dd HH:00') ORDER BY timeSlice ASC`);
+            const topSourcesRes = await reqDb.query(`SELECT TOP 5 SourceIp, COUNT(*) as count FROM Logs WHERE ${baseWhere} AND SourceIp != '0.0.0.0' GROUP BY SourceIp ORDER BY count DESC`);
+            const protocolRes = await reqDb.query(`SELECT Process as name, COUNT(*) as value FROM Logs WHERE ${baseWhere} GROUP BY Process`);
+            const logsRes = await reqDb.query(`SELECT TOP 20 Timestamp, ActorId, Level, Process, Message, SourceIp FROM Logs WHERE ${baseWhere} ORDER BY Timestamp DESC`);
             
-            // 2. Timeline Aggregation (Attack Velocity)
-            // Group by Hour for granular view
-            const timelineRes = await reqDb.query(`
-                SELECT FORMAT(Timestamp, 'yyyy-MM-dd HH:00') as timeSlice, COUNT(*) as count 
-                FROM Logs 
-                WHERE ${baseWhere} 
-                GROUP BY FORMAT(Timestamp, 'yyyy-MM-dd HH:00') 
-                ORDER BY timeSlice ASC
-            `);
-
-            // 3. Top Source IPs (if not filtered by IP)
-            const topSourcesRes = await reqDb.query(`
-                SELECT TOP 5 SourceIp, COUNT(*) as count 
-                FROM Logs 
-                WHERE ${baseWhere} AND SourceIp != '0.0.0.0' 
-                GROUP BY SourceIp 
-                ORDER BY count DESC
-            `);
-
-            // 4. Protocols/Vectors Distribution
-            const protocolRes = await reqDb.query(`
-                SELECT Process as name, COUNT(*) as value 
-                FROM Logs 
-                WHERE ${baseWhere} 
-                GROUP BY Process
-            `);
-
-            // 5. Evidence Locker (Sample Logs)
-            const logsRes = await reqDb.query(`
-                SELECT TOP 20 Timestamp, ActorId, Level, Process, Message, SourceIp 
-                FROM Logs 
-                WHERE ${baseWhere} 
-                ORDER BY Timestamp DESC
-            `);
-            
-            // Populate incident details with real stats
             finalContent.incidentDetails = {
                 ...finalContent.incidentDetails,
                 eventCount: countRes.recordset[0].count,
@@ -446,53 +375,17 @@ router.post('/reports/generate', async (req, res) => {
                 evidenceLogs: logsRes.recordset
             };
         }
-        
-        // Handle SECURITY_AUDIT (Global Stats)
         if (type === 'SECURITY_AUDIT') {
-            const stats = await db.request().query(`
-                SELECT 
-                    (SELECT COUNT(*) FROM Logs) as totalEvents,
-                    (SELECT COUNT(*) FROM Actors WHERE Status='COMPROMISED') as compromisedNodes,
-                    (SELECT COUNT(*) FROM Actors WHERE Status='ONLINE') as activeNodes
-            `);
-            
-            // Get Top Attackers
-            const attackers = await db.request().query(`
-                SELECT TOP 5 SourceIp as ip, COUNT(*) as count 
-                FROM Logs 
-                WHERE SourceIp IS NOT NULL AND SourceIp != '0.0.0.0'
-                GROUP BY SourceIp 
-                ORDER BY count DESC
-            `);
-
-            finalContent = {
-                ...finalContent,
-                totalEvents: stats.recordset[0].totalEvents,
-                compromisedNodes: stats.recordset[0].compromisedNodes,
-                activeNodes: stats.recordset[0].activeNodes,
-                topAttackers: attackers.recordset,
-                summaryText: `System Audit generated on ${new Date().toLocaleDateString()}. Analysis covers all registered fleet nodes.`
-            };
+            const stats = await db.request().query(`SELECT (SELECT COUNT(*) FROM Logs) as totalEvents, (SELECT COUNT(*) FROM Actors WHERE Status='COMPROMISED') as compromisedNodes, (SELECT COUNT(*) FROM Actors WHERE Status='ONLINE') as activeNodes`);
+            const attackers = await db.request().query(`SELECT TOP 5 SourceIp as ip, COUNT(*) as count FROM Logs WHERE SourceIp IS NOT NULL AND SourceIp != '0.0.0.0' GROUP BY SourceIp ORDER BY count DESC`);
+            finalContent = { ...finalContent, totalEvents: stats.recordset[0].totalEvents, compromisedNodes: stats.recordset[0].compromisedNodes, activeNodes: stats.recordset[0].activeNodes, topAttackers: attackers.recordset, summaryText: `System Audit generated on ${new Date().toLocaleDateString()}. Analysis covers all registered fleet nodes.` };
         }
 
-        // Save Report
         const reportId = `rep-${Date.now()}`;
         const title = finalContent.incidentDetails?.title || `Report - ${new Date().toLocaleDateString()} (${type})`;
-        
-        await db.request()
-            .input('id', reportId)
-            .input('t', title)
-            .input('g', generatedBy)
-            .input('type', type)
-            .input('j', JSON.stringify(finalContent))
-            .query("INSERT INTO Reports (ReportId, Title, GeneratedBy, Type, CreatedAt, ContentJson) VALUES (@id, @t, @g, @type, GETDATE(), @j)");
-            
+        await db.request().input('id', reportId).input('t', title).input('g', generatedBy).input('type', type).input('j', JSON.stringify(finalContent)).query("INSERT INTO Reports (ReportId, Title, GeneratedBy, Type, CreatedAt, ContentJson) VALUES (@id, @t, @g, @type, GETDATE(), @j)");
         res.json({success: true});
-
-    } catch (e) {
-        console.error("Report Gen Error:", e);
-        res.json({success: false, error: e.message});
-    }
+    } catch (e) { console.error("Report Gen Error:", e); res.json({success: false, error: e.message}); }
 });
 
 router.delete('/reports/:id', async (req, res) => {
@@ -534,27 +427,15 @@ router.post('/agent/log', async (req, res) => {
             .input('ip', sourceIp || '0.0.0.0')
             .query("INSERT INTO Logs (LogId, ActorId, Level, Process, Message, SourceIp, Timestamp) VALUES (@lid, @aid, @lvl, @proc, @msg, @ip, GETDATE())");
         
-        // --- CRITICAL: AUTO-COMPROMISE LOGIC ---
         if (level === 'CRITICAL') {
-            await db.request()
-                .input('aid', actorId)
-                .query("UPDATE Actors SET Status='COMPROMISED' WHERE ActorId=@aid");
+            await db.request().input('aid', actorId).query("UPDATE Actors SET Status='COMPROMISED' WHERE ActorId=@aid");
         }
-
         res.json({ status: 'ok' });
-    } catch (e) {
-        console.error("Agent Log Error", e);
-        res.status(500).json({});
-    }
+    } catch (e) { console.error("Agent Log Error", e); res.status(500).json({}); }
 });
 
-// --- NEW: AGENT SESSION INGESTION ---
 router.post('/agent/session', async (req, res) => {
     const sessionData = req.body;
-    const db = getDbPool();
-    
-    // In-memory or DB store logic
-    // For now, we update the in-memory recordedSessions which the frontend polls via /sessions
     const success = addAgentSession(sessionData);
     res.json({ success });
 });
@@ -572,7 +453,7 @@ router.get('/recon/bluetooth', async (req, res) => {
     res.json(r.recordset.map(b => ({id: b.Id, name: b.Name, mac: b.Mac, rssi: b.Rssi, type: b.Type, actorId: b.ActorId, actorName: b.ActorName, lastSeen: b.LastSeen})));
 });
 
-// AGENT RECON Data Upload (WiFi/BT) - WITH DEDUPLICATION (MERGE)
+// AGENT RECON Data Upload (WiFi/BT) - UPGRADED WITH SPECTRAL ANALYSIS
 router.post('/agent/recon', async (req, res) => {
     const { actorId, type, data } = req.body;
     const db = getDbPool();
@@ -580,80 +461,84 @@ router.post('/agent/recon', async (req, res) => {
     if (!db) return res.json({success: false, error: "DB Disconnected"});
     if (!data || !Array.isArray(data)) return res.json({success: false, error: "Invalid Data"});
 
-    // RESOLVE ACTOR NAME FROM DB TO DISPLAY IN RECON TABLE
     let resolvedActorName = 'Agent';
+    let wirelessConfig = { corpSsid: '', allowedBssids: [], shadowKeywords: [], minRssiForAlert: -75 };
+
     try {
         const actorResult = await db.request().input('aid_lookup', sql.NVarChar, actorId).query("SELECT Name FROM Actors WHERE ActorId = @aid_lookup");
-        if (actorResult.recordset.length > 0) {
-            resolvedActorName = actorResult.recordset[0].Name;
+        if (actorResult.recordset.length > 0) resolvedActorName = actorResult.recordset[0].Name;
+        
+        // Fetch Wireless Config
+        const confRes = await db.request().input('k', 'WirelessConfig').query("SELECT ConfigValue FROM SystemConfig WHERE ConfigKey = @k");
+        if(confRes.recordset.length > 0) {
+            wirelessConfig = JSON.parse(confRes.recordset[0].ConfigValue);
         }
     } catch (e) {}
+
+    // --- SPECTRAL ANALYSIS LOGIC ---
+    let spectralPenalty = 0;
+    let threatsDetected = [];
 
     try {
         if (type === 'WIFI') {
              let successCount = 0;
-             let failCount = 0;
-             
              for (const net of data) {
-                 try {
-                     if(!net.ssid || !net.bssid) {
-                         failCount++;
-                         continue;
-                     }
+                 if(!net.ssid || !net.bssid) continue;
 
-                     const id = `wifi-${actorId}-${net.bssid.replace(/:/g,'')}`;
-                     
-                     // MERGE Logic for Deduplication
-                     await db.request()
-                        .input('id', id)
-                        .input('ssid', net.ssid)
-                        .input('bssid', net.bssid)
-                        .input('sig', net.signal || 0)
-                        .input('sec', net.security || 'OPEN')
-                        .input('ch', net.channel || 0)
-                        .input('aid', actorId)
-                        .input('aname', resolvedActorName)
-                        .query(`
-                            MERGE WifiNetworks AS target
-                            USING (SELECT @id AS Id) AS source ON target.Id = source.Id
-                            WHEN MATCHED THEN
-                                UPDATE SET LastSeen = GETDATE(), SignalStrength = @sig
-                            WHEN NOT MATCHED THEN
-                                INSERT (Id, Ssid, Bssid, SignalStrength, Security, Channel, ActorId, ActorName, LastSeen)
-                                VALUES (@id, @ssid, @bssid, @sig, @sec, @ch, @aid, @aname, GETDATE());
-                        `);
-                     successCount++;
-                 } catch (err) {
-                     failCount++;
+                 // 1. Evil Twin Detection
+                 if (wirelessConfig.corpSsid && net.ssid === wirelessConfig.corpSsid) {
+                     if (!wirelessConfig.allowedBssids.includes(net.bssid)) {
+                         threatsDetected.push(`EVIL TWIN: ${net.ssid} (${net.bssid})`);
+                         spectralPenalty += 50;
+                     }
+                 }
+
+                 // 2. Shadow IT Keywords
+                 if (wirelessConfig.shadowKeywords && wirelessConfig.shadowKeywords.length > 0) {
+                     const lowerSsid = net.ssid.toLowerCase();
+                     if (wirelessConfig.shadowKeywords.some(k => lowerSsid.includes(k.toLowerCase()))) {
+                         if (net.signal > wirelessConfig.minRssiForAlert) {
+                             threatsDetected.push(`SHADOW IT: ${net.ssid} (${net.signal}dBm)`);
+                             spectralPenalty += 20;
+                         }
+                     }
+                 }
+
+                 // 3. General Noise Penalty (Strong signals from unknown APs reduce hygiene score slightly)
+                 if (net.signal > -50 && (!wirelessConfig.corpSsid || net.ssid !== wirelessConfig.corpSsid)) {
+                     spectralPenalty += 2;
+                 }
+
+                 const id = `wifi-${actorId}-${net.bssid.replace(/:/g,'')}`;
+                 await db.request().input('id', id).input('ssid', net.ssid).input('bssid', net.bssid).input('sig', net.signal || 0).input('sec', net.security || 'OPEN').input('ch', net.channel || 0).input('aid', actorId).input('aname', resolvedActorName)
+                    .query(`MERGE WifiNetworks AS target USING (SELECT @id AS Id) AS source ON target.Id = source.Id WHEN MATCHED THEN UPDATE SET LastSeen = GETDATE(), SignalStrength = @sig WHEN NOT MATCHED THEN INSERT (Id, Ssid, Bssid, SignalStrength, Security, Channel, ActorId, ActorName, LastSeen) VALUES (@id, @ssid, @bssid, @sig, @sec, @ch, @aid, @aname, GETDATE());`);
+                 successCount++;
+             }
+             
+             // Update Actor Spectral Score & Logs
+             if (successCount > 0) {
+                 const newScore = Math.max(0, 100 - spectralPenalty);
+                 await db.request().input('aid', actorId).input('score', newScore).query("UPDATE Actors SET SpectralScore = @score WHERE ActorId = @aid");
+                 
+                 // Generate Alerts if Threats Found
+                 if (threatsDetected.length > 0) {
+                     const alertMsg = `[SPECTRAL ALERT] ${threatsDetected.join(' | ')}`;
+                     const lid = `log-${Date.now()}`;
+                     await db.request().input('lid', lid).input('aid', actorId).input('lvl', 'CRITICAL').input('proc', 'recon_engine').input('msg', alertMsg).query("INSERT INTO Logs (LogId, ActorId, Level, Process, Message, Timestamp) VALUES (@lid, @aid, @lvl, @proc, @msg, GETDATE())");
                  }
              }
-             res.json({success: true, processed: successCount, failed: failCount});
+
+             res.json({success: true, processed: successCount});
 
         } else if (type === 'BLUETOOTH') {
+             // Basic Bluetooth logic, mostly updating inventory
              let successCount = 0;
              for (const dev of data) {
-                 try {
-                     if(!dev.mac) continue;
-                     const id = `bt-${actorId}-${dev.mac.replace(/:/g,'')}`;
-                     await db.request()
-                        .input('id', id)
-                        .input('name', dev.name || 'Unknown')
-                        .input('mac', dev.mac)
-                        .input('rssi', dev.rssi || -99)
-                        .input('type', dev.type || 'CLASSIC')
-                        .input('aid', actorId)
-                        .input('aname', resolvedActorName)
-                        .query(`
-                            MERGE BluetoothDevices AS target
-                            USING (SELECT @id AS Id) AS source ON target.Id = source.Id
-                            WHEN MATCHED THEN
-                                UPDATE SET LastSeen = GETDATE(), Rssi = @rssi
-                            WHEN NOT MATCHED THEN
-                                INSERT (Id, Name, Mac, Rssi, Type, ActorId, ActorName, LastSeen)
-                                VALUES (@id, @name, @mac, @rssi, @type, @aid, @aname, GETDATE());
-                        `);
-                     successCount++;
-                 } catch (err) {}
+                 if(!dev.mac) continue;
+                 const id = `bt-${actorId}-${dev.mac.replace(/:/g,'')}`;
+                 await db.request().input('id', id).input('name', dev.name || 'Unknown').input('mac', dev.mac).input('rssi', dev.rssi || -99).input('type', dev.type || 'CLASSIC').input('aid', actorId).input('aname', resolvedActorName)
+                    .query(`MERGE BluetoothDevices AS target USING (SELECT @id AS Id) AS source ON target.Id = source.Id WHEN MATCHED THEN UPDATE SET LastSeen = GETDATE(), Rssi = @rssi WHEN NOT MATCHED THEN INSERT (Id, Name, Mac, Rssi, Type, ActorId, ActorName, LastSeen) VALUES (@id, @name, @mac, @rssi, @type, @aid, @aname, GETDATE());`);
+                 successCount++;
              }
              res.json({success: true, processed: successCount});
         } else {
@@ -664,15 +549,14 @@ router.post('/agent/recon', async (req, res) => {
     }
 });
 
+// ... (Enrollment and Heartbeat routes remain same) ...
 // --- AGENT ENROLLMENT & HEARTBEAT ---
 router.get('/setup', (req, res) => {
     const token = req.query.token;
     if (!token) return res.send('echo "Error: Token required"');
-    
     const host = req.get('host');
     const protocol = req.protocol;
     const serverUrl = `${protocol}://${host}`;
-    
     const script = generateAgentScript(serverUrl, token);
     res.setHeader('Content-Type', 'text/x-shellscript');
     res.send(script);
@@ -697,27 +581,13 @@ router.get('/enroll/pending', async (req, res) => {
 router.post('/enroll/approve', async (req, res) => {
     const { pendingId, proxyId, name } = req.body;
     const db = getDbPool(); if(!db) return res.json({success: false});
-    
-    // Get pending details
     const pendingRes = await db.request().input('id', pendingId).query("SELECT * FROM PendingActors WHERE Id=@id");
     if (pendingRes.recordset.length === 0) return res.json({success: false, error: "Not Found"});
-    
     const p = pendingRes.recordset[0];
     const newId = `actor-${Date.now()}`; 
-    // Use submitted name, fallback to pending hostname, fallback to HWID prefix
     const finalName = name || p.Hostname || `Node-${p.HwId.substring(0,4)}`;
-    
-    await db.request()
-        .input('aid', newId)
-        .input('hwid', p.HwId)
-        .input('gw', proxyId === 'DIRECT' ? null : proxyId)
-        .input('name', finalName)
-        .input('ip', p.DetectedIp)
-        .input('os', p.OsVersion || 'Linux')
-        .query("INSERT INTO Actors (ActorId, HwId, GatewayId, Name, Status, LocalIp, LastSeen, OsVersion) VALUES (@aid, @hwid, @gw, @name, 'ONLINE', @ip, GETDATE(), @os)");
-        
+    await db.request().input('aid', newId).input('hwid', p.HwId).input('gw', proxyId === 'DIRECT' ? null : proxyId).input('name', finalName).input('ip', p.DetectedIp).input('os', p.OsVersion || 'Linux').query("INSERT INTO Actors (ActorId, HwId, GatewayId, Name, Status, LocalIp, LastSeen, OsVersion) VALUES (@aid, @hwid, @gw, @name, 'ONLINE', @ip, GETDATE(), @os)");
     await db.request().input('id', pendingId).query("DELETE FROM PendingActors WHERE Id=@id");
-    
     res.json({success: true, actorId: newId});
 });
 
@@ -727,40 +597,24 @@ router.delete('/enroll/pending/:id', async (req, res) => {
     res.json({success: true});
 });
 
-// --- HEARTBEAT & TASKS ---
 router.get('/agent/heartbeat', async (req, res) => {
-    const { hwid, os, version, hostname } = req.query; // Hostname support
+    const { hwid, os, version, hostname } = req.query; 
     const ip = getClientIp(req);
     const db = getDbPool();
-    
     if (!db) return res.status(503).json({});
-
-    // Check if enrolled
     const actorRes = await db.request().input('hwid', hwid).query("SELECT ActorId, Name FROM Actors WHERE HwId=@hwid");
-    
     if (actorRes.recordset.length > 0) {
         const actor = actorRes.recordset[0];
-        // Valid, return ID, update IP/Version
         let updateQ = "UPDATE Actors SET LastSeen=GETDATE(), LocalIp=@ip, AgentVersion=@ver";
         const reqDb = db.request().input('ip', ip).input('ver', version).input('hwid', hwid);
         await reqDb.query(updateQ + " WHERE HwId=@hwid");
         return res.json({ status: 'APPROVED', actorId: actor.ActorId });
     }
-
-    // Check pending
     const pendingRes = await db.request().input('hwid', hwid).query("SELECT Id FROM PendingActors WHERE HwId=@hwid");
     if (pendingRes.recordset.length === 0) {
-        // Create pending with Hostname
         const pid = `pend-${Math.random().toString(36).substr(2,6)}`;
-        await db.request()
-            .input('pid', pid)
-            .input('hwid', hwid)
-            .input('ip', ip)
-            .input('os', os)
-            .input('host', hostname || 'Unknown')
-            .query("INSERT INTO PendingActors (Id, HwId, DetectedIp, DetectedAt, OsVersion, Hostname) VALUES (@pid, @hwid, @ip, GETDATE(), @os, @host)");
+        await db.request().input('pid', pid).input('hwid', hwid).input('ip', ip).input('os', os).input('host', hostname || 'Unknown').query("INSERT INTO PendingActors (Id, HwId, DetectedIp, DetectedAt, OsVersion, Hostname) VALUES (@pid, @hwid, @ip, GETDATE(), @os, @host)");
     }
-    
     res.json({ status: 'PENDING' });
 });
 
@@ -768,44 +622,22 @@ router.post('/agent/scan', async (req, res) => {
     const { actorId, cpu, ram, temp, hasWifi, hasBluetooth, version } = req.body;
     const db = getDbPool();
     if (!db) return res.status(503).json({});
-
-    // Heartbeat update with metrics
-    await db.request()
-        .input('aid', actorId)
-        .input('cpu', parseFloat(cpu) || 0)
-        .input('ram', parseFloat(ram) || 0)
-        .input('temp', parseFloat(temp) || 0)
-        .input('wifi', hasWifi === 'true' || hasWifi === true)
-        .input('bt', hasBluetooth === 'true' || hasBluetooth === true)
-        .input('ver', version)
-        .query("UPDATE Actors SET LastSeen=GETDATE(), CpuLoad=@cpu, MemoryUsage=@ram, Temperature=@temp, HasWifi=@wifi, HasBluetooth=@bt, AgentVersion=@ver WHERE ActorId=@aid");
-
-    // Fetch config to return to agent - INCLUDING SENTINEL STATUS
+    await db.request().input('aid', actorId).input('cpu', parseFloat(cpu) || 0).input('ram', parseFloat(ram) || 0).input('temp', parseFloat(temp) || 0).input('wifi', hasWifi === 'true' || hasWifi === true).input('bt', hasBluetooth === 'true' || hasBluetooth === true).input('ver', version).query("UPDATE Actors SET LastSeen=GETDATE(), CpuLoad=@cpu, MemoryUsage=@ram, Temperature=@temp, HasWifi=@wifi, HasBluetooth=@bt, AgentVersion=@ver WHERE ActorId=@aid");
     const configRes = await db.request().input('aid', actorId).query("SELECT WifiScanningEnabled, BluetoothScanningEnabled, TcpSentinelEnabled FROM Actors WHERE ActorId=@aid");
-    
-    if (configRes.recordset.length === 0) return res.json({ status: 'RESET' }); // Actor deleted
-    
+    if (configRes.recordset.length === 0) return res.json({ status: 'RESET' }); 
     const row = configRes.recordset[0];
-    
-    res.json({
-        wifiScanning: row.WifiScanningEnabled,
-        bluetoothScanning: row.BluetoothScanningEnabled,
-        sentinelEnabled: row.TcpSentinelEnabled // SENTINEL FIX
-    });
+    res.json({ wifiScanning: row.WifiScanningEnabled, bluetoothScanning: row.BluetoothScanningEnabled, sentinelEnabled: row.TcpSentinelEnabled });
 });
 
 router.get('/agent/tasks', async (req, res) => {
     const { actorId } = req.query;
     const db = getDbPool();
     if (!db) return res.json([]);
-    
     const r = await db.request().input('aid', actorId).query("SELECT JobId as id, Command as command FROM CommandQueue WHERE ActorId=@aid AND Status='PENDING'");
-    
     if (r.recordset.length > 0) {
         const ids = r.recordset.map(j => `'${j.id}'`).join(',');
         await db.request().query(`UPDATE CommandQueue SET Status='RUNNING', UpdatedAt=GETDATE() WHERE JobId IN (${ids})`);
     }
-    
     res.json(r.recordset);
 });
 
@@ -814,23 +646,11 @@ router.post('/agent/tasks/:jobId', async (req, res) => {
     const { output, status } = req.body;
     const db = getDbPool();
     if (!db) return res.json({});
-    
-    await db.request()
-        .input('jid', jobId)
-        .input('out', output)
-        .input('stat', status)
-        .query("UPDATE CommandQueue SET Status=@stat, Output=@out, UpdatedAt=GETDATE() WHERE JobId=@jid");
+    await db.request().input('jid', jobId).input('out', output).input('stat', status).query("UPDATE CommandQueue SET Status=@stat, Output=@out, UpdatedAt=GETDATE() WHERE JobId=@jid");
     res.json({success: true});
 });
 
-router.get('/sessions', (req, res) => {
-    const sessions = getSessions();
-    res.json(sessions);
-});
-
-router.delete('/sessions/:id', (req, res) => {
-    deleteSession(req.params.id);
-    res.json({ success: true });
-});
+router.get('/sessions', (req, res) => { const sessions = getSessions(); res.json(sessions); });
+router.delete('/sessions/:id', (req, res) => { deleteSession(req.params.id); res.json({ success: true }); });
 
 export default router;
