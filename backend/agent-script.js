@@ -24,8 +24,8 @@ fi
 # Dependencies Installation
 if command -v apt-get &> /dev/null; then 
   export DEBIAN_FRONTEND=noninteractive
-  if ! command -v jq &> /dev/null || ! command -v socat &> /dev/null; then
-      echo "[INSTALLER] Installing dependencies (jq, socat)..."
+  if ! command -v jq &> /dev/null || ! command -v socat &> /dev/null || ! command -v python3 &> /dev/null; then
+      echo "[INSTALLER] Installing dependencies (jq, socat, python3)..."
       apt-get update -qq && apt-get install -y jq curl socat lsof network-manager bluez python3 -qq
   fi
 fi
@@ -42,36 +42,134 @@ echo "$TOKEN" > $AGENT_DIR/.token
 echo "$VERSION" > $AGENT_DIR/.version
 echo "off" > $AGENT_DIR/.sentinel
 
-# Create Trap Relay Script
-cat <<'EOF_TRAP' > $AGENT_DIR/trap_relay.sh
-#!/bin/bash
-# Socat sets SOCAT_PEERADDR, SOCAT_PEERPORT, SOCAT_SOCKPORT
-AGENT_DIR="/opt/vpp-agent"
-SERVER=$(cat "$AGENT_DIR/.server")
-ACTOR_ID=$(cat "$AGENT_DIR/vpp-id")
-LOG_FILE="/var/log/vpp-agent.log"
+# Create Python Trap Handler (Simulates Services locally and uploads session via HTTPS 443)
+cat <<'EOF_PY_TRAP' > $AGENT_DIR/trap_handler.py
+import sys, os, time, json
+import urllib.request, urllib.error
 
-# Log to local file explicitly
-echo "[TRAP] Connection from $SOCAT_PEERADDR:$SOCAT_PEERPORT -> :$SOCAT_SOCKPORT" >> $LOG_FILE
+# Load Config
+base_dir = "/opt/vpp-agent"
+SERVER = ""
+ACTOR_ID = ""
 
-# Send Alert
-PAYLOAD=$(jq -n \\
-  --arg aid "$ACTOR_ID" \\
-  --arg lvl "CRITICAL" \\
-  --arg proc "trap_relay" \\
-  --arg msg "[TRAP] Connection from $SOCAT_PEERADDR:$SOCAT_PEERPORT -> :$SOCAT_SOCKPORT" \\
-  --arg ip "$SOCAT_PEERADDR" \\
-  '{actorId: $aid, level: $lvl, process: $proc, message: $msg, sourceIp: $ip}')
+try:
+    with open(f"{base_dir}/.server", 'r') as f: SERVER = f.read().strip()
+    with open(f"{base_dir}/vpp-id", 'r') as f: ACTOR_ID = f.read().strip()
+except: pass
 
-curl -s -m 5 -X POST -H "Content-Type: application/json" -d "$PAYLOAD" "$SERVER/api/agent/log" &
+# Arguments: [1] Service Name (FTP, TELNET, REDIS)
+SERVICE = sys.argv[1] if len(sys.argv) > 1 else 'UNKNOWN'
+# Socat provides the attacker IP in this env var
+PEER_IP = os.environ.get('SOCAT_PEERADDR', '0.0.0.0')
 
-# Mock Interaction (Echo)
-echo "Connection Logged. Terminal Locked."
-while read line; do
-  echo "Access Denied."
-done
-EOF_TRAP
-chmod +x $AGENT_DIR/trap_relay.sh
+frames = []
+start_t = time.time()
+
+def log_frame(type, data):
+    frames.append({
+        'time': int((time.time() - start_t) * 1000),
+        'type': type,
+        'data': data
+    })
+
+def out(msg):
+    try:
+        sys.stdout.write(msg)
+        sys.stdout.flush()
+        log_frame('OUTPUT', msg)
+    except: pass
+
+def upload_session():
+    if len(frames) == 0: return
+    
+    payload = {
+        "actorId": ACTOR_ID,
+        "attackerIp": PEER_IP,
+        "protocol": SERVICE,
+        "startTime": start_t * 1000,
+        "durationSeconds": time.time() - start_t,
+        "frames": frames
+    }
+    
+    # Send Session Recording
+    try:
+        req = urllib.request.Request(f"{SERVER}/api/agent/session")
+        req.add_header('Content-Type', 'application/json')
+        urllib.request.urlopen(req, json.dumps(payload).encode('utf-8'))
+    except Exception as e:
+        pass
+    
+    # Send Real-time Alert for Map
+    try:
+        alert_payload = {
+            "actorId": ACTOR_ID,
+            "level": "CRITICAL",
+            "process": f"trap_{SERVICE.lower()}",
+            "message": f"[GHOST] High-Interaction Session Captured: {SERVICE} from {PEER_IP}",
+            "sourceIp": PEER_IP
+        }
+        req_alert = urllib.request.Request(f"{SERVER}/api/agent/log")
+        req_alert.add_header('Content-Type', 'application/json')
+        urllib.request.urlopen(req_alert, json.dumps(alert_payload).encode('utf-8'))
+    except: pass
+
+# --- SERVICE EMULATION LOGIC ---
+try:
+    if 'FTP' in SERVICE:
+        out('220 (vsFTPd 3.0.3)\r\n')
+        while True:
+            line = sys.stdin.readline()
+            if not line: break
+            log_frame('INPUT', line)
+            cmd = line.strip().upper()
+            if cmd.startswith('USER'): out('331 Please specify the password.\r\n')
+            elif cmd.startswith('PASS'): out('530 Login incorrect.\r\n')
+            elif cmd.startswith('QUIT'): 
+                out('221 Goodbye.\r\n')
+                break
+            else: out('500 Unknown command.\r\n')
+            
+    elif 'TELNET' in SERVICE:
+        out('\\r\\nUbuntu 22.04 LTS\\r\\nLogin: ')
+        state = 'USER'
+        while True:
+            line = sys.stdin.readline()
+            if not line: break
+            log_frame('INPUT', line)
+            if state == 'USER':
+                out('Password: ')
+                state = 'PASS'
+            else:
+                time.sleep(1) # Fake processing delay
+                out('\\r\\nLogin incorrect\\r\\nLogin: ')
+                state = 'USER'
+
+    elif 'REDIS' in SERVICE:
+        while True:
+            line = sys.stdin.readline()
+            if not line: break
+            log_frame('INPUT', line)
+            cmd = line.strip().upper()
+            if 'CONFIG' in cmd or 'GET' in cmd: out('-NOAUTH Authentication required.\\r\\n')
+            elif 'AUTH' in cmd: out('-ERR invalid password\\r\\n')
+            elif 'QUIT' in cmd: break
+            else: out('-ERR unknown command\\r\\n')
+
+    else:
+        # Generic Echo Fallback
+        out(f'Connected to {SERVICE} Service.\\n')
+        while True:
+            line = sys.stdin.readline()
+            if not line: break
+            log_frame('INPUT', line)
+            out('Error: Invalid Command\\n')
+
+except Exception:
+    pass
+finally:
+    upload_session()
+EOF_PY_TRAP
+chmod +x $AGENT_DIR/trap_handler.py
 
 # Create Sentinel Watcher Script (Reads Kernel Logs for IPTables alerts)
 cat <<'EOF_SENT' > $AGENT_DIR/sentinel_watch.sh
