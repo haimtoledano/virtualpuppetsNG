@@ -5,7 +5,7 @@ import { executeRemoteCommand, getAvailableCloudTraps, toggleTunnelMock, AVAILAB
 import { analyzeLogsWithAi, generateDeceptionContent } from '../services/aiService';
 import { updateActorName, queueSystemCommand, getActorCommands, deleteActor, updateActorTunnels, updateActorPersona, resetActorStatus, resetActorToFactory, updateActorHoneyFiles, toggleActorSentinel, generateReport, deleteAttackSession as deleteAttackSessionProd, getAttackSessions as getAttackSessionsProd, toggleActorScanning } from '../services/dbService';
 import Terminal from './Terminal';
-import { Cpu, Wifi, Shield, Bot, ArrowLeft, BrainCircuit, Router, Network, FileCode, Check, Activity, X, Printer, Camera, Server, Edit2, Trash2, Loader, ShieldCheck, AlertOctagon, Skull, ArrowRight, Terminal as TerminalIcon, Globe, ScanSearch, Power, RefreshCw, History as HistoryIcon, Thermometer, RefreshCcw, Siren, Eye, Fingerprint, Info, Cable, Search, Lock, Zap, FileText, HardDrive, List, Play, Pause, FastForward, Rewind, Film, Database, Monitor, Save, Radio, Bluetooth, Hash, MapPin, SkipBack, Maximize, Volume2, Clock } from 'lucide-react';
+import { Cpu, Wifi, Shield, Bot, ArrowLeft, BrainCircuit, Router, Network, FileCode, Check, Activity, X, Printer, Camera, Server, Edit2, Trash2, Loader, ShieldCheck, AlertOctagon, Skull, ArrowRight, Terminal as TerminalIcon, Globe, ScanSearch, Power, RefreshCw, History as HistoryIcon, Thermometer, RefreshCcw, Siren, Eye, Fingerprint, Info, Cable, Search, Lock, Zap, FileText, HardDrive, List, Play, Pause, FastForward, Rewind, Film, Database, Monitor, Save, Radio, Bluetooth, Hash, MapPin } from 'lucide-react';
 
 interface ActorDetailProps {
   actor: Actor;
@@ -601,13 +601,11 @@ const ActorDetail: React.FC<ActorDetailProps> = ({ actor, gateway, logs: initial
       const serverIp = window.location.hostname;
       const remotePort = SERVER_TRAP_PORTS[trapId];
 
-      if (isProduction) {
-           // NEW LOGIC: Run local high-interaction emulation via Python script
-           // Map trapId to service name for the script
-           const serviceName = trapId.includes('ftp') ? 'FTP' : trapId.includes('redis') ? 'REDIS' : 'TELNET';
-           await handleCommand(`nohup socat TCP-LISTEN:${port},fork EXEC:"python3 /opt/vpp-agent/trap_handler.py ${serviceName}" >/dev/null 2>&1 & # ${newTunnel.id}`);
+      if (isProduction && remotePort) {
+           // Tunnel to REAL Honeypot on Server
+           await handleCommand(`nohup socat TCP-LISTEN:${port},fork EXEC:/opt/vpp-agent/trap_relay.sh >/dev/null 2>&1 & # ${newTunnel.id}`);
       } else {
-           // Local Echo or Mock if no remote port (or mock mode)
+           // Local Echo or Mock
            await handleCommand(`nohup socat TCP-LISTEN:${port},fork EXEC:/opt/vpp-agent/trap_relay.sh >/dev/null 2>&1 & # ${newTunnel.id}`);
       }
       
@@ -1301,7 +1299,7 @@ const ActorDetail: React.FC<ActorDetailProps> = ({ actor, gateway, logs: initial
                     {forensicView === 'SESSIONS' && (
                         <div className="h-full flex flex-col lg:flex-row gap-6">
                             {/* Session List */}
-                            <div className="w-full lg:w-1/3 bg-slate-900 rounded-xl border border-slate-700 overflow-hidden flex flex-col shadow-lg">
+                            <div className="w-full lg:w-1/3 bg-slate-900 rounded border border-slate-700 overflow-hidden flex flex-col">
                                 <div className="p-3 bg-slate-800 border-b border-slate-700 text-sm font-bold text-slate-300 flex justify-between items-center">
                                      <span>Recorded Sessions</span>
                                      <button 
@@ -1329,13 +1327,10 @@ const ActorDetail: React.FC<ActorDetailProps> = ({ actor, gateway, logs: initial
                                             >
                                                 <div className="flex justify-between items-start mb-1 pr-6">
                                                     <span className="text-xs font-bold text-white">{new Date(session.startTime).toLocaleString()}</span>
-                                                    <span className="text-[10px] bg-red-900/50 text-red-300 px-1.5 rounded border border-red-800 font-mono">{session.protocol}</span>
+                                                    <span className="text-[10px] bg-red-900/50 text-red-300 px-1.5 rounded border border-red-800">{session.protocol}</span>
                                                 </div>
                                                 <div className="text-xs text-slate-400 font-mono mb-1">{session.attackerIp}</div>
-                                                <div className="text-[10px] text-slate-600 flex items-center">
-                                                    <Clock className="w-3 h-3 mr-1" />
-                                                    {session.durationSeconds.toFixed(1)}s Duration • {session.frames.length} Events
-                                                </div>
+                                                <div className="text-[10px] text-slate-600">{session.durationSeconds.toFixed(1)}s Duration • {session.frames.length} Events</div>
                                                 
                                                 <button 
                                                     onClick={(e) => handleDeleteSession(e, session.id)}
@@ -1350,84 +1345,57 @@ const ActorDetail: React.FC<ActorDetailProps> = ({ actor, gateway, logs: initial
                                 </div>
                             </div>
 
-                            {/* Enhanced Player */}
-                            <div className="flex-1 bg-black rounded-lg border border-slate-700 flex flex-col overflow-hidden relative shadow-2xl group/player">
+                            {/* Player */}
+                            <div className="flex-1 bg-black rounded border border-slate-700 flex flex-col overflow-hidden relative">
                                 {!activeSession ? (
-                                    <div className="flex items-center justify-center h-full text-slate-600 flex-col bg-slate-900/50">
-                                        <div className="p-6 rounded-full bg-slate-800/50 mb-4 animate-pulse">
-                                            <Film className="w-12 h-12 text-slate-500" />
-                                        </div>
-                                        <p className="font-mono tracking-widest text-sm">SELECT SESSION REEL</p>
+                                    <div className="flex items-center justify-center h-full text-slate-600 flex-col">
+                                        <Film className="w-12 h-12 mb-4 opacity-20" />
+                                        <p>Select a session to replay</p>
                                     </div>
                                 ) : (
                                     <>
-                                        {/* Screen Content */}
-                                        <div className="flex-1 relative flex flex-col bg-black overflow-hidden">
-                                            {/* Carbon Fibre Texture Overlay */}
-                                            <div className="absolute inset-0 bg-[url('https://www.transparenttextures.com/patterns/carbon-fibre.png')] opacity-10 pointer-events-none"></div>
-                                            
-                                            {/* CRT Scanline */}
-                                            <div className="absolute inset-0 bg-[linear-gradient(rgba(18,16,16,0)_50%,rgba(0,0,0,0.1)_50%),linear-gradient(90deg,rgba(255,0,0,0.06),rgba(0,255,0,0.02),rgba(0,0,255,0.06))] bg-[length:100%_4px,3px_100%] pointer-events-none z-10 animate-pulse"></div>
-
-                                            {/* Info HUD Overlay */}
-                                            <div className="absolute top-4 right-4 bg-black/60 border border-slate-700/50 rounded px-2 py-1 text-[10px] font-mono text-emerald-500 z-20 backdrop-blur-sm">
-                                                <div>REC: {activeSession.id.split('-').pop()}</div>
-                                                <div>SRC: {activeSession.attackerIp}</div>
-                                                <div>PRT: {activeSession.protocol}</div>
-                                            </div>
-
-                                            {/* Terminal Text */}
-                                            <div className="flex-1 p-6 font-mono text-sm overflow-y-auto whitespace-pre-wrap text-emerald-500 z-0 selection:bg-emerald-900 selection:text-white">
-                                                {replayContent}
-                                                {isPlaying && <span className="inline-block w-2.5 h-5 bg-emerald-500 animate-pulse ml-1 align-middle shadow-[0_0_8px_#10b981]"></span>}
-                                            </div>
+                                        {/* Terminal Screen */}
+                                        <div className="flex-1 p-4 font-mono text-xs md:text-sm overflow-y-auto whitespace-pre-wrap text-green-500 bg-black">
+                                            {replayContent}
+                                            <span className="animate-pulse inline-block w-2 h-4 bg-green-500 ml-1 align-middle"></span>
                                         </div>
 
-                                        {/* Advanced Controls Bar */}
-                                        <div className="bg-slate-900 border-t border-slate-700 p-4 z-20">
-                                            {/* Timeline Scrubber */}
-                                            <div className="flex items-center space-x-3 mb-4 group/timeline cursor-pointer" onClick={(e) => {
+                                        {/* Controls */}
+                                        <div className="bg-slate-800 p-3 border-t border-slate-700">
+                                            <div className="flex items-center justify-between mb-2 text-[10px] text-slate-400 font-mono">
+                                                <span>{(replayTime/1000).toFixed(1)}s</span>
+                                                <span>{activeSession.durationSeconds.toFixed(1)}s</span>
+                                            </div>
+                                            {/* Scrubber */}
+                                            <div className="relative h-2 bg-slate-700 rounded-full mb-4 cursor-pointer group" onClick={(e) => {
                                                 const rect = e.currentTarget.getBoundingClientRect();
                                                 const x = e.clientX - rect.left;
-                                                const pct = Math.max(0, Math.min(1, x / rect.width));
+                                                const pct = x / rect.width;
                                                 setReplayTime(pct * activeSession.durationSeconds * 1000);
                                             }}>
-                                                <span className="text-[10px] font-mono text-slate-400 w-10 text-right">{(replayTime/1000).toFixed(1)}s</span>
-                                                <div className="flex-1 h-1.5 bg-slate-700 rounded-full relative overflow-visible">
-                                                    <div 
-                                                        className="absolute top-0 left-0 h-full bg-blue-500 rounded-full transition-all duration-75" 
-                                                        style={{ width: `${(replayTime / (activeSession.durationSeconds * 1000)) * 100}%` }}
-                                                    >
-                                                        <div className="absolute right-0 -top-1 w-3.5 h-3.5 bg-white rounded-full shadow-[0_0_10px_rgba(59,130,246,0.5)] opacity-0 group-hover/timeline:opacity-100 transition-opacity transform scale-0 group-hover/timeline:scale-100"></div>
-                                                    </div>
-                                                </div>
-                                                <span className="text-[10px] font-mono text-slate-500 w-10">{activeSession.durationSeconds.toFixed(1)}s</span>
+                                                <div 
+                                                    className="absolute top-0 left-0 h-full bg-blue-500 rounded-full pointer-events-none" 
+                                                    style={{ width: `${(replayTime / (activeSession.durationSeconds * 1000)) * 100}%` }}
+                                                ></div>
+                                                <div 
+                                                    className="absolute top-1/2 -mt-1.5 w-3 h-3 bg-white rounded-full shadow cursor-grab group-hover:scale-125 transition-transform"
+                                                    style={{ left: `calc(${(replayTime / (activeSession.durationSeconds * 1000)) * 100}% - 6px)` }}
+                                                ></div>
                                             </div>
 
-                                            {/* Buttons */}
-                                            <div className="flex justify-between items-center">
-                                                <div className="flex items-center space-x-4">
-                                                    <button 
-                                                        onClick={() => setIsPlaying(!isPlaying)} 
-                                                        className="w-10 h-10 bg-blue-600 hover:bg-blue-500 text-white rounded-full flex items-center justify-center shadow-lg hover:scale-105 transition-all"
-                                                    >
-                                                        {isPlaying ? <Pause className="w-5 h-5 fill-current" /> : <Play className="w-5 h-5 fill-current ml-0.5" />}
-                                                    </button>
-                                                    <div className="flex space-x-1 bg-slate-800 rounded-lg p-1 border border-slate-700">
-                                                        <button onClick={() => { setReplayTime(Math.max(0, replayTime - 5000)); }} className="p-1.5 text-slate-400 hover:text-white hover:bg-slate-700 rounded"><Rewind className="w-4 h-4" /></button>
-                                                        <button onClick={() => { setReplayTime(Math.min(activeSession.durationSeconds * 1000, replayTime + 5000)); }} className="p-1.5 text-slate-400 hover:text-white hover:bg-slate-700 rounded"><FastForward className="w-4 h-4" /></button>
-                                                    </div>
-                                                </div>
-
-                                                <div className="flex items-center space-x-3">
-                                                    <button onClick={() => setReplayTime(0)} className="text-slate-500 hover:text-white transition-colors" title="Restart"><SkipBack className="w-4 h-4" /></button>
-                                                    <div className="h-4 w-px bg-slate-700"></div>
-                                                    <button onClick={() => setReplaySpeed(s => s === 1 ? 2 : s === 2 ? 4 : 1)} className="text-xs font-bold font-mono text-slate-400 hover:text-blue-400 w-8 text-center transition-colors">
-                                                        {replaySpeed}x
-                                                    </button>
-                                                    <Volume2 className="w-4 h-4 text-slate-600 cursor-not-allowed" />
-                                                    <Maximize className="w-4 h-4 text-slate-400 hover:text-white cursor-pointer" />
-                                                </div>
+                                            <div className="flex justify-center items-center space-x-6">
+                                                <button onClick={() => setReplaySpeed(s => s === 1 ? 2 : s === 2 ? 4 : 1)} className="text-xs font-bold text-slate-500 w-12 text-center hover:text-white">
+                                                    {replaySpeed}x
+                                                </button>
+                                                <button onClick={() => { setReplayTime(Math.max(0, replayTime - 5000)); }} className="text-slate-400 hover:text-white"><Rewind className="w-5 h-5" /></button>
+                                                <button 
+                                                    onClick={() => setIsPlaying(!isPlaying)} 
+                                                    className="bg-blue-600 hover:bg-blue-500 text-white p-3 rounded-full shadow-lg transition-transform hover:scale-105"
+                                                >
+                                                    {isPlaying ? <Pause className="w-6 h-6" /> : <Play className="w-6 h-6 ml-1" />}
+                                                </button>
+                                                <button onClick={() => { setReplayTime(Math.min(activeSession.durationSeconds * 1000, replayTime + 5000)); }} className="text-slate-400 hover:text-white"><FastForward className="w-5 h-5" /></button>
+                                                <div className="w-12"></div> {/* Spacer */}
                                             </div>
                                         </div>
                                     </>
@@ -1438,6 +1406,251 @@ const ActorDetail: React.FC<ActorDetailProps> = ({ actor, gateway, logs: initial
 
                 </div>
            </div>
+      )}
+
+      {activeTab === 'TERMINAL' && (
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 h-auto lg:h-[600px]">
+              <div className="lg:col-span-2 flex flex-col bg-slate-800 rounded-xl border border-slate-700 p-1 overflow-hidden min-h-[400px]">
+                   <div className="bg-slate-900 p-2 flex justify-between items-center border-b border-slate-700">
+                       <div className="flex items-center text-xs text-slate-400"><TerminalIcon className="w-3 h-3 mr-2" /> SSH Session: root@{actor.localIp}</div>
+                       <div className="flex space-x-2"><button onClick={handleTestLog} className="text-xs bg-slate-700 hover:bg-slate-600 px-2 py-1 rounded text-white transition-colors">Inject Test Event</button></div>
+                   </div>
+                   <div className="flex-1 relative"><Terminal logs={displayLogs} height="h-full" onCommand={handleCommand} isInteractive={true} /></div>
+              </div>
+              <div className="bg-slate-800 rounded-xl border border-slate-700 flex flex-col overflow-hidden min-h-[300px]">
+                  <div className="bg-slate-900 p-3 border-b border-slate-700 flex justify-between items-center">
+                      <div className="flex items-center text-xs font-bold text-slate-300"><HistoryIcon className="w-3 h-3 mr-2 text-blue-400" /> COMMAND HISTORY</div>
+                      <span className="bg-slate-700 text-slate-300 text-[10px] px-2 py-0.5 rounded-full">{commandHistory.length}</span>
+                  </div>
+                  <div className="flex-1 overflow-y-auto p-0 scrollbar-thin scrollbar-thumb-slate-700">
+                        {commandHistory.length === 0 && <div className="flex flex-col items-center justify-center h-full text-slate-500 text-xs"><TerminalIcon className="w-8 h-8 mb-2 opacity-20" /><p>No remote commands executed.</p></div>}
+                        {commandHistory.map(job => (
+                            <div key={job.id} className="p-3 border-b border-slate-700/50 hover:bg-slate-700/30 transition-colors group">
+                                <div className="flex justify-between items-start mb-1.5">
+                                    <code className="text-[11px] text-blue-300 font-mono bg-slate-900 px-1.5 py-0.5 rounded border border-slate-700/50 break-all mr-2">{job.command}</code>
+                                    <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded uppercase tracking-wider shrink-0 ${job.status === 'COMPLETED' ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20' : job.status === 'FAILED' ? 'bg-red-500/10 text-red-400 border border-red-500/20' : 'bg-blue-500/10 text-blue-400 border border-blue-500/20 animate-pulse'}`}>{job.status}</span>
+                                </div>
+                                <div className="flex justify-between items-center text-[10px] text-slate-500 mb-2 font-mono"><span>{new Date(job.createdAt).toLocaleTimeString()}</span><span>JOB: {job.id.split('-').pop()}</span></div>
+                                {job.output && <div className="bg-black/50 p-2 rounded text-[10px] font-mono text-slate-400 whitespace-pre-wrap max-h-32 overflow-y-auto border border-slate-800 scrollbar-thin"><span className="text-slate-600 select-none mr-2">$</span>{job.output}</div>}
+                            </div>
+                        ))}
+                  </div>
+              </div>
+          </div>
+      )}
+
+      {activeTab === 'DECEPTION' && (
+          <div className="space-y-6">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                  <div className="bg-slate-800 rounded-xl border border-slate-700 p-6 shadow-lg">
+                       <h3 className="text-lg font-bold text-white mb-4 flex items-center"><Bot className="w-5 h-5 mr-2 text-purple-400" /> Device Persona</h3>
+                       <div className="bg-blue-900/20 border border-blue-500/30 rounded p-3 mb-4 flex items-start"><Info className="w-4 h-4 text-blue-400 mr-2 shrink-0 mt-0.5" /><p className="text-xs text-blue-200">Deploying a persona will temporarily restart networking services on the actor. The agent will spoof the MAC Address Vendor, open dummy ports, and update service banners to deceive scanners.</p></div>
+                       <div className="space-y-3">
+                           {AVAILABLE_PERSONAS.map(p => {
+                               const isActive = activePersona.id === p.id;
+                               const conflictingPorts = getPersonaConflicts(p);
+                               const hasConflict = conflictingPorts.length > 0 && !isActive;
+                               return (
+                                   <div key={p.id} onClick={() => !hasConflict && handleChangePersona(p.id)} className={`rounded-lg border transition-all overflow-hidden relative ${isActive ? 'bg-purple-900/10 border-purple-500' : hasConflict ? 'bg-slate-900/40 border-slate-800 opacity-60 cursor-not-allowed grayscale' : 'bg-slate-900 border-slate-700 hover:border-slate-500 cursor-pointer'}`}>
+                                       <div className="p-3 flex items-center border-b border-slate-700/50">
+                                            <div className={`p-2 rounded-full mr-3 ${isActive ? 'bg-purple-600 text-white' : 'bg-slate-800 text-slate-500'}`}>
+                                                {p.icon === 'SERVER' && <Server className="w-4 h-4" />}
+                                                {p.icon === 'CAMERA' && <Camera className="w-4 h-4" />}
+                                                {p.icon === 'PRINTER' && <Printer className="w-4 h-4" />}
+                                                {p.icon === 'PLC' && <Cpu className="w-4 h-4" />}
+                                                {p.icon === 'ROUTER' && <Router className="w-4 h-4" />}
+                                            </div>
+                                            <div className="flex-1">
+                                                <div className={`font-bold text-sm ${isActive ? 'text-white' : 'text-slate-300'}`}>{p.name}{hasConflict && <span className="text-[10px] text-red-400 ml-2 font-normal">(Ports Blocked)</span>}</div>
+                                                <div className="text-[10px] text-slate-500">{p.description}</div>
+                                            </div>
+                                            {isChangingPersona && isActive && <Loader className="w-4 h-4 animate-spin text-purple-500" />}
+                                            {isActive && !isChangingPersona && <Check className="w-4 h-4 text-purple-500" />}
+                                       </div>
+                                       <div className="bg-black/20 p-2 text-xs font-mono grid gap-1.5">
+                                            <div className="flex items-center"><span className="text-slate-600 font-bold w-16 text-[10px] uppercase">Open Ports</span><div className="flex gap-1 flex-wrap">{p.openPorts.map(port => { const isBlocked = conflictingPorts.includes(port); return (<span key={port} className={`px-1.5 rounded text-[10px] border ${isBlocked && !isActive ? 'bg-red-900/30 text-red-400 border-red-900' : 'bg-slate-800 text-slate-400 border-slate-700'}`} title={isBlocked ? "Port is currently in use by a Tunnel" : ""}>{port}/tcp</span>); })}</div></div>
+                                            <div className="flex items-center"><span className="text-slate-600 font-bold w-16 text-[10px] uppercase">MAC OUI</span><span className="text-slate-400 flex items-center text-[10px]"><Fingerprint className="w-3 h-3 mr-1 text-emerald-500" />{p.macVendor || 'Generic'}</span></div>
+                                            <div className="flex items-start mt-1"><span className="text-slate-600 font-bold w-16 text-[10px] uppercase pt-0.5">Banner</span><code className="text-[10px] text-yellow-600/80 break-all bg-slate-950 px-1 rounded flex-1">{p.banner}</code></div>
+                                       </div>
+                                       {hasConflict && <div className="absolute inset-0 bg-black/40 flex items-center justify-center opacity-0 hover:opacity-100 transition-opacity backdrop-blur-[1px]"><div className="bg-red-900/90 text-red-200 text-xs px-2 py-1 rounded shadow-lg border border-red-500/50">Conflict: Port {conflictingPorts.join(', ')} in use</div></div>}
+                                   </div>
+                               );
+                           })}
+                       </div>
+                  </div>
+                  <div className="bg-slate-800 rounded-xl border border-slate-700 p-6 shadow-lg">
+                      <div className="flex justify-between items-center mb-4">
+                          <h3 className="text-lg font-bold text-white flex items-center"><FileCode className="w-5 h-5 mr-2 text-yellow-400" /> Honey Files</h3>
+                          <div className="flex space-x-2">
+                              <button onClick={() => handleDeployDeception('CREDENTIALS')} disabled={isGeneratingDeception} className="bg-yellow-600 hover:bg-yellow-500 text-white px-3 py-1 rounded text-xs font-bold">+ Creds</button>
+                              <button onClick={() => handleDeployDeception('CONFIG')} disabled={isGeneratingDeception} className="bg-blue-600 hover:bg-blue-500 text-white px-3 py-1 rounded text-xs font-bold">+ Config</button>
+                          </div>
+                      </div>
+                      <p className="text-slate-400 text-xs mb-4">Deploy fake files generated by AI to lure attackers. Accessing these files triggers high-severity alerts.</p>
+                      <div className="space-y-3">
+                          {isGeneratingDeception && <div className="text-center py-4 text-slate-500 text-xs animate-pulse">Generating realistic deception content...</div>}
+                          {honeyFiles.length === 0 && !isGeneratingDeception && <div className="text-center text-slate-600 italic py-4 text-xs">No deception files deployed.</div>}
+                          {honeyFiles.map((file, i) => (
+                              <div key={i} className="bg-slate-900 border border-slate-700 rounded p-3 group relative overflow-hidden">
+                                  <div className="flex justify-between items-start mb-1"><div className="font-mono text-sm text-yellow-400 font-bold">{file.filename}</div><div className="text-[10px] text-slate-500">{new Date(file.createdAt).toLocaleDateString()}</div></div>
+                                  <div className="text-xs text-slate-500 font-mono mb-2">{file.path}</div>
+                                  <div className="bg-black p-2 rounded text-[10px] font-mono text-slate-400 truncate opacity-70 group-hover:opacity-100 transition-opacity">{file.contentPreview}</div>
+                              </div>
+                          ))}
+                      </div>
+                  </div>
+              </div>
+          </div>
+      )}
+
+      {activeTab === 'NETWORK' && (
+          <div className="space-y-6">
+              {/* SENTINEL MODE BANNER */}
+              <div className={`rounded-xl border p-6 shadow-lg transition-all ${isSentinelEnabled ? 'bg-red-900/10 border-red-500/50 shadow-red-900/20' : 'bg-slate-800 border-slate-700'}`}>
+                  <div className="flex justify-between items-start">
+                      <div className="flex items-start">
+                          <div className={`p-3 rounded-full mr-4 ${isSentinelEnabled ? 'bg-red-600 text-white animate-pulse' : 'bg-slate-700 text-slate-400'}`}><Siren className="w-6 h-6" /></div>
+                          <div>
+                              <h3 className={`text-lg font-bold ${isSentinelEnabled ? 'text-red-400' : 'text-white'}`}>TCP Sentinel (Paranoid Mode)</h3>
+                              <p className="text-slate-400 text-sm mt-1 max-w-md">When enabled, <span className="font-bold text-white">ANY</span> inbound connection attempt (SYN packet) to this actor will trigger a <span className="font-bold text-red-400">CRITICAL</span> alert. Use during active lockdowns.</p>
+                          </div>
+                      </div>
+                      <label className="relative inline-flex items-center cursor-pointer mt-1">
+                          <input type="checkbox" checked={isSentinelEnabled} onChange={handleToggleSentinel} className="sr-only peer" />
+                          <div className="w-11 h-6 bg-slate-700 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-red-800 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-red-600"></div>
+                      </label>
+                  </div>
+              </div>
+
+              {/* TRAP PROJECTOR UI */}
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6 h-[500px]">
+                  
+                  {/* LEFT: Active Tunnels Dashboard */}
+                  <div className="bg-slate-800 rounded-xl border border-slate-700 p-6 shadow-lg flex flex-col">
+                      <h3 className="text-lg font-bold text-white mb-2 flex items-center"><Network className="w-5 h-5 mr-2 text-emerald-400" /> Active Cloud Tunnels</h3>
+                      <p className="text-slate-400 text-xs mb-4">Live connections forwarded to the central server honeypots.</p>
+                      
+                      <div className="flex-1 space-y-4 overflow-y-auto pr-2">
+                          {tunnels.length === 0 && (
+                              <div className="h-full flex flex-col items-center justify-center text-slate-500 opacity-50 border-2 border-dashed border-slate-700 rounded-lg">
+                                  <Monitor className="w-12 h-12 mb-3" />
+                                  <p className="text-sm font-bold">No Active Projections</p>
+                                  <p className="text-xs">Select a trap from the catalog to project.</p>
+                              </div>
+                          )}
+                          {tunnels.map(t => (
+                              <div key={t.id} className="bg-slate-900 border border-emerald-900/50 p-4 rounded-lg relative overflow-hidden group">
+                                  {/* Animated Activity Line */}
+                                  <div className="absolute top-0 left-0 w-full h-0.5 bg-gradient-to-r from-transparent via-emerald-500 to-transparent opacity-50 animate-shimmer"></div>
+                                  
+                                  <div className="flex justify-between items-start">
+                                      <div>
+                                          <div className="flex items-center">
+                                              <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse mr-2"></span>
+                                              <div className="font-bold text-emerald-400 text-sm">{t.trap.name}</div>
+                                          </div>
+                                          <div className="text-xs text-slate-400 font-mono mt-1 ml-4">
+                                              Local Port: <span className="text-white font-bold">{t.localPort}</span> &rarr; Cloud
+                                          </div>
+                                          <div className="text-[10px] text-slate-600 mt-2 ml-4 flex items-center">
+                                              <Activity className="w-3 h-3 mr-1" /> Uptime: {Math.floor(Math.random()*100)}m
+                                          </div>
+                                      </div>
+                                      <button onClick={() => handleStopTunnel(t.id)} className="bg-slate-800 hover:bg-red-900/50 text-slate-400 hover:text-red-400 p-2 rounded transition-colors border border-slate-700 hover:border-red-500">
+                                          <Power className="w-4 h-4" />
+                                      </button>
+                                  </div>
+                              </div>
+                          ))}
+                      </div>
+                  </div>
+
+                  {/* RIGHT: Trap Catalog */}
+                  <div className="bg-slate-800 rounded-xl border border-slate-700 p-6 shadow-lg flex flex-col">
+                      <h3 className="text-lg font-bold text-white mb-2 flex items-center"><Database className="w-5 h-5 mr-2 text-blue-400" /> Trap Catalog</h3>
+                      <p className="text-slate-400 text-xs mb-4">Project high-interaction vulnerabilities from the server to this device.</p>
+                      
+                      <div className="flex-1 space-y-2 overflow-y-auto pr-2 scrollbar-thin scrollbar-thumb-slate-700">
+                          {getAvailableCloudTraps().map(trap => {
+                              const isActive = tunnels.some(t => t.trap.id === trap.id);
+                              const isPending = pendingTunnel === trap.id;
+                              const conflictingPorts = getTunnelConflicts(trap.id);
+                              const hasConflict = conflictingPorts.length > 0 && !isActive;
+                              
+                              return (
+                                  <div key={trap.id} className="relative group">
+                                      <button 
+                                        onClick={() => !hasConflict && handleToggleTunnel(trap.id)} 
+                                        disabled={isPending || (hasConflict && !isActive)} 
+                                        className={`w-full text-left p-3 rounded border flex items-center justify-between transition-all ${
+                                            isActive 
+                                            ? 'bg-emerald-900/10 border-emerald-500/50' 
+                                            : hasConflict 
+                                                ? 'bg-slate-900/40 border-slate-800 cursor-not-allowed grayscale opacity-60' 
+                                                : 'bg-slate-900 border-slate-700 hover:border-blue-500 hover:bg-slate-800'
+                                        }`}
+                                      >
+                                          <div className="flex items-center">
+                                              <div className={`p-2 rounded mr-3 ${isActive ? 'bg-emerald-500/20 text-emerald-400' : 'bg-slate-800 text-slate-500'}`}>
+                                                  <Server className="w-4 h-4" />
+                                              </div>
+                                              <div>
+                                                  <div className={`font-bold text-sm ${isActive ? 'text-emerald-400' : 'text-slate-200'}`}>{trap.name}</div>
+                                                  <div className="text-xs text-slate-500">{trap.serviceType} <span className="opacity-50">({DEFAULT_TRAP_PORTS[trap.id] || 'Dynamic'})</span></div>
+                                              </div>
+                                          </div>
+                                          
+                                          <div className="flex items-center">
+                                              {isPending ? (
+                                                  <Loader className="w-4 h-4 animate-spin text-blue-400" />
+                                              ) : (
+                                                  <div className={`w-8 h-4 rounded-full relative transition-colors ${isActive ? 'bg-emerald-500' : 'bg-slate-700'}`}>
+                                                      <div className={`absolute top-0.5 w-3 h-3 bg-white rounded-full transition-all ${isActive ? 'left-[18px]' : 'left-0.5'}`} />
+                                                  </div>
+                                              )}
+                                          </div>
+                                      </button>
+                                      
+                                      {hasConflict && (
+                                          <div className="absolute inset-0 hidden group-hover:flex items-center justify-center pointer-events-none z-10">
+                                              <div className="bg-red-900/90 text-red-200 text-xs px-2 py-1 rounded shadow-lg border border-red-500/50 backdrop-blur-[1px]">
+                                                  Port {conflictingPorts.join(', ')} occupied
+                                              </div>
+                                          </div>
+                                      )}
+                                  </div>
+                              );
+                          })}
+                      </div>
+
+                      {/* Custom Forwarding */}
+                      <div className="border-t border-slate-700 pt-4 mt-2">
+                          <h4 className="text-xs font-bold text-slate-400 uppercase mb-2">Custom Projection</h4>
+                          <div className="flex gap-2">
+                              <input 
+                                placeholder="Port (e.g. 8080)" 
+                                className="bg-slate-900 border border-slate-600 rounded px-2 py-2 text-xs text-white outline-none w-24 focus:border-blue-500" 
+                                value={customPort} 
+                                onChange={e => setCustomPort(e.target.value)} 
+                              />
+                              <input 
+                                placeholder="Service Name" 
+                                className="bg-slate-900 border border-slate-600 rounded px-2 py-2 text-xs text-white outline-none flex-1 focus:border-blue-500" 
+                                value={customService} 
+                                onChange={e => setCustomService(e.target.value)} 
+                              />
+                              <button 
+                                onClick={handleStartCustomTunnel} 
+                                disabled={!customPort} 
+                                className="bg-blue-600 hover:bg-blue-500 text-white px-3 py-1 rounded text-xs font-bold disabled:opacity-50"
+                              >
+                                OPEN
+                              </button>
+                          </div>
+                      </div>
+                  </div>
+              </div>
+          </div>
       )}
 
     </div>

@@ -1,6 +1,4 @@
-
 import net from 'net';
-import { findActorByIp, insertLog } from './database.js';
 
 let recordedSessions = [];
 let trapSessions = {};
@@ -12,27 +10,15 @@ const HONEYPOT_PORTS = {
     HTTP: 10080
 };
 
-const createSession = async (socket, protocol) => {
+const createSession = (socket, protocol) => {
     const startTime = Date.now();
     const sessionId = `sess-${protocol.toLowerCase()}-${startTime}`;
-    // When forwarded via socat, remoteAddress is the AGENT's IP.
     const remoteAddress = socket.remoteAddress ? socket.remoteAddress.replace('::ffff:', '') : 'Unknown';
     
-    // Resolve Actor
-    let actorId = 'unknown';
-    let attackerIp = remoteAddress;
-    
-    const actor = await findActorByIp(remoteAddress);
-    if (actor) {
-        actorId = actor.ActorId;
-        // Since we don't have proxy protocol, the "Attacker IP" is effectively the Agent relaying it.
-        // We denote this in the UI usually, but here we store the IP we see.
-    }
-
     const session = {
         id: sessionId,
-        actorId: actorId,
-        attackerIp: attackerIp,
+        actorId: 'unknown',
+        attackerIp: remoteAddress,
         protocol: protocol,
         startTime: new Date(startTime),
         durationSeconds: 0,
@@ -41,15 +27,6 @@ const createSession = async (socket, protocol) => {
 
     recordedSessions.unshift(session);
     if (recordedSessions.length > 50) recordedSessions.pop();
-
-    // Log the event to DB so Topology lights up
-    insertLog({
-        actorId: actorId,
-        level: 'CRITICAL',
-        process: `honey_${protocol.toLowerCase()}`,
-        message: `[GHOST] Active High-Interaction Session: ${protocol} connection captured via tunnel.`,
-        sourceIp: attackerIp
-    });
 
     return {
         session,
@@ -66,8 +43,8 @@ const createSession = async (socket, protocol) => {
 
 export const startHoneypots = () => {
     // FTP
-    const ftpServer = net.createServer(async (socket) => {
-        const { record } = await createSession(socket, 'FTP');
+    const ftpServer = net.createServer((socket) => {
+        const { record } = createSession(socket, 'FTP');
         const send = (msg) => { socket.write(msg); record('OUTPUT', msg); };
         send('220 (vsFTPd 2.3.4)\r\n');
         socket.on('data', (data) => {
@@ -83,8 +60,8 @@ export const startHoneypots = () => {
     ftpServer.listen(HONEYPOT_PORTS.FTP);
 
     // Telnet
-    const telnetServer = net.createServer(async (socket) => {
-        const { record } = await createSession(socket, 'TELNET');
+    const telnetServer = net.createServer((socket) => {
+        const { record } = createSession(socket, 'TELNET');
         let state = 'LOGIN';
         const send = (msg) => { socket.write(msg); record('OUTPUT', msg); };
         send('\r\nUbuntu 20.04.6 LTS\r\nserver login: ');
@@ -98,8 +75,8 @@ export const startHoneypots = () => {
     telnetServer.listen(HONEYPOT_PORTS.TELNET);
 
     // Redis
-    const redisServer = net.createServer(async (socket) => {
-        const { record } = await createSession(socket, 'REDIS');
+    const redisServer = net.createServer((socket) => {
+        const { record } = createSession(socket, 'REDIS');
         const send = (msg) => { socket.write(msg); record('OUTPUT', msg); };
         socket.on('data', (data) => {
             record('INPUT', data);
@@ -129,26 +106,4 @@ export const interactTrap = (input) => {
     if (input && input.toUpperCase().startsWith('USER')) return { response: "331 Please specify the password.\r\n" };
     if (input && input.toUpperCase().startsWith('PASS')) return { response: "530 Login incorrect.\r\n" };
     return { response: "500 Unknown command.\r\n" };
-};
-
-// --- NEW: Add Agent Recorded Session ---
-export const addAgentSession = (sessionData) => {
-    try {
-        const session = {
-            id: `sess-agent-${Date.now()}-${Math.random().toString(36).substr(2,4)}`,
-            actorId: sessionData.actorId || 'unknown',
-            attackerIp: sessionData.attackerIp || 'unknown',
-            protocol: sessionData.protocol || 'TCP',
-            startTime: new Date(sessionData.startTime),
-            durationSeconds: sessionData.durationSeconds || 0,
-            frames: sessionData.frames || []
-        };
-        recordedSessions.unshift(session);
-        if (recordedSessions.length > 50) recordedSessions.pop();
-        console.log(`[SESSION] Added ${session.protocol} session from ${session.actorId}`);
-        return true;
-    } catch (e) {
-        console.error("Error adding agent session:", e);
-        return false;
-    }
 };

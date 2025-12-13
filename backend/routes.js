@@ -4,7 +4,7 @@ import { authenticator } from 'otplib';
 import QRCode from 'qrcode';
 import sql from 'mssql';
 import { getDbPool, connectToDb, saveDbConfigLocal, runSchemaMigrations, refreshSyslogConfig, sendToSyslog, getDbConfig } from './database.js';
-import { getSessions, deleteSession, initTrap, interactTrap, addAgentSession } from './honeypot.js';
+import { getSessions, deleteSession, initTrap, interactTrap } from './honeypot.js';
 import { CURRENT_AGENT_VERSION, generateAgentScript } from './agent-script.js';
 
 const router = express.Router();
@@ -372,7 +372,7 @@ router.post('/audit', async (req, res) => {
     res.json({success: true});
 });
 
-// --- AGENT LOG INGESTION ---
+// --- AGENT LOG INGESTION (New) ---
 router.post('/agent/log', async (req, res) => {
     const { actorId, level, process, message, sourceIp } = req.body;
     const db = getDbPool();
@@ -403,17 +403,6 @@ router.post('/agent/log', async (req, res) => {
     }
 });
 
-// --- NEW: AGENT SESSION INGESTION ---
-router.post('/agent/session', async (req, res) => {
-    const sessionData = req.body;
-    const db = getDbPool();
-    
-    // In-memory or DB store logic
-    // For now, we update the in-memory recordedSessions which the frontend polls via /sessions
-    const success = addAgentSession(sessionData);
-    res.json({ success });
-});
-
 // --- RECON DATA ---
 router.get('/recon/wifi', async (req, res) => {
     const db = getDbPool(); if(!db) return res.json([]);
@@ -427,13 +416,22 @@ router.get('/recon/bluetooth', async (req, res) => {
     res.json(r.recordset.map(b => ({id: b.Id, name: b.Name, mac: b.Mac, rssi: b.Rssi, type: b.Type, actorId: b.ActorId, actorName: b.ActorName, lastSeen: b.LastSeen})));
 });
 
-// AGENT RECON Data Upload (WiFi/BT) - WITH DEDUPLICATION (MERGE)
+// NEW: Agent Recon Data Upload (WiFi/BT) - WITH DEDUPLICATION (MERGE)
 router.post('/agent/recon', async (req, res) => {
     const { actorId, type, data } = req.body;
     const db = getDbPool();
     
-    if (!db) return res.json({success: false, error: "DB Disconnected"});
-    if (!data || !Array.isArray(data)) return res.json({success: false, error: "Invalid Data"});
+    console.log(`[API-RECON] Received from ${actorId} | Type: ${type} | Count: ${data ? data.length : 0}`);
+
+    if (!db) {
+        console.error("[API-RECON] Database not connected!");
+        return res.json({success: false, error: "DB Disconnected"});
+    }
+
+    if (!data || !Array.isArray(data)) {
+        console.error("[API-RECON] Invalid data format (not array)");
+        return res.json({success: false, error: "Invalid Data"});
+    }
 
     // RESOLVE ACTOR NAME FROM DB TO DISPLAY IN RECON TABLE
     let resolvedActorName = 'Agent';
@@ -442,7 +440,9 @@ router.post('/agent/recon', async (req, res) => {
         if (actorResult.recordset.length > 0) {
             resolvedActorName = actorResult.recordset[0].Name;
         }
-    } catch (e) {}
+    } catch (e) {
+        console.warn("[API-RECON] Failed to resolve actor name:", e.message);
+    }
 
     try {
         if (type === 'WIFI') {
@@ -479,6 +479,7 @@ router.post('/agent/recon', async (req, res) => {
                         `);
                      successCount++;
                  } catch (err) {
+                     console.error("SQL Error on Wifi Item:", err.message);
                      failCount++;
                  }
              }
@@ -486,10 +487,13 @@ router.post('/agent/recon', async (req, res) => {
 
         } else if (type === 'BLUETOOTH') {
              let successCount = 0;
+             
              for (const dev of data) {
                  try {
                      if(!dev.mac) continue;
                      const id = `bt-${actorId}-${dev.mac.replace(/:/g,'')}`;
+                     
+                     // MERGE Logic for Deduplication
                      await db.request()
                         .input('id', id)
                         .input('name', dev.name || 'Unknown')
@@ -508,13 +512,14 @@ router.post('/agent/recon', async (req, res) => {
                                 VALUES (@id, @name, @mac, @rssi, @type, @aid, @aname, GETDATE());
                         `);
                      successCount++;
-                 } catch (err) {}
+                 } catch (err) { console.error("SQL Error BT:", err.message); }
              }
              res.json({success: true, processed: successCount});
         } else {
             res.json({success: false, error: "Unknown Type"});
         }
     } catch (e) {
+        console.error("[API-RECON] Critical Error", e);
         res.json({success: false, error: e.message});
     }
 });

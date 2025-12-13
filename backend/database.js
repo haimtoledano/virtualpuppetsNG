@@ -57,41 +57,6 @@ export const sendToSyslog = (level, processName, message) => {
     client.send(msg, syslogConfig.port, syslogConfig.host, (err) => { client.close(); });
 };
 
-// --- NEW HELPER FUNCTIONS FOR HONEYPOT ---
-export const findActorByIp = async (ip) => {
-    if (!dbPool) return null;
-    try {
-        // Check exact match first
-        const res = await dbPool.request().input('ip', ip).query("SELECT ActorId, Name FROM Actors WHERE LocalIp = @ip");
-        if (res.recordset.length > 0) return res.recordset[0];
-        
-        // If not found, and IP is localhost, might be local dev
-        if (ip === '127.0.0.1' || ip === '::1') return { ActorId: 'local-dev', Name: 'Local Agent' };
-        
-        return null;
-    } catch (e) {
-        console.error("Actor Lookup Error", e);
-        return null;
-    }
-};
-
-export const insertLog = async (entry) => {
-    if (!dbPool) return;
-    try {
-        const logId = `log-${Date.now()}-${Math.random().toString(36).substr(2,4)}`;
-        await dbPool.request()
-            .input('lid', logId)
-            .input('aid', entry.actorId || 'unknown')
-            .input('lvl', entry.level || 'INFO')
-            .input('proc', entry.process || 'honeypot')
-            .input('msg', entry.message || '')
-            .input('ip', entry.sourceIp || '0.0.0.0')
-            .query("INSERT INTO Logs (LogId, ActorId, Level, Process, Message, SourceIp, Timestamp) VALUES (@lid, @aid, @lvl, @proc, @msg, @ip, GETDATE())");
-    } catch (e) {
-        console.error("Insert Log Error", e);
-    }
-};
-
 export const runSchemaMigrations = async () => {
     if (!dbPool) return;
     const req = new sql.Request(dbPool);
