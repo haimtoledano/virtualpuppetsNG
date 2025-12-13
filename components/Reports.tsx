@@ -1,5 +1,4 @@
 
-
 import React, { useState, useEffect, useRef } from 'react';
 import { Report, SystemConfig, User, LogEntry, Actor } from '../types';
 import { getReports, generateReport, getSystemConfig, deleteReport } from '../services/dbService';
@@ -169,7 +168,7 @@ const Reports: React.FC<ReportsProps> = ({ currentUser, logs = [], actors = [] }
               if (part.startsWith('```mermaid')) {
                   const code = part.replace('```mermaid', '').replace('```', '').trim();
                   return (
-                      <div key={index} className="my-6 flex justify-center bg-slate-100 p-4 rounded border border-slate-200">
+                      <div key={index} className="my-6 flex justify-center bg-slate-100 p-4 rounded border border-slate-200 print:border-0 print:bg-transparent">
                           <pre className="mermaid">
                               {code}
                           </pre>
@@ -196,7 +195,7 @@ const Reports: React.FC<ReportsProps> = ({ currentUser, logs = [], actors = [] }
               <div className="space-y-8 my-8 print:break-inside-avoid">
                   {/* Timeline Chart */}
                   {timeline.length > 0 && (
-                      <div className="bg-slate-50 border border-slate-200 p-4 rounded-lg">
+                      <div className="bg-slate-50 border border-slate-200 p-4 rounded-lg print:break-inside-avoid">
                           <h4 className="text-xs font-bold text-slate-500 uppercase mb-4 flex items-center">
                               <Activity className="w-4 h-4 mr-2" /> Threat Velocity (Events/Hour)
                           </h4>
@@ -221,9 +220,9 @@ const Reports: React.FC<ReportsProps> = ({ currentUser, logs = [], actors = [] }
                   )}
 
                   {/* Protocol Distribution */}
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6 print:block print:space-y-6">
                       {protocols.length > 0 && (
-                          <div className="bg-slate-50 border border-slate-200 p-4 rounded-lg">
+                          <div className="bg-slate-50 border border-slate-200 p-4 rounded-lg print:break-inside-avoid">
                               <h4 className="text-xs font-bold text-slate-500 uppercase mb-4 flex items-center">
                                   <Target className="w-4 h-4 mr-2" /> Attack Surface (By Protocol)
                               </h4>
@@ -245,7 +244,7 @@ const Reports: React.FC<ReportsProps> = ({ currentUser, logs = [], actors = [] }
 
                       {/* Top Attackers List */}
                       {content.incidentDetails?.topSources && (
-                          <div className="bg-slate-50 border border-slate-200 p-4 rounded-lg flex flex-col">
+                          <div className="bg-slate-50 border border-slate-200 p-4 rounded-lg flex flex-col print:break-inside-avoid">
                               <h4 className="text-xs font-bold text-slate-500 uppercase mb-3 flex items-center">
                                   <AlertOctagon className="w-4 h-4 mr-2" /> Top Threat Sources
                               </h4>
@@ -275,8 +274,8 @@ const Reports: React.FC<ReportsProps> = ({ currentUser, logs = [], actors = [] }
       };
 
       return (
-          <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-              <div className="bg-white text-slate-900 w-full max-w-4xl h-[85vh] rounded-lg shadow-2xl flex flex-col overflow-hidden">
+          <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4 print:p-0 print:bg-white print:fixed print:inset-0 print:z-[10000] print:block print:h-auto print:overflow-visible">
+              <div className="bg-white text-slate-900 w-full max-w-4xl h-[85vh] rounded-lg shadow-2xl flex flex-col overflow-hidden print:shadow-none print:w-full print:max-w-none print:h-auto print:max-h-none print:rounded-none print:overflow-visible">
                   {/* Toolbar */}
                   <div className="bg-slate-100 border-b border-slate-200 p-3 flex justify-between items-center print:hidden">
                       <h3 className="font-bold text-slate-600">Document Viewer</h3>
@@ -291,8 +290,8 @@ const Reports: React.FC<ReportsProps> = ({ currentUser, logs = [], actors = [] }
                   </div>
                   
                   {/* Document Page */}
-                  <div className="flex-1 overflow-y-auto bg-slate-500 p-8 print:p-0 print:overflow-visible">
-                      <div className="bg-white max-w-3xl mx-auto shadow-xl min-h-[1000px] p-12 relative print:shadow-none print:w-full print:max-w-none">
+                  <div className="flex-1 overflow-y-auto bg-slate-500 p-8 print:p-0 print:bg-white print:overflow-visible print:h-auto">
+                      <div className="bg-white max-w-3xl mx-auto shadow-xl min-h-[1000px] p-12 relative print:shadow-none print:w-full print:max-w-none print:p-8 print:min-h-0 print:h-auto">
                           {/* Header */}
                           <div className="flex justify-between items-start border-b-2 border-slate-800 pb-6 mb-8">
                               <div>
@@ -309,7 +308,7 @@ const Reports: React.FC<ReportsProps> = ({ currentUser, logs = [], actors = [] }
 
                           {/* Title */}
                           <div className="text-center mb-10">
-                              <div className="inline-block bg-slate-100 px-4 py-1 rounded-full text-xs font-bold uppercase tracking-widest text-slate-500 mb-4">{report.type.replace('_', ' ')}</div>
+                              <div className="inline-block bg-slate-100 px-4 py-1 rounded-full text-xs font-bold uppercase tracking-widest text-slate-500 mb-4 print:border print:border-slate-200">{report.type.replace('_', ' ')}</div>
                               <h2 className="text-2xl font-bold text-slate-800 uppercase underline decoration-4 decoration-blue-500 underline-offset-4">{report.title}</h2>
                               <p className="text-slate-500 mt-2 italic">Generated by Officer: {report.generatedBy}</p>
                           </div>
@@ -318,16 +317,16 @@ const Reports: React.FC<ReportsProps> = ({ currentUser, logs = [], actors = [] }
                           
                           {/* 1. AUTO SNAPSHOT STATS */}
                           {report.type === 'SECURITY_AUDIT' && (
-                              <div className="grid grid-cols-3 gap-6 mb-10">
-                                  <div className="bg-slate-50 p-4 border border-slate-200 text-center">
+                              <div className="grid grid-cols-3 gap-6 mb-10 print:mb-6">
+                                  <div className="bg-slate-50 p-4 border border-slate-200 text-center print:break-inside-avoid">
                                       <div className="text-3xl font-bold text-blue-600">{report.content.totalEvents?.toLocaleString() || 0}</div>
                                       <div className="text-xs uppercase font-bold text-slate-500 mt-1">Total Log Events</div>
                                   </div>
-                                  <div className="bg-slate-50 p-4 border border-slate-200 text-center">
+                                  <div className="bg-slate-50 p-4 border border-slate-200 text-center print:break-inside-avoid">
                                       <div className="text-3xl font-bold text-red-500">{report.content.compromisedNodes || 0}</div>
                                       <div className="text-xs uppercase font-bold text-slate-500 mt-1">Active Compromises</div>
                                   </div>
-                                  <div className="bg-slate-50 p-4 border border-slate-200 text-center">
+                                  <div className="bg-slate-50 p-4 border border-slate-200 text-center print:break-inside-avoid">
                                       <div className="text-3xl font-bold text-emerald-600">{report.content.activeNodes || 0}</div>
                                       <div className="text-xs uppercase font-bold text-slate-500 mt-1">Online Agents</div>
                                   </div>
@@ -338,7 +337,7 @@ const Reports: React.FC<ReportsProps> = ({ currentUser, logs = [], actors = [] }
                           {report.type === 'INCIDENT_LOG' && (
                                <div className="mb-8">
                                    {/* Executive Summary Box */}
-                                   <div className="bg-slate-50 border border-l-4 border-l-red-500 p-6 mb-8 shadow-sm">
+                                   <div className="bg-slate-50 border border-l-4 border-l-red-500 p-6 mb-8 shadow-sm print:break-inside-avoid">
                                        <h3 className="text-slate-700 font-bold uppercase mb-4 flex items-center"><AlertTriangle className="w-5 h-5 mr-2 text-red-500" /> Executive Summary</h3>
                                        <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
                                            <div><div className="text-[10px] text-slate-400 font-bold uppercase">Scope</div><div className="font-bold">{report.content.incidentFilters?.dateRange}</div></div>
@@ -353,7 +352,7 @@ const Reports: React.FC<ReportsProps> = ({ currentUser, logs = [], actors = [] }
 
                                    {/* Forensic Evidence Log Table */}
                                    {report.content.incidentDetails?.evidenceLogs && report.content.incidentDetails.evidenceLogs.length > 0 && (
-                                       <div className="mt-8">
+                                       <div className="mt-8 print:break-before-auto">
                                            <h3 className="text-sm font-bold uppercase border-b border-slate-300 mb-4 pb-1 flex items-center"><Hash className="w-4 h-4 mr-2"/> Forensic Evidence (Sample)</h3>
                                            <table className="w-full text-xs text-left border-collapse">
                                                <thead className="bg-slate-100 text-slate-600">
@@ -366,7 +365,7 @@ const Reports: React.FC<ReportsProps> = ({ currentUser, logs = [], actors = [] }
                                                </thead>
                                                <tbody>
                                                    {report.content.incidentDetails.evidenceLogs.map((log: any, i: number) => (
-                                                       <tr key={i}>
+                                                       <tr key={i} className="print:break-inside-avoid">
                                                            <td className="p-2 border border-slate-200 font-mono whitespace-nowrap">{new Date(log.Timestamp).toLocaleString()}</td>
                                                            <td className={`p-2 border border-slate-200 font-bold ${log.Level === 'CRITICAL' ? 'text-red-600' : 'text-slate-600'}`}>{log.Level}</td>
                                                            <td className="p-2 border border-slate-200 font-mono">{log.Process}</td>
@@ -383,8 +382,8 @@ const Reports: React.FC<ReportsProps> = ({ currentUser, logs = [], actors = [] }
                           {/* 3. FORENSIC SNAPSHOT DISPLAY */}
                           {report.type === 'FORENSIC_SNAPSHOT' && report.content.snapshotData && (
                               <div className="space-y-6 mb-8">
-                                  <div className="grid grid-cols-2 gap-4">
-                                       <div className="border p-4 bg-slate-50 rounded">
+                                  <div className="grid grid-cols-2 gap-4 print:block print:space-y-4">
+                                       <div className="border p-4 bg-slate-50 rounded print:break-inside-avoid">
                                             <h4 className="font-bold text-xs uppercase mb-2 flex items-center"><Cpu className="w-3 h-3 mr-1"/> Top Processes</h4>
                                             <table className="w-full text-xs">
                                                 <thead><tr className="border-b border-slate-300"><th className="text-left">PID</th><th>CMD</th><th className="text-right">CPU</th></tr></thead>
@@ -399,16 +398,16 @@ const Reports: React.FC<ReportsProps> = ({ currentUser, logs = [], actors = [] }
                                                 </tbody>
                                             </table>
                                        </div>
-                                       <div className="border p-4 bg-slate-50 rounded">
+                                       <div className="border p-4 bg-slate-50 rounded print:break-inside-avoid">
                                             <h4 className="font-bold text-xs uppercase mb-2 flex items-center"><Network className="w-3 h-3 mr-1"/> Network</h4>
-                                            <div className="text-[10px] font-mono whitespace-pre-wrap overflow-hidden h-32">
+                                            <div className="text-[10px] font-mono whitespace-pre-wrap overflow-hidden h-32 print:h-auto">
                                                 {report.content.snapshotData.connections.slice(0,5).join('\n')}
                                             </div>
                                        </div>
                                   </div>
-                                  <div className="border p-4 bg-slate-50 rounded">
+                                  <div className="border p-4 bg-slate-50 rounded print:break-inside-avoid">
                                        <h4 className="font-bold text-xs uppercase mb-2 flex items-center"><Key className="w-3 h-3 mr-1"/> Auth Log Snippet</h4>
-                                       <div className="text-[10px] font-mono whitespace-pre-wrap bg-white border p-2 rounded">
+                                       <div className="text-[10px] font-mono whitespace-pre-wrap bg-white border p-2 rounded print:border-none print:p-0">
                                             {report.content.snapshotData.authLogs.slice(0,5).join('\n')}
                                        </div>
                                   </div>
@@ -417,7 +416,7 @@ const Reports: React.FC<ReportsProps> = ({ currentUser, logs = [], actors = [] }
 
                           {/* 4. BODY TEXT (Summary or Custom/AI with Mermaid) */}
                           {report.type !== 'INCIDENT_LOG' && (
-                              <div className="mb-8">
+                              <div className="mb-8 print:break-inside-avoid">
                                   <h3 className="text-sm font-bold uppercase border-b border-slate-300 mb-4 pb-1">
                                       {report.type === 'CUSTOM' ? 'Analyst Notes' : report.type === 'AI_INSIGHT' ? 'AI Assessment & Visualization' : report.type === 'FORENSIC_SNAPSHOT' ? 'Artifact Summary' : 'Executive Summary'}
                                   </h3>
@@ -429,7 +428,7 @@ const Reports: React.FC<ReportsProps> = ({ currentUser, logs = [], actors = [] }
 
                           {/* 5. TOP ATTACKERS (Only for Audit) */}
                           {report.type === 'SECURITY_AUDIT' && report.content.topAttackers && (
-                              <div className="mb-8">
+                              <div className="mb-8 print:break-inside-avoid">
                                   <h3 className="text-sm font-bold uppercase border-b border-slate-300 mb-2 pb-1">Top Threat Sources</h3>
                                   <table className="w-full text-sm text-left">
                                       <thead className="bg-slate-100">
@@ -453,7 +452,7 @@ const Reports: React.FC<ReportsProps> = ({ currentUser, logs = [], actors = [] }
                           )}
 
                           {/* Footer */}
-                          <div className="absolute bottom-8 left-12 right-12 border-t border-slate-200 pt-4 flex justify-between items-center text-xs text-slate-400">
+                          <div className="absolute bottom-8 left-12 right-12 border-t border-slate-200 pt-4 flex justify-between items-center text-xs text-slate-400 print:static print:mt-12 print:text-black">
                               <span>CONFIDENTIAL // INTERNAL USE ONLY</span>
                               <span className="flex items-center"><ShieldCheck className="w-3 h-3 mr-1" /> VPP-SECURE-DOC</span>
                           </div>

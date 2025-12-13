@@ -1,3 +1,4 @@
+
 <!DOCTYPE html>
 <html lang="en" class="dark">
   <head>
@@ -43,6 +44,19 @@
       ::-webkit-scrollbar-thumb:hover {
         background: #475569; 
       }
+
+      /* Print Optimization */
+      @media print {
+        body, html, #root {
+          overflow: visible !important;
+          height: auto !important;
+          background: white !important;
+        }
+        /* Hide scrollbars in print */
+        ::-webkit-scrollbar {
+          display: none;
+        }
+      }
     </style>
 <script type="importmap">
 {
@@ -71,7 +85,7 @@
 }
 </script>
 </head>
-  <body class="bg-cyber-900 text-slate-200 antialiased overflow-hidden">
+  <body class="bg-cyber-900 text-slate-200 antialiased overflow-hidden print:overflow-visible">
     <div id="root"></div>
     <script type="module" src="/index.tsx"></script>
   </body>
