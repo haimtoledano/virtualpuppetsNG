@@ -1,6 +1,6 @@
 
-import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { BookOpen, HelpCircle, Video, FileText, ChevronDown, ChevronUp, PlayCircle, ExternalLink, Zap, Shield, Terminal, LifeBuoy, ArrowLeft, CheckCircle, Clock, Play, Pause, Volume2, Maximize, MousePointer2, Plus, LayoutDashboard, Server, X, RefreshCw } from 'lucide-react';
+import React, { useState, useEffect, useRef } from 'react';
+import { BookOpen, HelpCircle, Video, FileText, ChevronDown, ChevronUp, PlayCircle, ExternalLink, Zap, Shield, Terminal, LifeBuoy, ArrowLeft, CheckCircle, Clock, Play, Pause, Volume2, Maximize, MousePointer2, Plus, LayoutDashboard, Server, X, RefreshCw, Radio, Activity, Eye, Search, Camera, Printer, Box } from 'lucide-react';
 
 const TUTORIALS = [
     {
@@ -105,75 +105,225 @@ const FAQS = [
 const MockDashboard = ({ 
     activeModal, 
     pendingCount, 
-    actors 
-}: { activeModal: string | null, pendingCount: number, actors: any[] }) => (
-    <div className="h-full w-full bg-slate-900 flex text-[8px] md:text-[10px] font-sans overflow-hidden select-none">
-        {/* Sidebar */}
-        <div className="w-16 bg-slate-950 border-r border-slate-800 flex flex-col items-center py-4 space-y-4">
-            <div className="w-8 h-8 rounded bg-blue-900/50 mb-2"></div>
-            <div className="w-8 h-8 rounded bg-slate-800 flex items-center justify-center text-slate-500"><LayoutDashboard className="w-4 h-4"/></div>
-            <div className="w-8 h-8 rounded bg-slate-800 flex items-center justify-center text-slate-500"><Server className="w-4 h-4"/></div>
-            <div className="w-8 h-8 rounded bg-slate-800 flex items-center justify-center text-slate-500"><Plus className="w-4 h-4"/></div>
-        </div>
-        {/* Main Content */}
-        <div className="flex-1 p-4 bg-slate-900/90 relative">
-            <div className="flex justify-between items-center mb-4">
-                <div className="h-4 w-32 bg-slate-800 rounded"></div>
-                <div className="bg-blue-600 text-white px-2 py-1 rounded flex items-center shadow-lg cursor-pointer" id="btn-enroll">
-                    <Plus className="w-3 h-3 mr-1" /> Enroll
-                </div>
+    actors,
+    viewMode = 'FLEET', // 'FLEET' or 'DETAIL'
+    detailTab = 'OVERVIEW',
+    onTabChange,
+    activePersona = 'Generic Linux',
+    sentinelActive = false,
+    forensicData = null
+}: any) => {
+    
+    return (
+        <div className="h-full w-full bg-slate-900 flex text-[8px] md:text-[10px] font-sans overflow-hidden select-none relative">
+            {/* Sidebar */}
+            <div className="w-12 bg-slate-950 border-r border-slate-800 flex flex-col items-center py-4 space-y-4 shrink-0">
+                <div className="w-6 h-6 rounded bg-blue-900/50 mb-2"></div>
+                <div className={`w-6 h-6 rounded flex items-center justify-center ${viewMode === 'FLEET' ? 'bg-blue-600 text-white' : 'bg-slate-800 text-slate-500'}`}><LayoutDashboard className="w-3 h-3"/></div>
+                <div className="w-6 h-6 rounded bg-slate-800 flex items-center justify-center text-slate-500"><Server className="w-3 h-3"/></div>
+                <div className="w-6 h-6 rounded bg-slate-800 flex items-center justify-center text-slate-500"><Plus className="w-3 h-3"/></div>
             </div>
-            {/* Grid */}
-            <div className="grid grid-cols-3 gap-2">
-                {actors.map(a => (
-                    <div key={a.id} className={`h-16 rounded border p-2 ${a.status === 'ONLINE' ? 'bg-slate-800 border-slate-700' : 'bg-red-900/20 border-red-500'}`}>
-                        <div className="flex justify-between mb-1">
-                            <div className="w-4 h-4 rounded bg-slate-700"></div>
-                            <div className={`w-2 h-2 rounded-full ${a.status === 'ONLINE' ? 'bg-emerald-500' : 'bg-red-500'}`}></div>
-                        </div>
-                        <div className="h-2 w-16 bg-slate-700 rounded mb-1"></div>
-                        <div className="h-2 w-10 bg-slate-700/50 rounded"></div>
-                    </div>
-                ))}
-            </div>
-
-            {/* Simulated Modal */}
-            {activeModal === 'ENROLL' && (
-                <div className="absolute inset-0 bg-black/60 flex items-center justify-center backdrop-blur-[1px] animate-fade-in z-20">
-                    <div className="bg-slate-800 border border-slate-600 rounded p-4 w-3/4 shadow-2xl">
-                        <div className="flex justify-between mb-3 border-b border-slate-700 pb-2">
-                            <span className="text-white font-bold">Enroll New Device</span>
-                            <X className="w-3 h-3 text-slate-500" />
-                        </div>
-                        <div className="bg-black p-2 rounded border border-slate-700 mb-3 font-mono text-emerald-400 truncate flex justify-between items-center">
-                            <span>curl -sL http://vpp.io/setup | bash</span>
-                            <span className="bg-slate-700 text-white px-1 rounded ml-2 cursor-pointer hover:bg-slate-600" id="btn-copy">Copy</span>
-                        </div>
-                        <div className="border-t border-slate-700 pt-2">
-                            <div className="flex justify-between items-center">
-                                <span className="text-slate-400">Pending Devices</span>
-                                {pendingCount > 0 ? (
-                                    <span className="bg-blue-600 text-white px-1.5 rounded animate-pulse">{pendingCount} New</span>
-                                ) : <span className="text-slate-600">Waiting...</span>}
+            
+            {/* Main Content */}
+            <div className="flex-1 bg-slate-900/90 relative flex flex-col">
+                
+                {/* FLEET VIEW */}
+                {viewMode === 'FLEET' && (
+                    <div className="p-4 flex-1">
+                        <div className="flex justify-between items-center mb-4">
+                            <div className="h-3 w-24 bg-slate-800 rounded"></div>
+                            <div className="bg-blue-600 text-white px-2 py-1 rounded flex items-center shadow-lg cursor-pointer" id="btn-enroll">
+                                <Plus className="w-2 h-2 mr-1" /> Enroll
                             </div>
-                            {pendingCount > 0 && (
-                                <div className="mt-2 bg-slate-900 p-2 rounded flex justify-between items-center border border-slate-700">
-                                    <div className="flex items-center">
-                                        <Terminal className="w-3 h-3 text-yellow-500 mr-2"/>
-                                        <span>New_Pi_Device</span>
+                        </div>
+                        {/* Grid */}
+                        <div className="grid grid-cols-4 gap-3" id="actor-grid">
+                            {actors.map((a: any) => (
+                                <div key={a.id} id={`actor-${a.id}`} className={`h-16 rounded border p-2 relative group hover:border-blue-500 transition-colors ${a.status === 'ONLINE' ? 'bg-slate-800 border-slate-700' : 'bg-red-900/20 border-red-500'}`}>
+                                    <div className="flex justify-between mb-1">
+                                        <div className="w-3 h-3 rounded bg-slate-700"></div>
+                                        <div className={`w-1.5 h-1.5 rounded-full ${a.status === 'ONLINE' ? 'bg-emerald-500' : 'bg-red-500 animate-pulse'}`}></div>
                                     </div>
-                                    <div className="bg-emerald-600 p-1 rounded text-white cursor-pointer hover:bg-emerald-500" id="btn-approve">
-                                        <CheckCircle className="w-3 h-3"/>
+                                    <div className="h-1.5 w-12 bg-slate-700 rounded mb-1"></div>
+                                    <div className="h-1.5 w-8 bg-slate-700/50 rounded"></div>
+                                    {sentinelActive && a.id === 1 && <div className="absolute top-1 right-1 w-1.5 h-1.5 bg-red-500 rounded-full animate-pulse shadow-[0_0_4px_red]"></div>}
+                                </div>
+                            ))}
+                        </div>
+                    </div>
+                )}
+
+                {/* DETAIL VIEW */}
+                {viewMode === 'DETAIL' && (
+                    <div className="flex-1 flex flex-col">
+                        {/* Header */}
+                        <div className="h-12 border-b border-slate-800 flex items-center px-4 justify-between bg-slate-800/50">
+                            <div className="flex items-center">
+                                <div className="w-6 h-6 rounded bg-slate-700 mr-2 flex items-center justify-center">
+                                    {activePersona.includes('Printer') ? <Printer className="w-3 h-3 text-emerald-400"/> : activePersona.includes('Camera') ? <Camera className="w-3 h-3 text-blue-400"/> : <Terminal className="w-3 h-3 text-slate-400"/>}
+                                </div>
+                                <div>
+                                    <div className="w-16 h-2 bg-slate-600 rounded mb-1"></div>
+                                    <div className="w-10 h-1.5 bg-slate-700 rounded"></div>
+                                </div>
+                            </div>
+                            <div className={`px-2 py-0.5 rounded text-[8px] font-bold ${sentinelActive ? 'bg-red-600 text-white animate-pulse' : 'bg-emerald-900 text-emerald-400'}`}>
+                                {sentinelActive ? 'SENTINEL ACTIVE' : 'ONLINE'}
+                            </div>
+                        </div>
+
+                        {/* Tabs */}
+                        <div className="flex border-b border-slate-800 bg-slate-900" id="detail-tabs">
+                            {['OVERVIEW', 'DECEPTION', 'NETWORK', 'FORENSICS'].map(tab => (
+                                <div 
+                                    key={tab} 
+                                    id={`tab-${tab}`}
+                                    className={`px-3 py-2 text-[8px] font-bold border-b-2 cursor-pointer transition-colors ${detailTab === tab ? 'border-blue-500 text-blue-400 bg-blue-900/10' : 'border-transparent text-slate-500'}`}
+                                >
+                                    {tab}
+                                </div>
+                            ))}
+                        </div>
+
+                        {/* Tab Content */}
+                        <div className="flex-1 p-4 bg-slate-900 overflow-hidden">
+                            {detailTab === 'OVERVIEW' && (
+                                <div className="space-y-3">
+                                    <div className="grid grid-cols-2 gap-3">
+                                        <div className="bg-slate-800 h-16 rounded border border-slate-700 p-2">
+                                            <div className="text-[8px] text-slate-500 mb-1">CPU Load</div>
+                                            <div className="w-full bg-slate-700 h-1 rounded overflow-hidden"><div className="w-1/3 bg-blue-500 h-full"></div></div>
+                                        </div>
+                                        <div className="bg-slate-800 h-16 rounded border border-slate-700 p-2">
+                                            <div className="text-[8px] text-slate-500 mb-1">Memory</div>
+                                            <div className="w-full bg-slate-700 h-1 rounded overflow-hidden"><div className="w-1/2 bg-purple-500 h-full"></div></div>
+                                        </div>
                                     </div>
+                                    <div className="bg-slate-800 h-24 rounded border border-slate-700 p-2">
+                                        <div className="text-[8px] text-slate-500 mb-1">Recent Activity</div>
+                                        <div className="space-y-1">
+                                            <div className="h-1.5 w-3/4 bg-slate-700/50 rounded"></div>
+                                            <div className="h-1.5 w-1/2 bg-slate-700/50 rounded"></div>
+                                            <div className="h-1.5 w-2/3 bg-slate-700/50 rounded"></div>
+                                        </div>
+                                    </div>
+                                </div>
+                            )}
+
+                            {detailTab === 'DECEPTION' && (
+                                <div className="space-y-3">
+                                    <div className="text-[8px] text-slate-400 font-bold uppercase mb-1">Active Persona</div>
+                                    <div className="bg-slate-800 border border-slate-700 rounded p-2 flex items-center justify-between">
+                                        <div className="flex items-center">
+                                            <Box className="w-4 h-4 text-blue-400 mr-2"/>
+                                            <span className="text-white font-bold">{activePersona}</span>
+                                        </div>
+                                        <div className="h-2 w-2 rounded-full bg-emerald-500"></div>
+                                    </div>
+                                    <div className="text-[8px] text-slate-400 font-bold uppercase mt-3 mb-1">Library</div>
+                                    <div className="grid grid-cols-2 gap-2">
+                                        <div id="persona-printer" className="bg-slate-800 hover:border-blue-500 border border-slate-700 p-2 rounded cursor-pointer group">
+                                            <Printer className="w-4 h-4 text-slate-500 group-hover:text-blue-400 mb-1"/>
+                                            <div className="text-[8px] text-slate-300">HP Printer</div>
+                                        </div>
+                                        <div className="bg-slate-800 border border-slate-700 p-2 rounded opacity-50">
+                                            <Camera className="w-4 h-4 text-slate-500 mb-1"/>
+                                            <div className="text-[8px] text-slate-300">IP Camera</div>
+                                        </div>
+                                    </div>
+                                </div>
+                            )}
+
+                            {detailTab === 'NETWORK' && (
+                                <div className="space-y-4">
+                                    <div className={`p-3 rounded border flex justify-between items-center ${sentinelActive ? 'bg-red-900/20 border-red-500' : 'bg-slate-800 border-slate-700'}`}>
+                                        <div>
+                                            <div className={`font-bold ${sentinelActive ? 'text-red-400' : 'text-white'}`}>TCP Sentinel</div>
+                                            <div className="text-[7px] text-slate-500">Paranoid Mode (Log all SYN)</div>
+                                        </div>
+                                        <div id="toggle-sentinel" className={`w-8 h-4 rounded-full relative cursor-pointer transition-colors ${sentinelActive ? 'bg-red-600' : 'bg-slate-600'}`}>
+                                            <div className={`absolute top-0.5 w-3 h-3 bg-white rounded-full transition-all ${sentinelActive ? 'left-[18px]' : 'left-0.5'}`}></div>
+                                        </div>
+                                    </div>
+                                    
+                                    <div className="bg-slate-800 border border-slate-700 rounded p-2 opacity-60">
+                                        <div className="text-[8px] text-slate-500 mb-2">Active Tunnels</div>
+                                        <div className="h-8 border-l-2 border-slate-600 pl-2 flex flex-col justify-center">
+                                            <div className="h-1.5 w-16 bg-slate-700 rounded mb-1"></div>
+                                            <div className="h-1.5 w-10 bg-slate-700/30 rounded"></div>
+                                        </div>
+                                    </div>
+                                </div>
+                            )}
+
+                            {detailTab === 'FORENSICS' && (
+                                <div className="space-y-4 h-full flex flex-col">
+                                    {!forensicData ? (
+                                        <div className="flex-1 flex flex-col items-center justify-center border-2 border-dashed border-slate-700 rounded">
+                                            <Search className="w-6 h-6 text-slate-600 mb-2"/>
+                                            <button id="btn-forensic" className="bg-red-600 text-white px-3 py-1.5 rounded font-bold text-[9px] shadow-lg hover:bg-red-500 transition-colors">
+                                                RUN FORENSIC SCAN
+                                            </button>
+                                        </div>
+                                    ) : (
+                                        <div className="flex-1 bg-slate-800 rounded border border-slate-700 p-2 overflow-hidden flex flex-col animate-fade-in">
+                                            <div className="text-[8px] text-emerald-400 font-mono mb-2 border-b border-slate-700 pb-1">SNAPSHOT COMPLETE</div>
+                                            <div className="space-y-1.5 flex-1 overflow-hidden">
+                                                <div className="bg-black/50 p-1.5 rounded">
+                                                    <div className="text-[7px] text-slate-500 uppercase mb-0.5">Top Process</div>
+                                                    <div className="font-mono text-red-400">./xmrig --donate-level 1</div>
+                                                </div>
+                                                <div className="bg-black/50 p-1.5 rounded">
+                                                    <div className="text-[7px] text-slate-500 uppercase mb-0.5">Network Conn</div>
+                                                    <div className="font-mono text-yellow-400">ESTAB 192.168.1.55:4444</div>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    )}
                                 </div>
                             )}
                         </div>
                     </div>
-                </div>
-            )}
+                )}
+
+                {/* Simulated Modal */}
+                {activeModal === 'ENROLL' && (
+                    <div className="absolute inset-0 bg-black/60 flex items-center justify-center backdrop-blur-[1px] animate-fade-in z-20">
+                        <div className="bg-slate-800 border border-slate-600 rounded p-4 w-3/4 shadow-2xl">
+                            <div className="flex justify-between mb-3 border-b border-slate-700 pb-2">
+                                <span className="text-white font-bold">Enroll New Device</span>
+                                <X className="w-3 h-3 text-slate-500" />
+                            </div>
+                            <div className="bg-black p-2 rounded border border-slate-700 mb-3 font-mono text-emerald-400 truncate flex justify-between items-center">
+                                <span>curl -sL http://vpp.io/setup | bash</span>
+                                <span className="bg-slate-700 text-white px-1 rounded ml-2 cursor-pointer hover:bg-slate-600" id="btn-copy">Copy</span>
+                            </div>
+                            <div className="border-t border-slate-700 pt-2">
+                                <div className="flex justify-between items-center">
+                                    <span className="text-slate-400">Pending Devices</span>
+                                    {pendingCount > 0 ? (
+                                        <span className="bg-blue-600 text-white px-1.5 rounded animate-pulse">{pendingCount} New</span>
+                                    ) : <span className="text-slate-600">Waiting...</span>}
+                                </div>
+                                {pendingCount > 0 && (
+                                    <div className="mt-2 bg-slate-900 p-2 rounded flex justify-between items-center border border-slate-700">
+                                        <div className="flex items-center">
+                                            <Terminal className="w-3 h-3 text-yellow-500 mr-2"/>
+                                            <span>New_Pi_Device</span>
+                                        </div>
+                                        <div className="bg-emerald-600 p-1 rounded text-white cursor-pointer hover:bg-emerald-500" id="btn-approve">
+                                            <CheckCircle className="w-3 h-3"/>
+                                        </div>
+                                    </div>
+                                )}
+                            </div>
+                        </div>
+                    </div>
+                )}
+            </div>
         </div>
-    </div>
-);
+    );
+};
 
 // --- ANIMATION ORCHESTRATOR ---
 
@@ -187,6 +337,13 @@ const PlayerEngine = ({ scenario, onFinish }: { scenario: any, onFinish: () => v
     const [activeModal, setActiveModal] = useState<string | null>(null);
     const [pendingCount, setPendingCount] = useState(0);
     const [mockActors, setMockActors] = useState([{id:1, status:'ONLINE'}, {id:2, status:'ONLINE'}, {id:3, status:'OFFLINE'}]);
+    
+    // ADVANCED DASHBOARD STATE (For new tutorials)
+    const [viewMode, setViewMode] = useState<'FLEET' | 'DETAIL'>('FLEET');
+    const [detailTab, setDetailTab] = useState('OVERVIEW');
+    const [activePersona, setActivePersona] = useState('Generic Linux');
+    const [sentinelActive, setSentinelActive] = useState(false);
+    const [forensicData, setForensicData] = useState<any>(null);
 
     // Refs for safe async loop
     const isMounted = useRef(true);
@@ -252,82 +409,133 @@ const PlayerEngine = ({ scenario, onFinish }: { scenario: any, onFinish: () => v
     useEffect(() => {
         const runScenario = async () => {
             if (scenario.id === 1) { // QUICK START
-                // 1. Initial State
                 setLayout('DASHBOARD');
+                setViewMode('FLEET');
                 setMockActors([{id:1, status:'ONLINE'}]);
                 await wait(1000);
 
-                // 2. Click Enroll
-                await moveMouseTo(85, 12); 
-                await click();
+                // Click Enroll
+                await moveMouseTo(85, 12); await click();
                 setActiveModal('ENROLL');
                 await wait(800);
 
-                // 3. Copy Command
-                await moveMouseTo(88, 38);
-                await click(); // Copy
+                // Copy Command
+                await moveMouseTo(88, 38); await click();
                 await wait(500);
 
-                // 4. Switch to Split View (Show Terminal)
+                // Terminal
                 setLayout('SPLIT');
                 await wait(800);
-
-                // 5. Run Command in Terminal
                 await typeLine("pi@raspberry:~ $ curl -sL http://vpp.io/setup | sudo bash");
                 await wait(500);
                 await typeLine("[+] Downloading Agent...");
-                await typeLine("[+] Installing Dependencies...");
-                await wait(1000);
                 await typeLine("[+] Connecting to C2...");
                 await wait(500);
                 
-                // 6. Device Appears
+                // Approve
                 setPendingCount(1);
                 await typeLine("[!] Waiting for approval...");
+                await moveMouseTo(42, 65); await click();
                 
-                // 7. Approve on Dashboard (Right side of split is terminal, Left is Dash)
-                // Mouse needs to go to Left side relative to whole container
-                await moveMouseTo(42, 65); // Coordinates for Approve button in split mode
-                await click();
-                
-                // 8. Success
                 setPendingCount(0);
                 setActiveModal(null);
                 setMockActors(prev => [...prev, {id:2, status:'ONLINE'}]);
                 await typeLine("[OK] Device Adopted!");
-                await typeLine("[OK] Starting Service...");
-                
-                await wait(2000);
-                if(isMounted.current) onFinish();
             } 
-            else if (scenario.id === 2) { // PERSONAS
-                // 1. Dash View
+            else if (scenario.id === 2) { // MASTERING PERSONAS
+                // 1. Initial
                 setLayout('DASHBOARD');
-                await wait(500);
+                setViewMode('FLEET');
+                setMockActors([{id:1, status:'ONLINE'}, {id:2, status:'ONLINE'}]);
+                await wait(1000);
+
+                // 2. Select Actor
+                await moveMouseTo(18, 30); await click();
+                setViewMode('DETAIL');
+                setDetailTab('OVERVIEW');
+                await wait(800);
+
+                // 3. Switch to Deception Tab
+                await moveMouseTo(30, 22); await click(); // Assuming Tab location
+                setDetailTab('DECEPTION');
+                await wait(800);
+
+                // 4. Select Printer Persona
+                await moveMouseTo(20, 50); await click(); // Assuming Printer location in grid
                 
-                // 2. Click Actor
-                await moveMouseTo(20, 20); // First actor grid
-                await click();
-                
-                // 3. Simulate Tab Switch (simplified visually)
-                // We'll just show terminal typing "Switching..."
+                // 5. Split Screen & Execute
                 setLayout('SPLIT');
-                await typeLine("root@node:~ $ vpp-agent --set-persona 'Printer'");
-                await typeLine("[+] Stopping HTTP...");
-                await typeLine("[+] Opening Port 9100...");
-                await typeLine("[OK] Persona Applied: HP LaserJet");
-                await wait(2000);
-                if(isMounted.current) onFinish();
+                await typeLine("root@node:~ $ vpp-agent --set-persona 'HP Printer'");
+                await typeLine("[+] Stopping network services...");
+                await typeLine("[+] Spoofing MAC OUI: Hewlett Packard");
+                await typeLine("[+] Opening Port 9100 (JetDirect)...");
+                await wait(1000);
+                setActivePersona('HP Printer');
+                await typeLine("[OK] Persona Applied Successfully.");
             }
-            else {
-                // Fallback for others
-                setLayout('TERMINAL');
-                await typeLine("Running simulated scenario...");
-                await typeLine("Step 1 complete.");
-                await typeLine("Step 2 complete.");
-                await wait(2000);
-                if(isMounted.current) onFinish();
+            else if (scenario.id === 3) { // SENTINEL MODE
+                // 1. Initial
+                setLayout('DASHBOARD');
+                setViewMode('FLEET');
+                setMockActors([{id:1, status:'ONLINE'}]);
+                await wait(1000);
+
+                // 2. Select Actor
+                await moveMouseTo(18, 30); await click();
+                setViewMode('DETAIL');
+                await wait(500);
+
+                // 3. Network Tab
+                await moveMouseTo(42, 22); await click();
+                setDetailTab('NETWORK');
+                await wait(800);
+
+                // 4. Toggle Sentinel
+                await moveMouseTo(45, 35); await click();
+                setSentinelActive(true);
+                
+                // 5. Terminal Feedback
+                setLayout('SPLIT');
+                await typeLine("root@node:~ $ vpp-agent --sentinel on");
+                await typeLine("[!] ACTIVATING PARANOID MODE");
+                await typeLine("[+] IPTables: LOG --tcp-flags SYN");
+                await wait(1000);
+                await typeLine("[ALERT] INBOUND SYN from 192.168.1.55:44322 -> :80");
+                await typeLine("[ALERT] INBOUND SYN from 192.168.1.55:44323 -> :443");
             }
+            else if (scenario.id === 4) { // FORENSICS
+                // 1. Initial
+                setLayout('DASHBOARD');
+                setViewMode('DETAIL');
+                setDetailTab('OVERVIEW');
+                setMockActors([{id:1, status:'COMPROMISED'}]);
+                await wait(1000);
+
+                // 2. Forensics Tab
+                await moveMouseTo(55, 22); await click();
+                setDetailTab('FORENSICS');
+                await wait(800);
+
+                // 3. Run Scan
+                await moveMouseTo(25, 40); await click(); // Button location
+                
+                // 4. Terminal Process
+                setLayout('SPLIT');
+                await typeLine("root@node:~ $ vpp-agent --forensic --dump-mem");
+                await typeLine("[+] Snapshotting volatile memory...");
+                await typeLine("[+] Analyzing process tree...");
+                await wait(500);
+                await typeLine("[!] Suspicious Process: ./xmrig (PID 4421)");
+                await typeLine("[+] Saving artifacts to disk...");
+                
+                // 5. UI Update
+                await wait(1000);
+                setForensicData(true); // Triggers UI update
+                await typeLine("[OK] Forensic Snapshot Uploaded to C2.");
+            }
+
+            await wait(2000);
+            if(isMounted.current) onFinish();
         };
 
         runScenario();
@@ -340,7 +548,16 @@ const PlayerEngine = ({ scenario, onFinish }: { scenario: any, onFinish: () => v
             
             {/* LEFT PANE (Dashboard) */}
             <div className={`relative transition-all duration-500 ease-in-out border-r border-slate-800 ${layout === 'TERMINAL' ? 'w-0' : layout === 'SPLIT' ? 'w-1/2' : 'w-full'}`}>
-                <MockDashboard activeModal={activeModal} pendingCount={pendingCount} actors={mockActors} />
+                <MockDashboard 
+                    activeModal={activeModal} 
+                    pendingCount={pendingCount} 
+                    actors={mockActors}
+                    viewMode={viewMode}
+                    detailTab={detailTab}
+                    activePersona={activePersona}
+                    sentinelActive={sentinelActive}
+                    forensicData={forensicData}
+                />
             </div>
 
             {/* RIGHT PANE (Terminal) */}
