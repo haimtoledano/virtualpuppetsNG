@@ -1,9 +1,9 @@
 
 import React, { useState, useEffect, useMemo } from 'react';
-import { WifiNetwork, BluetoothDevice, Actor, WirelessThreatConfig, SystemConfig } from '../types';
+import { WifiNetwork, BluetoothDevice, Actor, WirelessThreatConfig, SystemConfig, WatchlistTarget } from '../types';
 import { getWifiNetworks, getBluetoothDevices, getSystemConfig, updateSystemConfig } from '../services/dbService';
 import { generateMockWifi, generateMockBluetooth } from '../services/mockService';
-import { Wifi, Bluetooth, Search, Lock, Monitor, Radio, RefreshCw, AlertTriangle, ChevronLeft, ChevronRight, Layers, ArrowUp, ArrowDown, GripVertical, Factory, Ruler, Signal, Tag, Shield, Activity, Save, Settings, Info, Siren } from 'lucide-react';
+import { Wifi, Bluetooth, Search, Lock, Monitor, Radio, RefreshCw, AlertTriangle, ChevronLeft, ChevronRight, Layers, ArrowUp, ArrowDown, GripVertical, Factory, Ruler, Signal, Tag, Shield, Activity, Save, Settings, Info, Siren, Plus, Trash2, Crosshair, Users, VolumeX } from 'lucide-react';
 
 interface WirelessReconProps {
     isProduction: boolean;
@@ -106,10 +106,16 @@ const WirelessRecon: React.FC<WirelessReconProps> = ({ isProduction, actors }) =
         corpSsid: '',
         allowedBssids: [],
         shadowKeywords: ['printer', 'hp', 'canon', 'direct', 'iphone', 'android'],
-        minRssiForAlert: -75
+        minRssiForAlert: -75,
+        watchlist: []
     });
     const [isSavingConfig, setIsSavingConfig] = useState(false);
     const [sysConfig, setSysConfig] = useState<SystemConfig | null>(null);
+    
+    // Watchlist State
+    const [newTargetName, setNewTargetName] = useState('');
+    const [newTargetMac, setNewTargetMac] = useState('');
+    const [newTargetType, setNewTargetType] = useState<'WIFI' | 'BT'>('WIFI');
 
     const activeColumns = activeTab === 'WIFI' ? wifiColumns : btColumns;
     const setActiveColumns = activeTab === 'WIFI' ? setWifiColumns : setBtColumns;
@@ -177,6 +183,43 @@ const WirelessRecon: React.FC<WirelessReconProps> = ({ isProduction, actors }) =
         alert("Threat Detection Policies Updated.");
     };
 
+    const handleAddToWatchlist = () => {
+        if (!newTargetMac || !newTargetName) return;
+        const newTarget: WatchlistTarget = { mac: newTargetMac, name: newTargetName, type: newTargetType };
+        setThreatConfig(prev => ({
+            ...prev,
+            watchlist: [...(prev.watchlist || []), newTarget]
+        }));
+        setNewTargetMac('');
+        setNewTargetName('');
+    };
+
+    const handleRemoveFromWatchlist = (mac: string) => {
+        setThreatConfig(prev => ({
+            ...prev,
+            watchlist: (prev.watchlist || []).filter(t => t.mac !== mac)
+        }));
+    };
+
+    const handleToggleRestricted = async (actor: Actor) => {
+        if (isProduction) {
+            try {
+                await fetch(`/api/actors/${actor.id}/restricted`, {
+                    method: 'PUT',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({ enabled: !actor.isRestrictedZone })
+                });
+                // Optimistic UI Update or Refresh
+                actor.isRestrictedZone = !actor.isRestrictedZone; 
+                // Force refresh to sync state
+                loadData(true);
+            } catch (e) { alert("Failed to toggle restricted mode"); }
+        } else {
+            actor.isRestrictedZone = !actor.isRestrictedZone;
+            alert(`SCIF Mode for ${actor.name} is now ${actor.isRestrictedZone ? 'ENABLED' : 'DISABLED'}`);
+        }
+    };
+
     const handleSort = (key: string) => {
         setSortConfig(current => {
             if (current.key === key) {
@@ -212,8 +255,16 @@ const WirelessRecon: React.FC<WirelessReconProps> = ({ isProduction, actors }) =
         const evilTwins = wifiList.filter(n => threatConfig.corpSsid && n.ssid === threatConfig.corpSsid && !threatConfig.allowedBssids.includes(n.bssid));
         const shadowIT = wifiList.filter(n => threatConfig.shadowKeywords.some(k => n.ssid?.toLowerCase().includes(k.toLowerCase())) && n.signalStrength > threatConfig.minRssiForAlert);
         
-        return { evilTwins, shadowIT };
-    }, [wifiList, threatConfig]);
+        // Watchlist Matches
+        const watchlistHits = [...wifiList, ...btList].filter(dev => {
+            const mac = 'bssid' in dev ? dev.bssid : (dev as BluetoothDevice).mac;
+            return threatConfig.watchlist?.some(w => w.mac.toUpperCase() === mac.toUpperCase());
+        });
+
+        return { evilTwins, shadowIT, watchlistHits };
+    }, [wifiList, btList, threatConfig]);
+
+    const totalThreats = analysisResults.evilTwins.length + analysisResults.shadowIT.length + analysisResults.watchlistHits.length;
 
     const processData = useMemo(() => {
         let rawList: any[] = activeTab === 'WIFI' ? wifiList : btList;
@@ -311,8 +362,6 @@ const WirelessRecon: React.FC<WirelessReconProps> = ({ isProduction, actors }) =
     };
 
     const renderCell = (item: any, columnId: string) => {
-        // ... (Existing renderCell logic for WIFI/BT columns remains mostly same)
-        // Re-using existing logic for brevity since it was perfect
         if (activeTab === 'WIFI') {
             const net = item as WifiNetwork;
             switch (columnId) {
@@ -357,7 +406,12 @@ const WirelessRecon: React.FC<WirelessReconProps> = ({ isProduction, actors }) =
                 <div className="flex bg-slate-800 rounded-lg p-1 border border-slate-700">
                     <button onClick={() => setActiveTab('WIFI')} className={`px-4 py-2 rounded text-sm font-bold flex items-center transition-all ${activeTab === 'WIFI' ? 'bg-cyan-600 text-white shadow-lg' : 'text-slate-400 hover:text-white'}`}><Wifi className="w-4 h-4 mr-2" /> Wi-Fi Networks</button>
                     <button onClick={() => setActiveTab('BLUETOOTH')} className={`px-4 py-2 rounded text-sm font-bold flex items-center transition-all ${activeTab === 'BLUETOOTH' ? 'bg-blue-600 text-white shadow-lg' : 'text-slate-400 hover:text-white'}`}><Bluetooth className="w-4 h-4 mr-2" /> Bluetooth Devices</button>
-                    <button onClick={() => setActiveTab('ANALYSIS')} className={`px-4 py-2 rounded text-sm font-bold flex items-center transition-all ${activeTab === 'ANALYSIS' ? 'bg-red-600 text-white shadow-lg' : 'text-slate-400 hover:text-white'}`}><Activity className="w-4 h-4 mr-2" /> Spectral Analysis</button>
+                    <button onClick={() => setActiveTab('ANALYSIS')} className={`px-4 py-2 rounded text-sm font-bold flex items-center transition-all ${activeTab === 'ANALYSIS' ? 'bg-red-600 text-white shadow-lg' : 'text-slate-400 hover:text-white'}`}>
+                        <Activity className="w-4 h-4 mr-2" /> Spectral Analysis
+                        {totalThreats > 0 && (
+                            <span className="ml-2 bg-white text-red-600 px-1.5 py-0.5 rounded-full text-[9px] font-bold shadow-sm animate-pulse">{totalThreats}</span>
+                        )}
+                    </button>
                 </div>
             </div>
 
@@ -365,7 +419,7 @@ const WirelessRecon: React.FC<WirelessReconProps> = ({ isProduction, actors }) =
             {activeTab === 'ANALYSIS' && (
                 <div className="space-y-6">
                     {/* 1. Scoreboard */}
-                    <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                    <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
                         <div className="bg-slate-800 rounded-xl border border-slate-700 p-6 shadow-lg flex flex-col justify-center">
                             <h3 className="text-slate-400 font-bold uppercase text-xs mb-4 flex items-center"><Shield className="w-4 h-4 mr-2"/> Fleet Hygiene Score</h3>
                             <div className="flex items-center space-x-4">
@@ -388,16 +442,21 @@ const WirelessRecon: React.FC<WirelessReconProps> = ({ isProduction, actors }) =
                             <div className="text-3xl font-bold text-white">{analysisResults.shadowIT.length} <span className="text-sm font-normal text-slate-400">Matches</span></div>
                             <p className="text-xs text-slate-500 mt-1">Unauthorized hotspots or peripherals</p>
                         </div>
+                        <div className={`rounded-xl border p-6 shadow-lg flex flex-col justify-center ${analysisResults.watchlistHits.length > 0 ? 'bg-blue-900/20 border-blue-500' : 'bg-slate-800 border-slate-700'}`}>
+                            <h3 className={`font-bold uppercase text-xs mb-2 flex items-center ${analysisResults.watchlistHits.length > 0 ? 'text-blue-400' : 'text-slate-400'}`}><Crosshair className="w-4 h-4 mr-2"/> Asset Watchlist</h3>
+                            <div className="text-3xl font-bold text-white">{analysisResults.watchlistHits.length} <span className="text-sm font-normal text-slate-400">Targets</span></div>
+                            <p className="text-xs text-slate-500 mt-1">Known devices currently active</p>
+                        </div>
                     </div>
 
                     {/* 2. Detected Threats Table */}
-                    {(analysisResults.evilTwins.length > 0 || analysisResults.shadowIT.length > 0) && (
+                    {(analysisResults.evilTwins.length > 0 || analysisResults.shadowIT.length > 0 || analysisResults.watchlistHits.length > 0) && (
                         <div className="bg-slate-900 border border-slate-700 rounded-xl overflow-hidden">
                             <div className="bg-red-900/20 p-3 border-b border-slate-700 flex items-center text-red-300 font-bold text-sm">
                                 <AlertTriangle className="w-4 h-4 mr-2" /> Live Threats Detected
                             </div>
                             <table className="w-full text-left text-xs">
-                                <thead className="bg-slate-900 text-slate-500"><tr><th className="p-3">Type</th><th className="p-3">SSID</th><th className="p-3">BSSID</th><th className="p-3">Signal</th><th className="p-3">Detected By</th></tr></thead>
+                                <thead className="bg-slate-900 text-slate-500"><tr><th className="p-3">Type</th><th className="p-3">SSID/Name</th><th className="p-3">BSSID/MAC</th><th className="p-3">Signal</th><th className="p-3">Detected By</th></tr></thead>
                                 <tbody className="divide-y divide-slate-800 bg-slate-800/50">
                                     {analysisResults.evilTwins.map((net, i) => (
                                         <tr key={i} className="hover:bg-red-900/10">
@@ -417,27 +476,34 @@ const WirelessRecon: React.FC<WirelessReconProps> = ({ isProduction, actors }) =
                                             <td className="p-3 text-blue-300">{net.actorName}</td>
                                         </tr>
                                     ))}
+                                    {analysisResults.watchlistHits.map((dev: any, i) => (
+                                        <tr key={i} className="hover:bg-blue-900/10">
+                                            <td className="p-3 font-bold text-blue-400">WATCHLIST TARGET</td>
+                                            <td className="p-3 text-white">{dev.ssid || dev.name}</td>
+                                            <td className="p-3 font-mono text-slate-400">{dev.bssid || dev.mac}</td>
+                                            <td className="p-3 text-blue-400">{dev.signalStrength || dev.rssi} dBm</td>
+                                            <td className="p-3 text-blue-300">{dev.actorName}</td>
+                                        </tr>
+                                    ))}
                                 </tbody>
                             </table>
                         </div>
                     )}
 
-                    {/* 3. Configuration Panel */}
-                    <div className="bg-slate-800 rounded-xl border border-slate-700 p-6 shadow-lg">
-                        <h3 className="text-lg font-bold text-white mb-4 flex items-center"><Settings className="w-5 h-5 mr-2 text-slate-400"/> Threat Policy Configuration</h3>
-                        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    {/* 3. Configuration & Tools Panel */}
+                    <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                        {/* Policy Config */}
+                        <div className="bg-slate-800 rounded-xl border border-slate-700 p-6 shadow-lg">
+                            <h3 className="text-lg font-bold text-white mb-4 flex items-center"><Settings className="w-5 h-5 mr-2 text-slate-400"/> Threat Policy Configuration</h3>
                             <div className="space-y-4">
                                 <div>
                                     <label className="block text-slate-500 text-xs font-bold uppercase mb-1">Corporate SSID</label>
                                     <input className="w-full bg-slate-900 border border-slate-600 rounded p-2 text-white outline-none text-sm" placeholder="e.g. Corp-Wifi-Secure" value={threatConfig.corpSsid} onChange={e => setThreatConfig({...threatConfig, corpSsid: e.target.value})} />
-                                    <p className="text-[10px] text-slate-500 mt-1">Networks with this name but unknown BSSIDs will be flagged as Evil Twins.</p>
                                 </div>
                                 <div>
                                     <label className="block text-slate-500 text-xs font-bold uppercase mb-1">Shadow IT Keywords (Comma Separated)</label>
                                     <input className="w-full bg-slate-900 border border-slate-600 rounded p-2 text-white outline-none text-sm" placeholder="e.g. printer, iphone, direct" value={threatConfig.shadowKeywords.join(', ')} onChange={e => setThreatConfig({...threatConfig, shadowKeywords: e.target.value.split(',').map(s => s.trim())})} />
                                 </div>
-                            </div>
-                            <div className="space-y-4">
                                 <div>
                                     <label className="block text-slate-500 text-xs font-bold uppercase mb-1">Whitelisted BSSIDs (Comma Separated)</label>
                                     <textarea className="w-full bg-slate-900 border border-slate-600 rounded p-2 text-white outline-none text-xs font-mono h-24" placeholder="00:11:22:33:44:55, AA:BB:CC..." value={threatConfig.allowedBssids.join(', ')} onChange={e => setThreatConfig({...threatConfig, allowedBssids: e.target.value.split(',').map(s => s.trim())})} />
@@ -447,6 +513,57 @@ const WirelessRecon: React.FC<WirelessReconProps> = ({ isProduction, actors }) =
                                         {isSavingConfig ? <RefreshCw className="w-4 h-4 mr-2 animate-spin"/> : <Save className="w-4 h-4 mr-2"/>}
                                         Save Policy
                                     </button>
+                                </div>
+                            </div>
+                        </div>
+
+                        {/* Watchlist & SCIF Control */}
+                        <div className="space-y-6">
+                            {/* Watchlist Manager */}
+                            <div className="bg-slate-800 rounded-xl border border-slate-700 p-6 shadow-lg">
+                                <h3 className="text-lg font-bold text-white mb-4 flex items-center"><Crosshair className="w-5 h-5 mr-2 text-slate-400"/> Asset Watchlist (VIP Tracking)</h3>
+                                <div className="flex gap-2 mb-4">
+                                    <input className="bg-slate-900 border border-slate-600 rounded p-2 text-xs text-white outline-none w-1/3" placeholder="MAC Address" value={newTargetMac} onChange={e => setNewTargetMac(e.target.value)} />
+                                    <input className="bg-slate-900 border border-slate-600 rounded p-2 text-xs text-white outline-none flex-1" placeholder="Friendly Name (e.g. CEO Phone)" value={newTargetName} onChange={e => setNewTargetName(e.target.value)} />
+                                    <select className="bg-slate-900 border border-slate-600 rounded p-2 text-xs text-white outline-none" value={newTargetType} onChange={(e) => setNewTargetType(e.target.value as 'WIFI' | 'BT')}>
+                                        <option value="WIFI">WiFi</option>
+                                        <option value="BT">BT</option>
+                                    </select>
+                                    <button onClick={handleAddToWatchlist} className="bg-emerald-600 hover:bg-emerald-500 text-white p-2 rounded"><Plus className="w-4 h-4" /></button>
+                                </div>
+                                <div className="max-h-40 overflow-y-auto space-y-2">
+                                    {threatConfig.watchlist?.map((t, i) => (
+                                        <div key={i} className="flex justify-between items-center bg-slate-900 p-2 rounded border border-slate-700/50 text-xs">
+                                            <div className="flex items-center">
+                                                <span className={`px-1.5 py-0.5 rounded text-[10px] font-bold mr-2 ${t.type === 'WIFI' ? 'bg-blue-900 text-blue-300' : 'bg-indigo-900 text-indigo-300'}`}>{t.type}</span>
+                                                <span className="text-white font-bold mr-2">{t.name}</span>
+                                                <span className="text-slate-500 font-mono">{t.mac}</span>
+                                            </div>
+                                            <button onClick={() => handleRemoveFromWatchlist(t.mac)} className="text-slate-500 hover:text-red-400"><Trash2 className="w-3 h-3" /></button>
+                                        </div>
+                                    ))}
+                                    {(!threatConfig.watchlist || threatConfig.watchlist.length === 0) && <div className="text-center text-slate-500 text-xs italic">No targets defined.</div>}
+                                </div>
+                            </div>
+
+                            {/* SCIF Mode Control */}
+                            <div className="bg-slate-800 rounded-xl border border-slate-700 p-6 shadow-lg">
+                                <h3 className="text-lg font-bold text-white mb-2 flex items-center"><VolumeX className="w-5 h-5 mr-2 text-red-400"/> Restricted Zone Control (SCIF)</h3>
+                                <p className="text-slate-400 text-xs mb-4">Designate actors as "Zone Sentinels". ANY detected signal will trigger a CRITICAL breach alert.</p>
+                                <div className="max-h-40 overflow-y-auto space-y-2 pr-2">
+                                    {actors.filter(a => a.hasWifi || a.hasBluetooth).map(a => (
+                                        <div key={a.id} className={`flex justify-between items-center p-2 rounded border transition-colors ${a.isRestrictedZone ? 'bg-red-900/20 border-red-500/50' : 'bg-slate-900 border-slate-700'}`}>
+                                            <div className="flex items-center">
+                                                <div className={`w-2 h-2 rounded-full mr-2 ${a.status === 'ONLINE' ? 'bg-emerald-500' : 'bg-slate-500'}`}></div>
+                                                <span className="text-xs font-bold text-white mr-2">{a.name}</span>
+                                                <span className="text-[10px] text-slate-500">({a.localIp})</span>
+                                            </div>
+                                            <label className="relative inline-flex items-center cursor-pointer">
+                                                <input type="checkbox" checked={!!a.isRestrictedZone} onChange={() => handleToggleRestricted(a)} className="sr-only peer" />
+                                                <div className="w-9 h-5 bg-slate-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-red-600"></div>
+                                            </label>
+                                        </div>
+                                    ))}
                                 </div>
                             </div>
                         </div>

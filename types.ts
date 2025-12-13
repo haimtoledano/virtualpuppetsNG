@@ -80,6 +80,7 @@ export interface Actor {
   tcpSentinelEnabled?: boolean; // If true, alerts on ANY connection
   physicalAddress?: string; // New field for physical location
   spectralScore?: number; // 0-100 Hygiene Score
+  isRestrictedZone?: boolean; // NEW: SCIF Mode (Alert on ANY signal)
 }
 
 export enum LogLevel {
@@ -193,11 +194,18 @@ export interface RolePermissions {
 }
 
 // --- WIRELESS THREAT CONFIG ---
+export interface WatchlistTarget {
+    mac: string;
+    name: string; // e.g. "CEO iPhone"
+    type: 'WIFI' | 'BT';
+}
+
 export interface WirelessThreatConfig {
     corpSsid: string;
     allowedBssids: string[]; // Whitelisted MACs for Corp SSID
     shadowKeywords: string[]; // e.g. "printer", "iphone"
     minRssiForAlert: number; // e.g. -75
+    watchlist?: WatchlistTarget[]; // NEW: Asset Tracking
 }
 
 export interface SystemConfig {
@@ -209,7 +217,7 @@ export interface SystemConfig {
   syslogConfig?: SyslogConfig; 
   targetAgentVersion?: string; 
   rolePermissions?: RolePermissions;
-  wirelessConfig?: WirelessThreatConfig; // NEW
+  wirelessConfig?: WirelessThreatConfig; 
 }
 
 export interface AuthState {

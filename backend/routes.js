@@ -226,7 +226,8 @@ router.get('/actors', async (req, res) => {
             memoryUsage: row.MemoryUsage,
             temperature: row.Temperature,
             physicalAddress: row.PhysicalAddress,
-            spectralScore: row.SpectralScore // NEW
+            spectralScore: row.SpectralScore,
+            isRestrictedZone: row.IsRestrictedZone // NEW
         }));
         res.json(actors);
     } catch(e) { console.error(e); res.json([]); }
@@ -284,6 +285,13 @@ router.put('/actors/:id/persona', async (req, res) => {
 router.put('/actors/:id/sentinel', async (req, res) => {
     const db = getDbPool(); if(!db) return res.json({success: false});
     await db.request().input('id', req.params.id).input('e', req.body.enabled).query("UPDATE Actors SET TcpSentinelEnabled=@e WHERE ActorId=@id");
+    res.json({success: true});
+});
+
+// --- NEW: Toggle SCIF / Restricted Zone Mode ---
+router.put('/actors/:id/restricted', async (req, res) => {
+    const db = getDbPool(); if(!db) return res.json({success: false});
+    await db.request().input('id', req.params.id).input('e', req.body.enabled).query("UPDATE Actors SET IsRestrictedZone=@e WHERE ActorId=@id");
     res.json({success: true});
 });
 
@@ -453,7 +461,7 @@ router.get('/recon/bluetooth', async (req, res) => {
     res.json(r.recordset.map(b => ({id: b.Id, name: b.Name, mac: b.Mac, rssi: b.Rssi, type: b.Type, actorId: b.ActorId, actorName: b.ActorName, lastSeen: b.LastSeen})));
 });
 
-// AGENT RECON Data Upload (WiFi/BT) - UPGRADED WITH SPECTRAL ANALYSIS
+// AGENT RECON Data Upload (WiFi/BT) - UPGRADED WITH SPECTRAL ANALYSIS & WATCHLIST & SCIF
 router.post('/agent/recon', async (req, res) => {
     const { actorId, type, data } = req.body;
     const db = getDbPool();
@@ -462,11 +470,15 @@ router.post('/agent/recon', async (req, res) => {
     if (!data || !Array.isArray(data)) return res.json({success: false, error: "Invalid Data"});
 
     let resolvedActorName = 'Agent';
-    let wirelessConfig = { corpSsid: '', allowedBssids: [], shadowKeywords: [], minRssiForAlert: -75 };
+    let isRestrictedZone = false;
+    let wirelessConfig = { corpSsid: '', allowedBssids: [], shadowKeywords: [], minRssiForAlert: -75, watchlist: [] };
 
     try {
-        const actorResult = await db.request().input('aid_lookup', sql.NVarChar, actorId).query("SELECT Name FROM Actors WHERE ActorId = @aid_lookup");
-        if (actorResult.recordset.length > 0) resolvedActorName = actorResult.recordset[0].Name;
+        const actorResult = await db.request().input('aid_lookup', sql.NVarChar, actorId).query("SELECT Name, IsRestrictedZone FROM Actors WHERE ActorId = @aid_lookup");
+        if (actorResult.recordset.length > 0) {
+            resolvedActorName = actorResult.recordset[0].Name;
+            isRestrictedZone = actorResult.recordset[0].IsRestrictedZone;
+        }
         
         // Fetch Wireless Config
         const confRes = await db.request().input('k', 'WirelessConfig').query("SELECT ConfigValue FROM SystemConfig WHERE ConfigKey = @k");
@@ -478,6 +490,16 @@ router.post('/agent/recon', async (req, res) => {
     // --- SPECTRAL ANALYSIS LOGIC ---
     let spectralPenalty = 0;
     let threatsDetected = [];
+
+    // --- SCIF / RESTRICTED ZONE LOGIC ---
+    // If ANY data comes in and zone is restricted, it's a critical violation
+    if (isRestrictedZone && data.length > 0) {
+        threatsDetected.push(`SCIF VIOLATION: Wireless signals detected in restricted zone!`);
+        // Immediate Critical Alert
+        const alertMsg = `[SCIF BREACH] ${data.length} ${type} signals detected by ${resolvedActorName}`;
+        const lid = `log-scif-${Date.now()}`;
+        await db.request().input('lid', lid).input('aid', actorId).input('lvl', 'CRITICAL').input('proc', 'scif_sentinel').input('msg', alertMsg).query("INSERT INTO Logs (LogId, ActorId, Level, Process, Message, Timestamp) VALUES (@lid, @aid, @lvl, @proc, @msg, GETDATE())");
+    }
 
     try {
         if (type === 'WIFI') {
@@ -503,8 +525,16 @@ router.post('/agent/recon', async (req, res) => {
                          }
                      }
                  }
+                 
+                 // 3. Watchlist Detection
+                 if (wirelessConfig.watchlist && wirelessConfig.watchlist.length > 0) {
+                     const target = wirelessConfig.watchlist.find(w => w.mac.toUpperCase() === net.bssid.toUpperCase() && w.type === 'WIFI');
+                     if (target) {
+                         threatsDetected.push(`WATCHLIST HIT: ${target.name} (${net.bssid}) detected!`);
+                     }
+                 }
 
-                 // 3. General Noise Penalty (Strong signals from unknown APs reduce hygiene score slightly)
+                 // 4. General Noise Penalty
                  if (net.signal > -50 && (!wirelessConfig.corpSsid || net.ssid !== wirelessConfig.corpSsid)) {
                      spectralPenalty += 2;
                  }
@@ -535,6 +565,17 @@ router.post('/agent/recon', async (req, res) => {
              let successCount = 0;
              for (const dev of data) {
                  if(!dev.mac) continue;
+                 
+                 // Watchlist Detection (BT)
+                 if (wirelessConfig.watchlist && wirelessConfig.watchlist.length > 0) {
+                     const target = wirelessConfig.watchlist.find(w => w.mac.toUpperCase() === dev.mac.toUpperCase());
+                     if (target) {
+                         const alertMsg = `[WATCHLIST HIT] ${target.name} (BT: ${dev.mac}) detected by ${resolvedActorName}`;
+                         const lid = `log-bt-${Date.now()}`;
+                         await db.request().input('lid', lid).input('aid', actorId).input('lvl', 'CRITICAL').input('proc', 'recon_engine').input('msg', alertMsg).query("INSERT INTO Logs (LogId, ActorId, Level, Process, Message, Timestamp) VALUES (@lid, @aid, @lvl, @proc, @msg, GETDATE())");
+                     }
+                 }
+
                  const id = `bt-${actorId}-${dev.mac.replace(/:/g,'')}`;
                  await db.request().input('id', id).input('name', dev.name || 'Unknown').input('mac', dev.mac).input('rssi', dev.rssi || -99).input('type', dev.type || 'CLASSIC').input('aid', actorId).input('aname', resolvedActorName)
                     .query(`MERGE BluetoothDevices AS target USING (SELECT @id AS Id) AS source ON target.Id = source.Id WHEN MATCHED THEN UPDATE SET LastSeen = GETDATE(), Rssi = @rssi WHEN NOT MATCHED THEN INSERT (Id, Name, Mac, Rssi, Type, ActorId, ActorName, LastSeen) VALUES (@id, @name, @mac, @rssi, @type, @aid, @aname, GETDATE());`);
