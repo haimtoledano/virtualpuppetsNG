@@ -1,3 +1,4 @@
+
 import net from 'net';
 
 let recordedSessions = [];
@@ -106,4 +107,26 @@ export const interactTrap = (input) => {
     if (input && input.toUpperCase().startsWith('USER')) return { response: "331 Please specify the password.\r\n" };
     if (input && input.toUpperCase().startsWith('PASS')) return { response: "530 Login incorrect.\r\n" };
     return { response: "500 Unknown command.\r\n" };
+};
+
+// --- NEW: Add Agent Recorded Session ---
+export const addAgentSession = (sessionData) => {
+    try {
+        const session = {
+            id: `sess-agent-${Date.now()}-${Math.random().toString(36).substr(2,4)}`,
+            actorId: sessionData.actorId || 'unknown',
+            attackerIp: sessionData.attackerIp || 'unknown',
+            protocol: sessionData.protocol || 'TCP',
+            startTime: new Date(sessionData.startTime),
+            durationSeconds: sessionData.durationSeconds || 0,
+            frames: sessionData.frames || []
+        };
+        recordedSessions.unshift(session);
+        if (recordedSessions.length > 50) recordedSessions.pop();
+        console.log(`[SESSION] Added ${session.protocol} session from ${session.actorId}`);
+        return true;
+    } catch (e) {
+        console.error("Error adding agent session:", e);
+        return false;
+    }
 };
