@@ -641,12 +641,32 @@ export const getAttackSessions = async (actorId: string, actorContext?: Actor): 
     return new Promise((resolve) => {
         setTimeout(() => {
              const sessions: AttackSession[] = [];
-             
+             const fakeIp = `${Math.floor(Math.random() * 255)}.${Math.floor(Math.random() * 255)}.${Math.floor(Math.random() * 255)}.${Math.floor(Math.random() * 255)}`;
+
+             // 1. Always create a "Mock" SSH Brute Force session for demonstration if list is empty
+             sessions.push({
+                id: `sess-ssh-brute-${Date.now()}`,
+                actorId,
+                attackerIp: fakeIp,
+                protocol: 'SSH',
+                startTime: new Date(Date.now() - 120000), // 2 mins ago
+                durationSeconds: 8,
+                frames: [
+                    { time: 100, type: 'OUTPUT', data: 'SSH-2.0-OpenSSH_8.2p1 Ubuntu-4ubuntu0.3\r\n' },
+                    { time: 500, type: 'INPUT', data: 'root\r\n' },
+                    { time: 800, type: 'OUTPUT', data: 'Password: ' },
+                    { time: 1500, type: 'INPUT', data: '123456\r\n' },
+                    { time: 2000, type: 'OUTPUT', data: '\r\nAccess Denied.\r\nPassword: ' },
+                    { time: 3000, type: 'INPUT', data: 'password\r\n' },
+                    { time: 3500, type: 'OUTPUT', data: '\r\nAccess Denied.\r\nPassword: ' },
+                    { time: 4500, type: 'INPUT', data: 'admin\r\n' },
+                    { time: 5000, type: 'OUTPUT', data: '\r\nAccess Denied.\r\nConnection closed by host.\r\n' },
+                ]
+             });
+
              // 2. Dynamic Traps (Real-time generation from context)
              if (actorContext && actorContext.activeTunnels) {
                  actorContext.activeTunnels.forEach(t => {
-                     const fakeIp = `${Math.floor(Math.random() * 255)}.${Math.floor(Math.random() * 255)}.${Math.floor(Math.random() * 255)}.${Math.floor(Math.random() * 255)}`;
-
                      // Check service type from trap definition or tunnel name
                      if (t.trap.serviceType === 'FTP' || t.trap.name.includes('VSFTPD')) {
                          sessions.push({
@@ -680,6 +700,24 @@ export const getAttackSessions = async (actorId: string, actorContext?: Actor): 
                                 { time: 1500, type: 'INPUT', data: 'AUTH root\r\n' },
                                 { time: 1600, type: 'OUTPUT', data: '(error) ERR invalid password\r\n' },
                                 { time: 3000, type: 'INPUT', data: 'quit\r\n' }
+                            ]
+                         });
+                     } else if (t.trap.serviceType === 'Oracle TNS' || t.trap.serviceType === 'PostgreSQL') {
+                         // Add SQL Injection Attempt
+                         sessions.push({
+                            id: `sess-sql-${t.id}-${Date.now()}`,
+                            actorId,
+                            attackerIp: fakeIp,
+                            protocol: 'SQL',
+                            startTime: new Date(Date.now() - Math.random() * 60000),
+                            durationSeconds: 6,
+                            frames: [
+                                { time: 100, type: 'INPUT', data: "SELECT * FROM users WHERE user='admin' --\r\n" },
+                                { time: 500, type: 'OUTPUT', data: "ERROR:  syntax error at or near '--'\r\nLINE 1: SELECT * FROM users WHERE user='admin' --\r\n" },
+                                { time: 2000, type: 'INPUT', data: "UNION SELECT 1, @@version, 3, 4 --\r\n" },
+                                { time: 2500, type: 'OUTPUT', data: "ERROR:  column count mismatch\r\n" },
+                                { time: 4000, type: 'INPUT', data: "'; DROP TABLE logs; --\r\n" },
+                                { time: 4500, type: 'OUTPUT', data: "NOTICE:  table \"logs\" does not exist, skipping\r\n" }
                             ]
                          });
                      }

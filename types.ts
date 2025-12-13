@@ -1,4 +1,5 @@
 
+
 export enum ActorStatus {
   ONLINE = 'ONLINE',
   OFFLINE = 'OFFLINE',
@@ -298,7 +299,7 @@ export interface AttackSession {
     id: string;
     actorId: string;
     attackerIp: string;
-    protocol: 'SSH' | 'TELNET' | 'FTP' | 'REDIS' | 'HTTP' | 'VNC';
+    protocol: 'SSH' | 'TELNET' | 'FTP' | 'REDIS' | 'HTTP' | 'VNC' | 'SQL';
     startTime: Date;
     durationSeconds: number;
     frames: SessionFrame[];

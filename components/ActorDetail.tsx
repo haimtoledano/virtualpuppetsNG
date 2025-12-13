@@ -5,7 +5,7 @@ import { executeRemoteCommand, getAvailableCloudTraps, toggleTunnelMock, AVAILAB
 import { analyzeLogsWithAi, generateDeceptionContent } from '../services/aiService';
 import { updateActorName, queueSystemCommand, getActorCommands, deleteActor, updateActorTunnels, updateActorPersona, resetActorStatus, resetActorToFactory, updateActorHoneyFiles, toggleActorSentinel, generateReport, deleteAttackSession as deleteAttackSessionProd, getAttackSessions as getAttackSessionsProd, toggleActorScanning } from '../services/dbService';
 import Terminal from './Terminal';
-import { Cpu, Wifi, Shield, Bot, ArrowLeft, BrainCircuit, Router, Network, FileCode, Check, Activity, X, Printer, Camera, Server, Edit2, Trash2, Loader, ShieldCheck, AlertOctagon, Skull, ArrowRight, Terminal as TerminalIcon, Globe, ScanSearch, Power, RefreshCw, History as HistoryIcon, Thermometer, RefreshCcw, Siren, Eye, Fingerprint, Info, Cable, Search, Lock, Zap, FileText, HardDrive, List, Play, Pause, FastForward, Rewind, Film, Database, Monitor, Save, Radio, Bluetooth, Hash, MapPin } from 'lucide-react';
+import { Cpu, Wifi, Shield, Bot, ArrowLeft, BrainCircuit, Router, Network, FileCode, Check, Activity, X, Printer, Camera, Server, Edit2, Trash2, Loader, ShieldCheck, AlertOctagon, Skull, ArrowRight, Terminal as TerminalIcon, Globe, ScanSearch, Power, RefreshCw, History as HistoryIcon, Thermometer, RefreshCcw, Siren, Eye, Fingerprint, Info, Cable, Search, Lock, Zap, FileText, HardDrive, List, Play, Pause, FastForward, Rewind, Film, Database, Monitor, Save, Radio, Bluetooth, Hash, MapPin, SkipBack, Maximize, Volume2, Clock } from 'lucide-react';
 
 interface ActorDetailProps {
   actor: Actor;
@@ -1299,7 +1299,7 @@ const ActorDetail: React.FC<ActorDetailProps> = ({ actor, gateway, logs: initial
                     {forensicView === 'SESSIONS' && (
                         <div className="h-full flex flex-col lg:flex-row gap-6">
                             {/* Session List */}
-                            <div className="w-full lg:w-1/3 bg-slate-900 rounded border border-slate-700 overflow-hidden flex flex-col">
+                            <div className="w-full lg:w-1/3 bg-slate-900 rounded-xl border border-slate-700 overflow-hidden flex flex-col shadow-lg">
                                 <div className="p-3 bg-slate-800 border-b border-slate-700 text-sm font-bold text-slate-300 flex justify-between items-center">
                                      <span>Recorded Sessions</span>
                                      <button 
@@ -1327,10 +1327,13 @@ const ActorDetail: React.FC<ActorDetailProps> = ({ actor, gateway, logs: initial
                                             >
                                                 <div className="flex justify-between items-start mb-1 pr-6">
                                                     <span className="text-xs font-bold text-white">{new Date(session.startTime).toLocaleString()}</span>
-                                                    <span className="text-[10px] bg-red-900/50 text-red-300 px-1.5 rounded border border-red-800">{session.protocol}</span>
+                                                    <span className="text-[10px] bg-red-900/50 text-red-300 px-1.5 rounded border border-red-800 font-mono">{session.protocol}</span>
                                                 </div>
                                                 <div className="text-xs text-slate-400 font-mono mb-1">{session.attackerIp}</div>
-                                                <div className="text-[10px] text-slate-600">{session.durationSeconds.toFixed(1)}s Duration • {session.frames.length} Events</div>
+                                                <div className="text-[10px] text-slate-600 flex items-center">
+                                                    <Clock className="w-3 h-3 mr-1" />
+                                                    {session.durationSeconds.toFixed(1)}s Duration • {session.frames.length} Events
+                                                </div>
                                                 
                                                 <button 
                                                     onClick={(e) => handleDeleteSession(e, session.id)}
@@ -1345,57 +1348,84 @@ const ActorDetail: React.FC<ActorDetailProps> = ({ actor, gateway, logs: initial
                                 </div>
                             </div>
 
-                            {/* Player */}
-                            <div className="flex-1 bg-black rounded border border-slate-700 flex flex-col overflow-hidden relative">
+                            {/* Enhanced Player */}
+                            <div className="flex-1 bg-black rounded-lg border border-slate-700 flex flex-col overflow-hidden relative shadow-2xl group/player">
                                 {!activeSession ? (
-                                    <div className="flex items-center justify-center h-full text-slate-600 flex-col">
-                                        <Film className="w-12 h-12 mb-4 opacity-20" />
-                                        <p>Select a session to replay</p>
+                                    <div className="flex items-center justify-center h-full text-slate-600 flex-col bg-slate-900/50">
+                                        <div className="p-6 rounded-full bg-slate-800/50 mb-4 animate-pulse">
+                                            <Film className="w-12 h-12 text-slate-500" />
+                                        </div>
+                                        <p className="font-mono tracking-widest text-sm">SELECT SESSION REEL</p>
                                     </div>
                                 ) : (
                                     <>
-                                        {/* Terminal Screen */}
-                                        <div className="flex-1 p-4 font-mono text-xs md:text-sm overflow-y-auto whitespace-pre-wrap text-green-500 bg-black">
-                                            {replayContent}
-                                            <span className="animate-pulse inline-block w-2 h-4 bg-green-500 ml-1 align-middle"></span>
+                                        {/* Screen Content */}
+                                        <div className="flex-1 relative flex flex-col bg-black overflow-hidden">
+                                            {/* Carbon Fibre Texture Overlay */}
+                                            <div className="absolute inset-0 bg-[url('https://www.transparenttextures.com/patterns/carbon-fibre.png')] opacity-10 pointer-events-none"></div>
+                                            
+                                            {/* CRT Scanline */}
+                                            <div className="absolute inset-0 bg-[linear-gradient(rgba(18,16,16,0)_50%,rgba(0,0,0,0.1)_50%),linear-gradient(90deg,rgba(255,0,0,0.06),rgba(0,255,0,0.02),rgba(0,0,255,0.06))] bg-[length:100%_4px,3px_100%] pointer-events-none z-10 animate-pulse"></div>
+
+                                            {/* Info HUD Overlay */}
+                                            <div className="absolute top-4 right-4 bg-black/60 border border-slate-700/50 rounded px-2 py-1 text-[10px] font-mono text-emerald-500 z-20 backdrop-blur-sm">
+                                                <div>REC: {activeSession.id.split('-').pop()}</div>
+                                                <div>SRC: {activeSession.attackerIp}</div>
+                                                <div>PRT: {activeSession.protocol}</div>
+                                            </div>
+
+                                            {/* Terminal Text */}
+                                            <div className="flex-1 p-6 font-mono text-sm overflow-y-auto whitespace-pre-wrap text-emerald-500 z-0 selection:bg-emerald-900 selection:text-white">
+                                                {replayContent}
+                                                {isPlaying && <span className="inline-block w-2.5 h-5 bg-emerald-500 animate-pulse ml-1 align-middle shadow-[0_0_8px_#10b981]"></span>}
+                                            </div>
                                         </div>
 
-                                        {/* Controls */}
-                                        <div className="bg-slate-800 p-3 border-t border-slate-700">
-                                            <div className="flex items-center justify-between mb-2 text-[10px] text-slate-400 font-mono">
-                                                <span>{(replayTime/1000).toFixed(1)}s</span>
-                                                <span>{activeSession.durationSeconds.toFixed(1)}s</span>
-                                            </div>
-                                            {/* Scrubber */}
-                                            <div className="relative h-2 bg-slate-700 rounded-full mb-4 cursor-pointer group" onClick={(e) => {
+                                        {/* Advanced Controls Bar */}
+                                        <div className="bg-slate-900 border-t border-slate-700 p-4 z-20">
+                                            {/* Timeline Scrubber */}
+                                            <div className="flex items-center space-x-3 mb-4 group/timeline cursor-pointer" onClick={(e) => {
                                                 const rect = e.currentTarget.getBoundingClientRect();
                                                 const x = e.clientX - rect.left;
-                                                const pct = x / rect.width;
+                                                const pct = Math.max(0, Math.min(1, x / rect.width));
                                                 setReplayTime(pct * activeSession.durationSeconds * 1000);
                                             }}>
-                                                <div 
-                                                    className="absolute top-0 left-0 h-full bg-blue-500 rounded-full pointer-events-none" 
-                                                    style={{ width: `${(replayTime / (activeSession.durationSeconds * 1000)) * 100}%` }}
-                                                ></div>
-                                                <div 
-                                                    className="absolute top-1/2 -mt-1.5 w-3 h-3 bg-white rounded-full shadow cursor-grab group-hover:scale-125 transition-transform"
-                                                    style={{ left: `calc(${(replayTime / (activeSession.durationSeconds * 1000)) * 100}% - 6px)` }}
-                                                ></div>
+                                                <span className="text-[10px] font-mono text-slate-400 w-10 text-right">{(replayTime/1000).toFixed(1)}s</span>
+                                                <div className="flex-1 h-1.5 bg-slate-700 rounded-full relative overflow-visible">
+                                                    <div 
+                                                        className="absolute top-0 left-0 h-full bg-blue-500 rounded-full transition-all duration-75" 
+                                                        style={{ width: `${(replayTime / (activeSession.durationSeconds * 1000)) * 100}%` }}
+                                                    >
+                                                        <div className="absolute right-0 -top-1 w-3.5 h-3.5 bg-white rounded-full shadow-[0_0_10px_rgba(59,130,246,0.5)] opacity-0 group-hover/timeline:opacity-100 transition-opacity transform scale-0 group-hover/timeline:scale-100"></div>
+                                                    </div>
+                                                </div>
+                                                <span className="text-[10px] font-mono text-slate-500 w-10">{activeSession.durationSeconds.toFixed(1)}s</span>
                                             </div>
 
-                                            <div className="flex justify-center items-center space-x-6">
-                                                <button onClick={() => setReplaySpeed(s => s === 1 ? 2 : s === 2 ? 4 : 1)} className="text-xs font-bold text-slate-500 w-12 text-center hover:text-white">
-                                                    {replaySpeed}x
-                                                </button>
-                                                <button onClick={() => { setReplayTime(Math.max(0, replayTime - 5000)); }} className="text-slate-400 hover:text-white"><Rewind className="w-5 h-5" /></button>
-                                                <button 
-                                                    onClick={() => setIsPlaying(!isPlaying)} 
-                                                    className="bg-blue-600 hover:bg-blue-500 text-white p-3 rounded-full shadow-lg transition-transform hover:scale-105"
-                                                >
-                                                    {isPlaying ? <Pause className="w-6 h-6" /> : <Play className="w-6 h-6 ml-1" />}
-                                                </button>
-                                                <button onClick={() => { setReplayTime(Math.min(activeSession.durationSeconds * 1000, replayTime + 5000)); }} className="text-slate-400 hover:text-white"><FastForward className="w-5 h-5" /></button>
-                                                <div className="w-12"></div> {/* Spacer */}
+                                            {/* Buttons */}
+                                            <div className="flex justify-between items-center">
+                                                <div className="flex items-center space-x-4">
+                                                    <button 
+                                                        onClick={() => setIsPlaying(!isPlaying)} 
+                                                        className="w-10 h-10 bg-blue-600 hover:bg-blue-500 text-white rounded-full flex items-center justify-center shadow-lg hover:scale-105 transition-all"
+                                                    >
+                                                        {isPlaying ? <Pause className="w-5 h-5 fill-current" /> : <Play className="w-5 h-5 fill-current ml-0.5" />}
+                                                    </button>
+                                                    <div className="flex space-x-1 bg-slate-800 rounded-lg p-1 border border-slate-700">
+                                                        <button onClick={() => { setReplayTime(Math.max(0, replayTime - 5000)); }} className="p-1.5 text-slate-400 hover:text-white hover:bg-slate-700 rounded"><Rewind className="w-4 h-4" /></button>
+                                                        <button onClick={() => { setReplayTime(Math.min(activeSession.durationSeconds * 1000, replayTime + 5000)); }} className="p-1.5 text-slate-400 hover:text-white hover:bg-slate-700 rounded"><FastForward className="w-4 h-4" /></button>
+                                                    </div>
+                                                </div>
+
+                                                <div className="flex items-center space-x-3">
+                                                    <button onClick={() => setReplayTime(0)} className="text-slate-500 hover:text-white transition-colors" title="Restart"><SkipBack className="w-4 h-4" /></button>
+                                                    <div className="h-4 w-px bg-slate-700"></div>
+                                                    <button onClick={() => setReplaySpeed(s => s === 1 ? 2 : s === 2 ? 4 : 1)} className="text-xs font-bold font-mono text-slate-400 hover:text-blue-400 w-8 text-center transition-colors">
+                                                        {replaySpeed}x
+                                                    </button>
+                                                    <Volume2 className="w-4 h-4 text-slate-600 cursor-not-allowed" />
+                                                    <Maximize className="w-4 h-4 text-slate-400 hover:text-white cursor-pointer" />
+                                                </div>
                                             </div>
                                         </div>
                                     </>
