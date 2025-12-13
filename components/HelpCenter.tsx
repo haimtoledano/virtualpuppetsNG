@@ -1,6 +1,5 @@
-
 import React, { useState } from 'react';
-import { BookOpen, HelpCircle, Video, FileText, ChevronDown, ChevronUp, PlayCircle, ExternalLink, Zap, Shield, Terminal, LifeBuoy } from 'lucide-react';
+import { BookOpen, HelpCircle, Video, FileText, ChevronDown, ChevronUp, PlayCircle, ExternalLink, Zap, Shield, Terminal, LifeBuoy, ArrowLeft, CheckCircle, Clock, Play, Pause, Volume2, Maximize, SkipBack, SkipForward, Loader } from 'lucide-react';
 
 const TUTORIALS = [
     {
@@ -12,7 +11,13 @@ const TUTORIALS = [
         icon: Terminal,
         color: "text-blue-400",
         bg: "bg-blue-500/10",
-        border: "border-blue-500/30"
+        border: "border-blue-500/30",
+        steps: [
+            { title: "Prepare the Hardware", text: "Ensure your Raspberry Pi (3B+ or 4) has a fresh install of Raspberry Pi OS Lite (64-bit recommended) and internet access." },
+            { title: "Generate Enrollment Token", text: "In the Dashboard sidebar, click 'Enroll New Device'. Select 'Direct to Cloud' or a specific Gateway." },
+            { title: "Run Bootstrap Command", text: "Copy the provided curl command. Paste it into your Raspberry Pi terminal via SSH.", code: "curl -sL http://vpp.io/api/setup?token=YOUR_TOKEN | sudo bash" },
+            { title: "Approve Device", text: "Once the script finishes, the device will appear in 'Pending Approvals'. Click the Green checkmark to adopt it." }
+        ]
     },
     {
         id: 2,
@@ -23,7 +28,13 @@ const TUTORIALS = [
         icon: Zap,
         color: "text-purple-400",
         bg: "bg-purple-500/10",
-        border: "border-purple-500/30"
+        border: "border-purple-500/30",
+        steps: [
+            { title: "Select Target Actor", text: "Navigate to the 'Fleet Matrix' or Dashboard and click on an online node to open details." },
+            { title: "Open Deception Tab", text: "Switch to the 'DECEPTION & PERSONA' tab in the top navigation bar." },
+            { title: "Choose Identity", text: "Review available Personas (Printer, Camera, Server). Note any port conflicts marked in red." },
+            { title: "Apply & Verify", text: "Click a Persona. The agent will restart networking, spoof the MAC OUI, and open fake ports. Use Nmap externally to verify." }
+        ]
     },
     {
         id: 3,
@@ -34,7 +45,13 @@ const TUTORIALS = [
         icon: Shield,
         color: "text-red-400",
         bg: "bg-red-500/10",
-        border: "border-red-500/30"
+        border: "border-red-500/30",
+        steps: [
+            { title: "Understanding Sentinel", text: "Sentinel Mode configures iptables to log EVERY TCP SYN packet. This is noisy but catches stealth scans." },
+            { title: "Activation", text: "In the 'NETWORK' tab of an actor, toggle 'TCP Sentinel (Paranoid Mode)'. The dashboard will show a pulsing eye icon." },
+            { title: "Monitoring", text: "Go to the Dashboard Overview. Any connection attempt will immediately trigger a CRITICAL alert and visualize the source IP." },
+            { title: "Deactivation", text: "Once the threat is identified, disable Sentinel Mode to reduce log volume and return to standard honeypot operations." }
+        ]
     },
     {
         id: 4,
@@ -45,7 +62,13 @@ const TUTORIALS = [
         icon: FileText,
         color: "text-emerald-400",
         bg: "bg-emerald-500/10",
-        border: "border-emerald-500/30"
+        border: "border-emerald-500/30",
+        steps: [
+            { title: "Trigger Snapshot", text: "In the 'FORENSICS' tab, click 'RUN FORENSIC SCAN'. This commands the agent to dump volatile data." },
+            { title: "Process Tree Analysis", text: "Look for processes with high CPU usage or names like 'nc', 'bash' (running as www-data), or crypto miners." },
+            { title: "Network Connections", text: "Examine the 'Network Artifacts' section. Look for ESTABLISHED connections to unknown external IPs on non-standard ports." },
+            { title: "Persistence Check", text: "Review the Auth Log snippet for 'Accepted password' or 'New session' events you didn't authorize." }
+        ]
     }
 ];
 
@@ -76,38 +99,108 @@ const FAQS = [
     }
 ];
 
+// --- MOCK VIDEO PLAYER COMPONENT ---
+const MockPlayer = ({ title }: { title: string }) => {
+    const [isPlaying, setIsPlaying] = useState(false);
+    const [progress, setProgress] = useState(30);
+
+    return (
+        <div className="w-full aspect-video bg-black rounded-lg border border-slate-700 relative group overflow-hidden shadow-2xl flex flex-col">
+            {/* Screen Content */}
+            <div className="flex-1 flex items-center justify-center bg-slate-900/50 relative">
+                <div className="absolute inset-0 bg-[url('https://www.transparenttextures.com/patterns/carbon-fibre.png')] opacity-20"></div>
+                {!isPlaying && (
+                    <button 
+                        onClick={() => setIsPlaying(true)}
+                        className="w-20 h-20 bg-blue-600/90 rounded-full flex items-center justify-center shadow-[0_0_30px_rgba(37,99,235,0.3)] hover:scale-110 transition-transform z-10"
+                    >
+                        <Play className="w-10 h-10 text-white ml-1.5" />
+                    </button>
+                )}
+                {isPlaying && (
+                    <div className="text-slate-500 font-mono text-sm animate-pulse flex flex-col items-center">
+                        <Loader className="w-10 h-10 mb-2 animate-spin text-blue-500" />
+                        <span>Loading Stream...</span>
+                    </div>
+                )}
+                <div className="absolute top-4 left-4 text-white font-bold text-lg drop-shadow-md bg-black/50 px-2 rounded">{title}</div>
+            </div>
+
+            {/* Controls */}
+            <div className="h-12 bg-slate-800 border-t border-slate-700 flex items-center px-4 space-x-4 z-20">
+                <button onClick={() => setIsPlaying(!isPlaying)} className="text-slate-300 hover:text-white">
+                    {isPlaying ? <Pause className="w-5 h-5" /> : <Play className="w-5 h-5" />}
+                </button>
+                <div className="flex-1 h-1.5 bg-slate-600 rounded-full overflow-hidden cursor-pointer relative group/bar">
+                    <div className="absolute top-0 left-0 h-full bg-blue-500 w-[30%]"></div>
+                    <div className="absolute top-0 left-[30%] w-3 h-3 bg-white rounded-full -mt-0.5 opacity-0 group-hover/bar:opacity-100 shadow-lg"></div>
+                </div>
+                <span className="text-xs font-mono text-slate-400">01:42 / 05:00</span>
+                <Volume2 className="w-5 h-5 text-slate-400 hover:text-white cursor-pointer" />
+                <Maximize className="w-5 h-5 text-slate-400 hover:text-white cursor-pointer" />
+            </div>
+        </div>
+    );
+};
+
 const HelpCenter = () => {
     const [activeTab, setActiveTab] = useState<'TUTORIALS' | 'FAQ'>('TUTORIALS');
     const [openFaqIndex, setOpenFaqIndex] = useState<number | null>(0);
+    const [selectedTutorial, setSelectedTutorial] = useState<any>(null);
 
     return (
         <div className="p-6 max-w-6xl mx-auto animate-fade-in h-full flex flex-col">
+            
+            {/* HEADER */}
             <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-8 shrink-0">
-                <div>
-                    <h2 className="text-3xl font-bold text-slate-200 flex items-center">
-                        <LifeBuoy className="w-8 h-8 mr-3 text-blue-400" />
-                        Help & Knowledge Base
-                    </h2>
-                    <p className="text-slate-500 text-sm mt-1">Documentation, guides, and support resources for Virtual Puppets.</p>
-                </div>
-                <div className="flex space-x-4 mt-4 md:mt-0">
-                    <button 
-                        onClick={() => setActiveTab('TUTORIALS')}
-                        className={`px-6 py-2 rounded-lg font-bold text-sm transition-all flex items-center ${activeTab === 'TUTORIALS' ? 'bg-blue-600 text-white shadow-lg shadow-blue-900/20' : 'bg-slate-800 text-slate-400 hover:text-white'}`}
-                    >
-                        <Video className="w-4 h-4 mr-2" /> Tutorials
-                    </button>
-                    <button 
-                        onClick={() => setActiveTab('FAQ')}
-                        className={`px-6 py-2 rounded-lg font-bold text-sm transition-all flex items-center ${activeTab === 'FAQ' ? 'bg-blue-600 text-white shadow-lg shadow-blue-900/20' : 'bg-slate-800 text-slate-400 hover:text-white'}`}
-                    >
-                        <HelpCircle className="w-4 h-4 mr-2" /> Q & A
-                    </button>
-                </div>
+                {!selectedTutorial ? (
+                    <div>
+                        <h2 className="text-3xl font-bold text-slate-200 flex items-center">
+                            <LifeBuoy className="w-8 h-8 mr-3 text-blue-400" />
+                            Help & Knowledge Base
+                        </h2>
+                        <p className="text-slate-500 text-sm mt-1">Documentation, guides, and support resources for Virtual Puppets.</p>
+                    </div>
+                ) : (
+                    <div className="flex items-center">
+                        <button 
+                            onClick={() => setSelectedTutorial(null)}
+                            className="bg-slate-800 hover:bg-slate-700 p-2 rounded-full mr-4 text-slate-400 hover:text-white transition-colors border border-slate-700"
+                        >
+                            <ArrowLeft className="w-5 h-5" />
+                        </button>
+                        <div>
+                            <div className="flex items-center space-x-3 mb-1">
+                                <span className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase border ${selectedTutorial.bg} ${selectedTutorial.color} ${selectedTutorial.border}`}>
+                                    {selectedTutorial.level}
+                                </span>
+                                <span className="text-slate-500 text-xs flex items-center"><Clock className="w-3 h-3 mr-1"/> {selectedTutorial.time} Read</span>
+                            </div>
+                            <h2 className="text-2xl font-bold text-white">{selectedTutorial.title}</h2>
+                        </div>
+                    </div>
+                )}
+
+                {!selectedTutorial && (
+                    <div className="flex space-x-4 mt-4 md:mt-0">
+                        <button 
+                            onClick={() => setActiveTab('TUTORIALS')}
+                            className={`px-6 py-2 rounded-lg font-bold text-sm transition-all flex items-center ${activeTab === 'TUTORIALS' ? 'bg-blue-600 text-white shadow-lg shadow-blue-900/20' : 'bg-slate-800 text-slate-400 hover:text-white'}`}
+                        >
+                            <Video className="w-4 h-4 mr-2" /> Tutorials
+                        </button>
+                        <button 
+                            onClick={() => setActiveTab('FAQ')}
+                            className={`px-6 py-2 rounded-lg font-bold text-sm transition-all flex items-center ${activeTab === 'FAQ' ? 'bg-blue-600 text-white shadow-lg shadow-blue-900/20' : 'bg-slate-800 text-slate-400 hover:text-white'}`}
+                        >
+                            <HelpCircle className="w-4 h-4 mr-2" /> Q & A
+                        </button>
+                    </div>
+                )}
             </div>
 
             <div className="flex-1 overflow-y-auto pr-2 pb-10">
-                {activeTab === 'TUTORIALS' && (
+                {activeTab === 'TUTORIALS' && !selectedTutorial && (
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                         {/* Featured Video Placeholder */}
                         <div className="md:col-span-2 bg-slate-900 rounded-xl border border-slate-700 overflow-hidden relative group cursor-pointer aspect-video md:aspect-[3/1]">
@@ -128,7 +221,11 @@ const HelpCenter = () => {
                         </div>
 
                         {TUTORIALS.map((tut) => (
-                            <div key={tut.id} className={`p-6 rounded-xl border ${tut.border} bg-slate-800/50 hover:bg-slate-800 transition-all cursor-pointer group relative overflow-hidden`}>
+                            <div 
+                                key={tut.id} 
+                                onClick={() => setSelectedTutorial(tut)}
+                                className={`p-6 rounded-xl border ${tut.border} bg-slate-800/50 hover:bg-slate-800 transition-all cursor-pointer group relative overflow-hidden`}
+                            >
                                 <div className={`absolute top-0 right-0 p-3 opacity-10 group-hover:opacity-20 transition-opacity`}>
                                     <tut.icon className="w-24 h-24" />
                                 </div>
@@ -139,13 +236,89 @@ const HelpCenter = () => {
                                     <span className="text-[10px] uppercase font-bold tracking-wider text-slate-500 bg-slate-900 px-2 py-1 rounded border border-slate-700">{tut.level}</span>
                                 </div>
                                 <h3 className="text-lg font-bold text-white mb-2 relative z-10 group-hover:text-blue-400 transition-colors">{tut.title}</h3>
-                                <p className="text-slate-400 text-sm mb-4 relative z-10 h-10">{tut.description}</p>
+                                <p className="text-slate-400 text-sm mb-4 relative z-10 h-10 line-clamp-2">{tut.description}</p>
                                 <div className="flex items-center text-xs text-slate-500 font-mono relative z-10">
                                     <span className="flex items-center mr-4"><Video className="w-3 h-3 mr-1" /> {tut.time}</span>
                                     <span className="flex items-center text-blue-400 opacity-0 group-hover:opacity-100 transition-opacity">Start Guide &rarr;</span>
                                 </div>
                             </div>
                         ))}
+                    </div>
+                )}
+
+                {/* TUTORIAL DETAIL VIEW */}
+                {activeTab === 'TUTORIALS' && selectedTutorial && (
+                    <div className="animate-slide-up space-y-8">
+                        {/* Video Player Area */}
+                        <MockPlayer title={selectedTutorial.title} />
+
+                        {/* Content Area */}
+                        <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+                            <div className="lg:col-span-2 space-y-6">
+                                <div className="bg-slate-800/50 border border-slate-700 rounded-xl p-6">
+                                    <h3 className="text-lg font-bold text-white mb-4">Step-by-Step Guide</h3>
+                                    <div className="space-y-6">
+                                        {selectedTutorial.steps?.map((step: any, idx: number) => (
+                                            <div key={idx} className="flex gap-4">
+                                                <div className="flex flex-col items-center">
+                                                    <div className={`w-8 h-8 rounded-full flex items-center justify-center font-bold text-sm shrink-0 ${idx === 0 ? 'bg-blue-600 text-white' : 'bg-slate-700 text-slate-300'}`}>
+                                                        {idx + 1}
+                                                    </div>
+                                                    {idx < selectedTutorial.steps.length - 1 && (
+                                                        <div className="w-0.5 flex-1 bg-slate-700 my-2"></div>
+                                                    )}
+                                                </div>
+                                                <div className="pb-2">
+                                                    <h4 className="text-white font-bold text-sm mb-1">{step.title}</h4>
+                                                    <p className="text-slate-400 text-sm leading-relaxed">{step.text}</p>
+                                                    {step.code && (
+                                                        <div className="mt-3 bg-black rounded border border-slate-700 p-3 group relative">
+                                                            <code className="text-emerald-400 font-mono text-xs break-all">{step.code}</code>
+                                                            <button 
+                                                                onClick={() => navigator.clipboard.writeText(step.code)}
+                                                                className="absolute top-2 right-2 bg-slate-800 p-1.5 rounded text-slate-400 hover:text-white opacity-0 group-hover:opacity-100 transition-opacity"
+                                                                title="Copy"
+                                                            >
+                                                                <CheckCircle className="w-3 h-3" />
+                                                            </button>
+                                                        </div>
+                                                    )}
+                                                </div>
+                                            </div>
+                                        ))}
+                                    </div>
+                                </div>
+                            </div>
+
+                            {/* Sidebar Info */}
+                            <div className="space-y-4">
+                                <div className="bg-blue-900/20 border border-blue-500/30 rounded-xl p-5">
+                                    <h4 className="text-blue-400 font-bold text-sm mb-2 flex items-center"><Zap className="w-4 h-4 mr-2"/> Key Takeaways</h4>
+                                    <ul className="text-xs text-blue-200 space-y-2 list-disc list-inside">
+                                        <li>Always verify connectivity after deployment.</li>
+                                        <li>Use Personas to match the physical environment.</li>
+                                        <li>Sentinel mode generates high log volume.</li>
+                                    </ul>
+                                </div>
+                                
+                                <div className="bg-slate-800 border border-slate-700 rounded-xl p-5">
+                                    <h4 className="text-white font-bold text-sm mb-3">Related Topics</h4>
+                                    <ul className="space-y-2">
+                                        {TUTORIALS.filter(t => t.id !== selectedTutorial.id).slice(0,3).map(t => (
+                                            <li key={t.id}>
+                                                <button 
+                                                    onClick={() => setSelectedTutorial(t)}
+                                                    className="text-xs text-slate-400 hover:text-blue-400 flex items-center transition-colors text-left"
+                                                >
+                                                    <PlayCircle className="w-3 h-3 mr-2 shrink-0" />
+                                                    {t.title}
+                                                </button>
+                                            </li>
+                                        ))}
+                                    </ul>
+                                </div>
+                            </div>
+                        </div>
                     </div>
                 )}
 
