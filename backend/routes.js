@@ -4,7 +4,7 @@ import { authenticator } from 'otplib';
 import QRCode from 'qrcode';
 import sql from 'mssql';
 import { getDbPool, connectToDb, saveDbConfigLocal, runSchemaMigrations, refreshSyslogConfig, sendToSyslog, getDbConfig } from './database.js';
-import { getSessions, deleteSession, initTrap, interactTrap } from './honeypot.js';
+import { getSessions, deleteSession, initTrap, interactTrap, addAgentSession } from './honeypot.js';
 import { CURRENT_AGENT_VERSION, generateAgentScript } from './agent-script.js';
 
 const router = express.Router();
@@ -341,13 +341,121 @@ router.get('/reports', async (req, res) => {
     })));
 });
 
+router.get('/reports/filters', async (req, res) => {
+    const db = getDbPool();
+    if (!db) return res.json({ attackers: [], protocols: [] });
+    try {
+        const attackers = await db.request().query("SELECT DISTINCT SourceIp FROM Logs WHERE SourceIp IS NOT NULL AND SourceIp != '0.0.0.0'");
+        const protocols = await db.request().query("SELECT DISTINCT Process FROM Logs WHERE Process IS NOT NULL");
+        res.json({
+            attackers: attackers.recordset.map(r => r.SourceIp),
+            protocols: protocols.recordset.map(r => r.Process)
+        });
+    } catch (e) {
+        res.json({ attackers: [], protocols: [] });
+    }
+});
+
 router.post('/reports/generate', async (req, res) => {
     const db = getDbPool(); if(!db) return res.json({success: false});
-    const r = req.body;
-    const reportId = `rep-${Date.now()}`;
-    const title = r.incidentDetails?.title || `Report - ${new Date().toLocaleDateString()}`;
-    await db.request().input('id', reportId).input('t', title).input('g', r.generatedBy).input('type', r.type).input('j', JSON.stringify(r)).query("INSERT INTO Reports (ReportId, Title, GeneratedBy, Type, CreatedAt, ContentJson) VALUES (@id, @t, @g, @type, GETDATE(), @j)");
-    res.json({success: true});
+    const { type, incidentFilters, generatedBy } = req.body;
+    
+    // Prepare final content object
+    let finalContent = req.body.content || {}; 
+    // Merge existing details if sent
+    if (req.body.incidentDetails) {
+        finalContent.incidentDetails = { ...finalContent.incidentDetails, ...req.body.incidentDetails };
+    }
+    // Always store filters used
+    if (incidentFilters) {
+        finalContent.incidentFilters = incidentFilters;
+    }
+
+    // --- DYNAMIC DATA AGGREGATION LOGIC ---
+    try {
+        // Handle INCIDENT_LOG generation
+        if (type === 'INCIDENT_LOG' && incidentFilters) {
+            const reqDb = db.request();
+            let query = "SELECT COUNT(*) as count FROM Logs WHERE 1=1";
+            
+            // 1. Date Filter
+            if (incidentFilters.dateRange === 'LAST_24H') query += " AND Timestamp >= DATEADD(hour, -24, GETDATE())";
+            else if (incidentFilters.dateRange === 'LAST_7D') query += " AND Timestamp >= DATEADD(day, -7, GETDATE())";
+            else if (incidentFilters.dateRange === 'LAST_30D') query += " AND Timestamp >= DATEADD(day, -30, GETDATE())";
+            
+            // 2. IP Filter
+            if (incidentFilters.attackerIp) {
+                query += " AND SourceIp = @ip";
+                reqDb.input('ip', incidentFilters.attackerIp);
+            }
+            // 3. Actor Filter
+            if (incidentFilters.targetActor) {
+                query += " AND ActorId = @aid";
+                reqDb.input('aid', incidentFilters.targetActor);
+            }
+            // 4. Protocol Filter
+            if (incidentFilters.protocol) {
+                query += " AND Process = @proc";
+                reqDb.input('proc', incidentFilters.protocol);
+            }
+
+            const countRes = await reqDb.query(query);
+            
+            // Populate incident details with real stats
+            finalContent.incidentDetails = {
+                ...finalContent.incidentDetails,
+                eventCount: countRes.recordset[0].count,
+                vector: incidentFilters.protocol ? `Protocol: ${incidentFilters.protocol}` : 'Multi-Vector',
+                mitigation: 'See attached log dump.'
+            };
+        }
+        
+        // Handle SECURITY_AUDIT (Global Stats)
+        if (type === 'SECURITY_AUDIT') {
+            const stats = await db.request().query(`
+                SELECT 
+                    (SELECT COUNT(*) FROM Logs) as totalEvents,
+                    (SELECT COUNT(*) FROM Actors WHERE Status='COMPROMISED') as compromisedNodes,
+                    (SELECT COUNT(*) FROM Actors WHERE Status='ONLINE') as activeNodes
+            `);
+            
+            // Get Top Attackers
+            const attackers = await db.request().query(`
+                SELECT TOP 5 SourceIp as ip, COUNT(*) as count 
+                FROM Logs 
+                WHERE SourceIp IS NOT NULL AND SourceIp != '0.0.0.0'
+                GROUP BY SourceIp 
+                ORDER BY count DESC
+            `);
+
+            finalContent = {
+                ...finalContent,
+                totalEvents: stats.recordset[0].totalEvents,
+                compromisedNodes: stats.recordset[0].compromisedNodes,
+                activeNodes: stats.recordset[0].activeNodes,
+                topAttackers: attackers.recordset,
+                summaryText: `System Audit generated on ${new Date().toLocaleDateString()}. Analysis covers all registered fleet nodes.`
+            };
+        }
+
+        // Save Report
+        const reportId = `rep-${Date.now()}`;
+        const title = finalContent.incidentDetails?.title || `Report - ${new Date().toLocaleDateString()} (${type})`;
+        
+        await db.request()
+            .input('id', reportId)
+            .input('t', title)
+            .input('g', generatedBy)
+            .input('type', type)
+            .input('j', JSON.stringify(finalContent))
+            .query("INSERT INTO Reports (ReportId, Title, GeneratedBy, Type, CreatedAt, ContentJson) VALUES (@id, @t, @g, @type, GETDATE(), @j)");
+            
+        res.json({success: true});
+
+    } catch (e) {
+        console.error("Report Gen Error:", e);
+        res.json({success: false, error: e.message});
+    }
 });
 
 router.delete('/reports/:id', async (req, res) => {
@@ -372,7 +480,7 @@ router.post('/audit', async (req, res) => {
     res.json({success: true});
 });
 
-// --- AGENT LOG INGESTION (New) ---
+// --- AGENT LOG INGESTION ---
 router.post('/agent/log', async (req, res) => {
     const { actorId, level, process, message, sourceIp } = req.body;
     const db = getDbPool();
@@ -403,6 +511,17 @@ router.post('/agent/log', async (req, res) => {
     }
 });
 
+// --- NEW: AGENT SESSION INGESTION ---
+router.post('/agent/session', async (req, res) => {
+    const sessionData = req.body;
+    const db = getDbPool();
+    
+    // In-memory or DB store logic
+    // For now, we update the in-memory recordedSessions which the frontend polls via /sessions
+    const success = addAgentSession(sessionData);
+    res.json({ success });
+});
+
 // --- RECON DATA ---
 router.get('/recon/wifi', async (req, res) => {
     const db = getDbPool(); if(!db) return res.json([]);
@@ -416,22 +535,13 @@ router.get('/recon/bluetooth', async (req, res) => {
     res.json(r.recordset.map(b => ({id: b.Id, name: b.Name, mac: b.Mac, rssi: b.Rssi, type: b.Type, actorId: b.ActorId, actorName: b.ActorName, lastSeen: b.LastSeen})));
 });
 
-// NEW: Agent Recon Data Upload (WiFi/BT) - WITH DEDUPLICATION (MERGE)
+// AGENT RECON Data Upload (WiFi/BT) - WITH DEDUPLICATION (MERGE)
 router.post('/agent/recon', async (req, res) => {
     const { actorId, type, data } = req.body;
     const db = getDbPool();
     
-    console.log(`[API-RECON] Received from ${actorId} | Type: ${type} | Count: ${data ? data.length : 0}`);
-
-    if (!db) {
-        console.error("[API-RECON] Database not connected!");
-        return res.json({success: false, error: "DB Disconnected"});
-    }
-
-    if (!data || !Array.isArray(data)) {
-        console.error("[API-RECON] Invalid data format (not array)");
-        return res.json({success: false, error: "Invalid Data"});
-    }
+    if (!db) return res.json({success: false, error: "DB Disconnected"});
+    if (!data || !Array.isArray(data)) return res.json({success: false, error: "Invalid Data"});
 
     // RESOLVE ACTOR NAME FROM DB TO DISPLAY IN RECON TABLE
     let resolvedActorName = 'Agent';
@@ -440,9 +550,7 @@ router.post('/agent/recon', async (req, res) => {
         if (actorResult.recordset.length > 0) {
             resolvedActorName = actorResult.recordset[0].Name;
         }
-    } catch (e) {
-        console.warn("[API-RECON] Failed to resolve actor name:", e.message);
-    }
+    } catch (e) {}
 
     try {
         if (type === 'WIFI') {
@@ -479,7 +587,6 @@ router.post('/agent/recon', async (req, res) => {
                         `);
                      successCount++;
                  } catch (err) {
-                     console.error("SQL Error on Wifi Item:", err.message);
                      failCount++;
                  }
              }
@@ -487,13 +594,10 @@ router.post('/agent/recon', async (req, res) => {
 
         } else if (type === 'BLUETOOTH') {
              let successCount = 0;
-             
              for (const dev of data) {
                  try {
                      if(!dev.mac) continue;
                      const id = `bt-${actorId}-${dev.mac.replace(/:/g,'')}`;
-                     
-                     // MERGE Logic for Deduplication
                      await db.request()
                         .input('id', id)
                         .input('name', dev.name || 'Unknown')
@@ -512,14 +616,13 @@ router.post('/agent/recon', async (req, res) => {
                                 VALUES (@id, @name, @mac, @rssi, @type, @aid, @aname, GETDATE());
                         `);
                      successCount++;
-                 } catch (err) { console.error("SQL Error BT:", err.message); }
+                 } catch (err) {}
              }
              res.json({success: true, processed: successCount});
         } else {
             res.json({success: false, error: "Unknown Type"});
         }
     } catch (e) {
-        console.error("[API-RECON] Critical Error", e);
         res.json({success: false, error: e.message});
     }
 });
