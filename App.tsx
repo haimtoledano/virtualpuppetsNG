@@ -4,7 +4,7 @@ import { generateInitialActors, generateRandomLog, generateGateways } from './se
 import { dbQuery, getSystemConfig, getPendingActors, approvePendingActor, rejectPendingActor, getSystemLogs, sendAuditLog, triggerFleetUpdate } from './services/dbService';
 import { saveUserPreferences } from './services/authService';
 import { Actor, LogEntry, ProxyGateway, PendingActor, ActorStatus, User, SystemConfig, UserPreferences, LogLevel } from './types';
-import { LayoutDashboard, Settings as SettingsIcon, Network, Plus, LogOut, User as UserIcon, FileText, Globe, Router, Radio, Loader, RefreshCw, Zap, Server, ChevronLeft, ChevronRight, Camera, Printer, Box, Eye, Cpu } from 'lucide-react';
+import { LayoutDashboard, Settings as SettingsIcon, Network, Plus, LogOut, User as UserIcon, FileText, Globe, Router, Radio, Loader, RefreshCw, Zap, Server, ChevronLeft, ChevronRight, Camera, Printer, Box, Eye, Cpu, HelpCircle } from 'lucide-react';
 
 // Lazy Load Components
 const Dashboard = React.lazy(() => import('./components/Dashboard'));
@@ -17,6 +17,7 @@ const WarRoomMap = React.lazy(() => import('./components/WarRoomMap'));
 const GatewayManager = React.lazy(() => import('./components/GatewayManager'));
 const WirelessRecon = React.lazy(() => import('./components/WirelessRecon'));
 const LandingPage = React.lazy(() => import('./components/LandingPage'));
+const HelpCenter = React.lazy(() => import('./components/HelpCenter'));
 
 const PageLoader = () => (
   <div className="flex flex-col items-center justify-center h-full w-full text-slate-500 min-h-[400px]">
@@ -25,13 +26,29 @@ const PageLoader = () => (
   </div>
 );
 
-const NavItem = ({ icon: Icon, label, active, onClick, expanded }: { icon: any, label: string, active: boolean, onClick: () => void, expanded: boolean }) => (
+// Inline Logo Component to avoid missing file issues
+const VpLogo = ({ className = "w-10 h-10" }: { className?: string }) => (
+    <svg viewBox="0 0 100 60" className={className} fill="none" xmlns="http://www.w3.org/2000/svg">
+        <path d="M10 5 L35 55 L60 5" stroke="currentColor" strokeWidth="8" strokeLinecap="round" strokeLinejoin="round" />
+        <path d="M60 5 L60 35 H80 C90 35 90 5 80 5 H60" stroke="currentColor" strokeWidth="8" strokeLinecap="round" strokeLinejoin="round" />
+        <circle cx="22" cy="30" r="3" className="fill-cyan-400 animate-pulse" />
+        <circle cx="48" cy="30" r="3" className="fill-cyan-400 animate-pulse" style={{animationDelay: '0.2s'}} />
+        <circle cx="70" cy="20" r="3" className="fill-cyan-400 animate-pulse" style={{animationDelay: '0.4s'}} />
+        <path d="M22 30 L48 30 L70 20" stroke="#22d3ee" strokeWidth="1.5" strokeOpacity="0.8" />
+    </svg>
+);
+
+const NavItem = ({ icon: Icon, label, active, onClick, expanded, hasAlert }: { icon: any, label: string, active: boolean, onClick: () => void, expanded: boolean, hasAlert?: boolean }) => (
     <button 
         onClick={onClick} 
         className={`w-full flex items-center ${expanded ? 'px-4 py-3 justify-start' : 'p-3 justify-center'} rounded-lg transition-all duration-200 group relative ${active ? 'bg-blue-600/10 text-blue-400 border border-blue-500/20' : 'text-slate-500 hover:text-slate-200 hover:bg-slate-800'}`}
         title={!expanded ? label : ''}
     >
-        <Icon className={`w-5 h-5 shrink-0 ${active ? 'text-blue-400' : 'group-hover:text-white'} transition-colors`} />
+        <div className="relative">
+            <Icon className={`w-5 h-5 shrink-0 ${active ? 'text-blue-400' : 'group-hover:text-white'} transition-colors`} />
+            {hasAlert && <span className="absolute -top-1 -right-1 w-2 h-2 bg-blue-500 rounded-full animate-pulse"></span>}
+        </div>
+        
         {expanded && (
             <span className="ml-3 text-sm font-medium tracking-wide whitespace-nowrap overflow-hidden transition-all duration-300 animate-fade-in">
                 {label}
@@ -53,7 +70,7 @@ export default function App() {
   });
   const [showLogin, setShowLogin] = useState(false); // New state to control Landing vs Login
   const [systemConfig, setSystemConfig] = useState<SystemConfig | null>(null);
-  const [activeTab, setActiveTab] = useState<'dashboard' | 'map' | 'actors' | 'wireless' | 'gateways' | 'reports' | 'settings'>('dashboard');
+  const [activeTab, setActiveTab] = useState<'dashboard' | 'map' | 'actors' | 'wireless' | 'gateways' | 'reports' | 'settings' | 'help'>('dashboard');
   const [gateways, setGateways] = useState<ProxyGateway[]>([]);
   const [actors, setActors] = useState<Actor[]>([]);
   const [logs, setLogs] = useState<LogEntry[]>([]);
@@ -316,8 +333,13 @@ export default function App() {
 
   return (
         <Suspense fallback={<PageLoader />}>
-            <div className="min-h-screen bg-cyber-900 text-slate-200 font-sans selection:bg-blue-500/30 flex overflow-hidden">
+            <div className="min-h-screen bg-cyber-900 text-slate-200 font-sans selection:bg-blue-500/30 flex overflow-hidden relative">
                 
+                {/* --- GLOBAL WATERMARK --- */}
+                <div className="fixed inset-0 z-0 flex items-center justify-center pointer-events-none opacity-5 overflow-hidden">
+                    <VpLogo className="w-[60vw] h-[60vw] max-w-[800px] max-h-[800px] text-white opacity-[0.03] filter blur-[1px]" />
+                </div>
+
                 {/* Sidebar Navigation */}
                 <div className={`fixed left-0 top-0 bottom-0 ${isSidebarExpanded ? 'w-64' : 'w-20'} bg-slate-950 border-r border-slate-800 flex flex-col z-50 transition-all duration-300 ease-in-out ${currentUser ? 'translate-x-0' : '-translate-x-full'} shadow-2xl`}>
                     
@@ -327,8 +349,8 @@ export default function App() {
                             {systemConfig?.logoUrl ? (
                                 <img src={systemConfig.logoUrl} alt="Logo" className="h-8 w-8 object-contain shrink-0" />
                             ) : (
-                                <div className="bg-blue-600 rounded-lg p-1.5 shadow-lg shadow-blue-500/20 shrink-0">
-                                    <Zap className="w-5 h-5 text-white" />
+                                <div className="bg-slate-900 rounded-lg p-1.5 shadow-lg border border-slate-800 shrink-0">
+                                    <VpLogo className="w-5 h-5 text-blue-500" />
                                 </div>
                             )}
                             
@@ -364,6 +386,7 @@ export default function App() {
 
                     {/* Footer Actions */}
                     <div className="p-3 border-t border-slate-800/50 space-y-2 mb-2 bg-slate-950/50 shrink-0">
+                        <NavItem icon={HelpCircle} label="Help & Support" active={activeTab === 'help'} onClick={() => setActiveTab('help')} expanded={isSidebarExpanded} hasAlert={true} />
                         <NavItem icon={SettingsIcon} label="System Settings" active={activeTab === 'settings'} onClick={() => setActiveTab('settings')} expanded={isSidebarExpanded} />
                         <button 
                             onClick={handleLogout} 
@@ -381,7 +404,7 @@ export default function App() {
                 </div>
 
                 {/* Main Content Area - Dynamic Margin */}
-                <div className={`flex-1 flex flex-col transition-all duration-300 ease-in-out ${currentUser ? (isSidebarExpanded ? 'ml-64' : 'ml-20') : ''} h-screen overflow-hidden bg-slate-900/95`}>
+                <div className={`flex-1 flex flex-col transition-all duration-300 ease-in-out ${currentUser ? (isSidebarExpanded ? 'ml-64' : 'ml-20') : ''} h-screen overflow-hidden bg-slate-900/90 relative z-10 backdrop-blur-[2px]`}>
                     <div className="flex-1 overflow-y-auto p-6 scroll-smooth">
                         {selectedActor ? (
                             <ActorDetail 
@@ -401,6 +424,7 @@ export default function App() {
                                 {activeTab === 'reports' && <Reports currentUser={currentUser} logs={logs} actors={actors} />}
                                 {activeTab === 'gateways' && <GatewayManager gateways={gateways} onRefresh={loadProductionData} domain={systemConfig?.domain || 'vpp.io'} isProduction={isProduction} />}
                                 {activeTab === 'wireless' && <WirelessRecon isProduction={isProduction} actors={actors} />}
+                                {activeTab === 'help' && <HelpCenter />}
                                 {activeTab === 'settings' && (
                                     <Settings 
                                         isProduction={isProduction} 
